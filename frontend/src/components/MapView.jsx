@@ -6,12 +6,17 @@ import { layers, namedTheme } from 'protomaps-themes-base'
 import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse } from '../api'
+import { getConfig } from '../config'
 
 const ROUTE_SOURCE = 'route-source'
 const ROUTE_LAYER_PREFIX = 'route-layer-'
 
 /** Build a full MapLibre style object for the given theme */
 function buildStyle(themeName) {
+  const config = getConfig()
+  const tileUrl = config?.tileset?.url || '/tiles/na.pmtiles'
+  const attribution = config?.tileset?.attribution || 'Protomaps \u00a9 OSM'
+
   return {
     version: 8,
     glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
@@ -19,9 +24,8 @@ function buildStyle(themeName) {
     sources: {
       protomaps: {
         type: 'vector',
-        url: 'pmtiles:///tiles/na.pmtiles',
-        attribution:
-          '<a href="https://protomaps.com">Protomaps</a> | <a href="https://openstreetmap.org">OSM</a>',
+        url: `pmtiles://${tileUrl}`,
+        attribution,
       },
     },
     layers: layers('protomaps', namedTheme(themeName), { lang: 'en' }),
@@ -68,8 +72,11 @@ const MapView = forwardRef(function MapView(_, ref) {
     const protocol = new Protocol()
     maplibregl.addProtocol('pmtiles', protocol.tile)
 
-    const DEFAULT_CENTER = [-114.6066, 42.5736]
-    const DEFAULT_ZOOM = 10
+    const config = getConfig()
+    const DEFAULT_CENTER = config?.defaults?.center
+      ? [config.defaults.center[1], config.defaults.center[0]]  // config is [lat,lon], MapLibre wants [lon,lat]
+      : [-114.6066, 42.5736]
+    const DEFAULT_ZOOM = config?.defaults?.zoom || 10
 
     const initialTheme = document.documentElement.getAttribute('data-theme') || 'dark'
     currentThemeRef.current = initialTheme
