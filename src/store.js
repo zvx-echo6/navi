@@ -54,12 +54,51 @@ export const useStore = create((set, get) => ({
   setRouteError: (err) => set({ routeError: err, route: null }),
   clearRoute: () => set({ route: null, routeError: null }),
 
+  // ── Place detail ──
+  selectedPlace: null, // { lat, lon, name, address, type, source, matchCode, raw }
+  gpsOrigin: true, // whether GPS should be used as origin when available
+  pendingDestination: null, // place waiting for a starting point (GPS-denied Directions flow)
+
+  setSelectedPlace: (place) => set({ selectedPlace: place }),
+  clearSelectedPlace: () => set({ selectedPlace: null }),
+  setGpsOrigin: (val) => set({ gpsOrigin: val }),
+  setPendingDestination: (place) => set({ pendingDestination: place }),
+  clearPendingDestination: () => set({ pendingDestination: null }),
+
+  startDirections: (place) => {
+    const { geoPermission, stops, addStop, clearStops } = get()
+    if (geoPermission === 'granted') {
+      clearStops()
+      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
+      set({ gpsOrigin: true, selectedPlace: null })
+    } else if (stops.length > 0) {
+      const origin = stops[0]
+      clearStops()
+      addStop({ lat: origin.lat, lon: origin.lon, name: origin.name, source: origin.source, matchCode: origin.matchCode })
+      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
+      set({ selectedPlace: null })
+    } else {
+      set({ pendingDestination: place, selectedPlace: null })
+    }
+  },
+
   // ── UI state ──
   sheetState: 'half', // 'collapsed' | 'half' | 'full'
   panelOpen: true,
   autocompleteOpen: false,
+  theme: 'dark', // 'dark' | 'light' (resolved value — what's actually applied)
+  themeOverride: null, // null | 'dark' | 'light' (manual override, persisted)
 
   setSheetState: (s) => set({ sheetState: s }),
   setPanelOpen: (open) => set({ panelOpen: open }),
   setAutocompleteOpen: (open) => set({ autocompleteOpen: open }),
+  setTheme: (theme) => set({ theme }),
+  setThemeOverride: (override) => {
+    set({ themeOverride: override })
+    if (override) {
+      localStorage.setItem('navi-theme-override', override)
+    } else {
+      localStorage.removeItem('navi-theme-override')
+    }
+  },
 }))

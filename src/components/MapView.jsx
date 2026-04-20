@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Protocol } from 'pmtiles'
@@ -8,17 +8,46 @@ import { decodePolyline } from '../utils/decode'
 
 const ROUTE_SOURCE = 'route-source'
 const ROUTE_LAYER_PREFIX = 'route-layer-'
-const STOPS_SOURCE = 'stops-source'
-const STOPS_LAYER = 'stops-layer'
 
-const MapView = forwardRef(function MapView({ onMapClick }, ref) {
+/** Build a full MapLibre style object for the given theme */
+function buildStyle(themeName) {
+  return {
+    version: 8,
+    glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
+    sprite: `https://protomaps.github.io/basemaps-assets/sprites/v4/${themeName}`,
+    sources: {
+      protomaps: {
+        type: 'vector',
+        url: 'pmtiles:///tiles/na.pmtiles',
+        attribution:
+          '<a href="https://protomaps.com">Protomaps</a> | <a href="https://openstreetmap.org">OSM</a>',
+      },
+    },
+    layers: layers('protomaps', namedTheme(themeName), { lang: 'en' }),
+  }
+}
+
+/** SVG for ATAK-style chevron pointing up (will be rotated via CSS) */
+const CHEVRON_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+  <path d="M8 1 L14 13 L8 10 L2 13 Z" fill="var(--accent)" stroke="var(--bg-raised)" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>`
+
+const MapView = forwardRef(function MapView(_, ref) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
   const markersRef = useRef([])
   const popupRef = useRef(null)
+  const gpsMarkerRef = useRef(null)
+  const previewMarkerRef = useRef(null)
+  const watchIdRef = useRef(null)
+  const currentThemeRef = useRef('dark')
 
   const stops = useStore((s) => s.stops)
   const route = useStore((s) => s.route)
+  const theme = useStore((s) => s.theme)
+  const selectedPlace = useStore((s) => s.selectedPlace)
+  const gpsOrigin = useStore((s) => s.gpsOrigin)
+  const geoPermission = useStore((s) => s.geoPermission)
   const setSheetState = useStore((s) => s.setSheetState)
 
   // Expose map methods to parent
@@ -36,59 +65,56 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
     const protocol = new Protocol()
     maplibregl.addProtocol('pmtiles', protocol.tile)
 
-    // Default center: Matt's home (Filer, ID) — updated by geolocation if permitted
     const DEFAULT_CENTER = [-114.6066, 42.5736]
     const DEFAULT_ZOOM = 10
 
+    const initialTheme = document.documentElement.getAttribute('data-theme') || 'dark'
+    currentThemeRef.current = initialTheme
+
     const map = new maplibregl.Map({
       container: mapRef.current,
-      style: {
-        version: 8,
-        glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
-        sprite: 'https://protomaps.github.io/basemaps-assets/sprites/v4/dark',
-        sources: {
-          protomaps: {
-            type: 'vector',
-            url: 'pmtiles:///tiles/na.pmtiles',
-            attribution:
-              '<a href="https://protomaps.com">Protomaps</a> | <a href="https://openstreetmap.org">OSM</a>',
-          },
-        },
-        layers: layers('protomaps', namedTheme('dark'), { lang: 'en' }),
-      },
+      style: buildStyle(initialTheme),
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
     })
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
 
-    // Request geolocation for initial view (not for routing — that's separate)
+    // GPS tracking — creates chevron or dot marker
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const { latitude, longitude } = pos.coords
-          // Only fly to user location if no stops have been added yet
           if (useStore.getState().stops.length === 0) {
             map.flyTo({ center: [longitude, latitude], zoom: 12, duration: 1500 })
           }
           useStore.getState().setUserLocation({ lat: latitude, lon: longitude })
           useStore.getState().setGeoPermission('granted')
+          createOrUpdateGpsMarker(map, latitude, longitude, null)
         },
         () => {
           useStore.getState().setGeoPermission('denied')
         },
         { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
       )
+
+      // Watch for heading changes
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude, heading } = pos.coords
+          useStore.getState().setUserLocation({ lat: latitude, lon: longitude })
+          createOrUpdateGpsMarker(map, latitude, longitude, heading)
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 5000 }
+      )
     }
 
     map.on('click', () => {
-      // Mobile: collapse sheet when map is tapped
-      if (window.innerWidth < 768) {
-        setSheetState('collapsed')
-      }
+      if (window.innerWidth < 768) setSheetState('collapsed')
+      useStore.getState().clearSelectedPlace()
     })
 
-    // Add empty route source on load
     map.on('load', () => {
       map.addSource(ROUTE_SOURCE, {
         type: 'geojson',
@@ -99,24 +125,116 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
     mapInstance.current = map
 
     return () => {
+      if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current)
+      if (gpsMarkerRef.current) gpsMarkerRef.current.remove()
       maplibregl.removeProtocol('pmtiles')
       map.remove()
     }
   }, [setSheetState])
 
+  /** Create or update the GPS chevron/dot marker */
+  function createOrUpdateGpsMarker(map, lat, lon, heading) {
+    if (!gpsMarkerRef.current) {
+      const el = document.createElement('div')
+      if (heading != null && !isNaN(heading)) {
+        el.className = 'navi-chevron'
+        el.innerHTML = CHEVRON_SVG
+        el.style.transform = `rotate(${heading}deg)`
+      } else {
+        el.className = 'navi-gps-dot'
+      }
+      gpsMarkerRef.current = new maplibregl.Marker({ element: el })
+        .setLngLat([lon, lat])
+        .addTo(map)
+    } else {
+      gpsMarkerRef.current.setLngLat([lon, lat])
+      const el = gpsMarkerRef.current.getElement()
+      if (heading != null && !isNaN(heading)) {
+        if (!el.classList.contains('navi-chevron')) {
+          el.className = 'navi-chevron'
+          el.innerHTML = CHEVRON_SVG
+        }
+        el.style.transform = `rotate(${heading}deg)`
+      } else {
+        if (!el.classList.contains('navi-gps-dot')) {
+          el.className = 'navi-gps-dot'
+          el.innerHTML = ''
+        }
+      }
+    }
+  }
+
+  // Swap map theme when store.theme changes
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map || currentThemeRef.current === theme) return
+
+    currentThemeRef.current = theme
+    const center = map.getCenter()
+    const zoom = map.getZoom()
+    const bearing = map.getBearing()
+    const pitch = map.getPitch()
+
+    map.setStyle(buildStyle(theme), { diff: false })
+
+    // Re-add route source after style swap
+    map.once('style.load', () => {
+      map.addSource(ROUTE_SOURCE, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+      // Restore view
+      map.jumpTo({ center, zoom, bearing, pitch })
+      // Re-render route if exists
+      const currentRoute = useStore.getState().route
+      if (currentRoute) updateRoute(map, currentRoute)
+    })
+  }, [theme])
+
+  // Preview pin for selected place
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map) return
+
+    // Remove old preview marker
+    if (previewMarkerRef.current) {
+      previewMarkerRef.current.remove()
+      previewMarkerRef.current = null
+    }
+
+    if (!selectedPlace) return
+
+    // Fly to selected place
+    map.flyTo({ center: [selectedPlace.lon, selectedPlace.lat], zoom: 14, duration: 800 })
+
+    // Create preview marker
+    const el = document.createElement('div')
+    el.className = 'navi-pin-preview'
+    previewMarkerRef.current = new maplibregl.Marker({ element: el })
+      .setLngLat([selectedPlace.lon, selectedPlace.lat])
+      .addTo(map)
+
+    return () => {
+      if (previewMarkerRef.current) {
+        previewMarkerRef.current.remove()
+        previewMarkerRef.current = null
+      }
+    }
+  }, [selectedPlace])
+
   // Update route polyline when route changes
   useEffect(() => {
     const map = mapInstance.current
-    if (!map || !map.isStyleLoaded()) {
-      // Wait for style to load
-      const handler = () => updateRoute(map)
-      map?.on('load', handler)
-      return () => map?.off('load', handler)
+    if (!map) return
+    if (!map.isStyleLoaded()) {
+      const handler = () => updateRoute(map, route)
+      map.once('load', handler)
+      return () => map.off('load', handler)
     }
-    updateRoute(map)
+    updateRoute(map, route)
   }, [route])
 
-  function updateRoute(map) {
+  function updateRoute(map, routeData) {
     if (!map) return
 
     // Remove old route layers
@@ -129,19 +247,16 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
       }
     }
 
-    if (!route || !route.legs) {
+    if (!routeData || !routeData.legs) {
       if (map.getSource(ROUTE_SOURCE)) {
         map.getSource(ROUTE_SOURCE).setData({ type: 'FeatureCollection', features: [] })
       }
       return
     }
 
-    // Build GeoJSON features from route legs
     const features = []
-    const legColors = ['#22d3ee', '#06b6d4', '#0891b2', '#0e7490', '#155e75']
-
-    for (let i = 0; i < route.legs.length; i++) {
-      const leg = route.legs[i]
+    for (let i = 0; i < routeData.legs.length; i++) {
+      const leg = routeData.legs[i]
       if (!leg.shape) continue
       const coords = decodePolyline(leg.shape, 6)
       features.push({
@@ -161,7 +276,9 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
       })
     }
 
-    // Add route layers (one per leg for color variation)
+    // Use CSS variable for route color (read computed value)
+    const routeColor = getComputedStyle(document.documentElement).getPropertyValue('--route-line').trim()
+
     for (let i = 0; i < features.length; i++) {
       const layerId = `${ROUTE_LAYER_PREFIX}${i}`
       if (!map.getLayer(layerId)) {
@@ -170,12 +287,9 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
           type: 'line',
           source: ROUTE_SOURCE,
           filter: ['==', ['get', 'legIndex'], i],
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round',
-          },
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: {
-            'line-color': legColors[i % legColors.length],
+            'line-color': routeColor || '#7a9a6b',
             'line-width': 5,
             'line-opacity': 0.85,
           },
@@ -190,7 +304,9 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
         (b, c) => b.extend(c),
         new maplibregl.LngLatBounds(allCoords[0], allCoords[0])
       )
-      map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: 340, right: 60 } })
+      const hasDetail = useStore.getState().selectedPlace != null
+      const leftPad = hasDetail ? 700 : 340
+      map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: leftPad, right: 60 } })
     }
   }
 
@@ -207,22 +323,21 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
       popupRef.current = null
     }
 
-    stops.forEach((stop, i) => {
-      let color = '#3b82f6' // blue
-      if (i === 0) color = '#22c55e' // green
-      else if (i === stops.length - 1 && stops.length > 1) color = '#ef4444' // red
+    const hasGpsOrigin = gpsOrigin && geoPermission === 'granted'
+    const indexOffset = hasGpsOrigin ? 1 : 0
 
-      const label = String.fromCharCode(65 + Math.min(i, 25))
+    stops.forEach((stop, i) => {
+      const displayIndex = i + indexOffset
+      const effectiveTotal = stops.length + indexOffset
+
+      let pinClass = 'navi-pin navi-pin--intermediate'
+      if (displayIndex === 0) pinClass = 'navi-pin navi-pin--origin'
+      else if (displayIndex === effectiveTotal - 1 && effectiveTotal > 1) pinClass = 'navi-pin navi-pin--destination'
+
+      const label = String.fromCharCode(65 + Math.min(displayIndex, 25))
 
       const el = document.createElement('div')
-      el.className = 'navi-marker'
-      el.style.cssText = `
-        width: 28px; height: 28px; border-radius: 50%;
-        background: ${color}; border: 2px solid white;
-        display: flex; align-items: center; justify-content: center;
-        color: white; font-size: 12px; font-weight: bold;
-        cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-      `
+      el.className = pinClass
       el.textContent = label
 
       el.addEventListener('click', (e) => {
@@ -231,9 +346,9 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
         const popup = new maplibregl.Popup({ offset: 20, closeButton: true })
           .setLngLat([stop.lon, stop.lat])
           .setHTML(
-            `<div style="color:#fff;font-size:12px;max-width:200px">
+            `<div style="font-size:12px;max-width:200px">
               <strong>${stop.name}</strong>
-              <br/><button id="remove-stop-${stop.id}" style="margin-top:4px;padding:2px 8px;background:#dc2626;border:none;border-radius:4px;color:white;cursor:pointer;font-size:11px">Remove</button>
+              <br/><button id="remove-stop-${stop.id}" style="margin-top:4px;padding:2px 8px;background:var(--status-danger);border:none;border-radius:4px;color:white;cursor:pointer;font-size:11px">Remove</button>
             </div>`
           )
           .addTo(map)
@@ -264,7 +379,7 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
         map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: 340, right: 60 } })
       }
     }
-  }, [stops, route])
+  }, [stops, route, gpsOrigin, geoPermission])
 
   return <div ref={mapRef} className="w-full h-full" />
 })

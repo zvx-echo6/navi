@@ -1,6 +1,7 @@
 const GEOCODE_URL = '/api/geocode'
 const VALHALLA_URL = '/valhalla/route'
 const VALHALLA_OPTIMIZED_URL = '/valhalla/optimized_route'
+const VALHALLA_HEIGHT_URL = '/valhalla/height'
 
 /**
  * Search geocode API with abort support.
@@ -85,5 +86,27 @@ export async function requestOptimizedRoute(locations, costing = 'auto') {
     return resp.json()
   } finally {
     clearTimeout(timeout)
+  }
+}
+
+/**
+ * Fetch elevation for a point via Valhalla height API.
+ * @param {number} lat
+ * @param {number} lon
+ * @returns {Promise<number|null>} Height in meters, or null on error
+ */
+export async function fetchElevation(lat, lon) {
+  try {
+    const resp = await fetch(VALHALLA_HEIGHT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shape: [{ lat, lon }], resample_distance: 100 }),
+    })
+    if (!resp.ok) return null
+    const data = await resp.json()
+    if (data.height && data.height.length > 0) return data.height[0]
+    return null
+  } catch {
+    return null
   }
 }

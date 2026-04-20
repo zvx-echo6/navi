@@ -1,32 +1,59 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
+import { MapPin, Building2, Star, Crosshair, Coffee, Fuel, ShoppingBag, Hotel, X } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { useStore } from '../store'
 import { searchGeocode } from '../api'
 
-export default function SearchBar() {
+/** Get category icon based on result type/source */
+function CategoryIcon({ result }) {
+  const type = result.type || ''
+  const source = result.source || ''
+  const size = 14
+
+  if (source === 'nickname') return <Star size={size} />
+  if (type === 'coordinates') return <Crosshair size={size} />
+  if (type === 'locality' || type === 'city') return <Building2 size={size} />
+
+  // POI subcategories from osm_value if available
+  const osmVal = result.raw?.osm_value || ''
+  if (osmVal.includes('cafe') || osmVal.includes('coffee')) return <Coffee size={size} />
+  if (osmVal.includes('fuel') || osmVal.includes('gas')) return <Fuel size={size} />
+  if (osmVal.includes('shop') || osmVal.includes('supermarket')) return <ShoppingBag size={size} />
+  if (osmVal.includes('hotel') || osmVal.includes('motel')) return <Hotel size={size} />
+
+  return <MapPin size={size} />
+}
+
+const SearchBar = forwardRef(function SearchBar(_, ref) {
   const inputRef = useRef(null)
   const [activeIndex, setActiveIndex] = useState(-1)
   const debounceRef = useRef(null)
+
+  useImperativeHandle(ref, () => ({
+    focus: () => inputRef.current?.focus(),
+  }))
 
   const query = useStore((s) => s.query)
   const results = useStore((s) => s.results)
   const searchLoading = useStore((s) => s.searchLoading)
   const autocompleteOpen = useStore((s) => s.autocompleteOpen)
   const stops = useStore((s) => s.stops)
+  const pendingDestination = useStore((s) => s.pendingDestination)
   const setQuery = useStore((s) => s.setQuery)
   const setResults = useStore((s) => s.setResults)
   const setSearchLoading = useStore((s) => s.setSearchLoading)
   const setAbortController = useStore((s) => s.setAbortController)
   const setAutocompleteOpen = useStore((s) => s.setAutocompleteOpen)
   const addStop = useStore((s) => s.addStop)
+  const setSelectedPlace = useStore((s) => s.setSelectedPlace)
+  const clearPendingDestination = useStore((s) => s.clearPendingDestination)
 
-  // Focus on mount
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
   const doSearch = useCallback(
     async (q) => {
-      // Abort previous
       const prev = useStore.getState().abortController
       if (prev) prev.abort()
 
@@ -61,19 +88,40 @@ export default function SearchBar() {
   const handleChange = (e) => {
     const val = e.target.value
     setQuery(val)
-
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => doSearch(val), 150)
   }
 
+  const handleClear = () => {
+    setQuery('')
+    setResults([])
+    setAutocompleteOpen(false)
+    inputRef.current?.focus()
+  }
+
   const selectResult = (result) => {
-    addStop({
-      lat: result.lat,
-      lon: result.lon,
-      name: result.name,
-      source: result.source,
-      matchCode: result.match_code,
-    })
+    const { pendingDestination: pending } = useStore.getState()
+
+    if (pending) {
+      // GPS-denied Directions flow: this result becomes the starting point
+      addStop({ lat: result.lat, lon: result.lon, name: result.name, source: result.source, matchCode: result.match_code })
+      addStop({ lat: pending.lat, lon: pending.lon, name: pending.name, source: pending.source, matchCode: pending.matchCode })
+      clearPendingDestination()
+      toast(`Routing from ${result.name} to ${pending.name}`, { icon: '\u{1F9ED}' })
+    } else {
+      // Normal flow: open PlaceDetail
+      setSelectedPlace({
+        lat: result.lat,
+        lon: result.lon,
+        name: result.name,
+        address: result.address || null,
+        type: result.type,
+        source: result.source,
+        matchCode: result.match_code,
+        raw: result.raw || {},
+      })
+    }
+
     setQuery('')
     setResults([])
     setAutocompleteOpen(false)
@@ -83,9 +131,7 @@ export default function SearchBar() {
 
   const handleKeyDown = (e) => {
     if (!autocompleteOpen || results.length === 0) {
-      if (e.key === 'Escape') {
-        setAutocompleteOpen(false)
-      }
+      if (e.key === 'Escape') setAutocompleteOpen(false)
       return
     }
 
@@ -116,35 +162,51 @@ export default function SearchBar() {
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onFocus={() => results.length > 0 && setAutocompleteOpen(true)}
-            placeholder={atCap ? 'Max 10 stops reached' : 'Search for a place...'}
-            disabled={atCap}
-            className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-            aria-label="Search places"
-            aria-expanded={autocompleteOpen}
-            aria-autocomplete="list"
-            role="combobox"
-          />
-          {searchLoading && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">
-              <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-            </div>
-          )}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onFocus={() => results.length > 0 && setAutocompleteOpen(true)}
+          placeholder={atCap ? 'Max 10 stops reached' : pendingDestination ? 'Starting point...' : 'Search for a place...'}
+          disabled={atCap}
+          className="navi-input w-full pr-8"
+          aria-label="Search places"
+          aria-expanded={autocompleteOpen}
+          aria-autocomplete="list"
+          role="combobox"
+        />
+        {/* Clear / Loading indicator */}
+        <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+          {searchLoading ? (
+            <div
+              className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+              style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
+            />
+          ) : query ? (
+            <button
+              onClick={handleClear}
+              className="p-0.5"
+              style={{ color: 'var(--text-tertiary)' }}
+              aria-label="Clear search"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
         </div>
       </div>
 
       {/* Autocomplete dropdown */}
       {autocompleteOpen && results.length > 0 && (
         <ul
-          className="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-lg overflow-hidden max-h-72 overflow-y-auto"
+          className="absolute z-50 mt-1 w-full rounded-lg overflow-hidden max-h-72 overflow-y-auto"
+          style={{
+            background: 'var(--bg-overlay)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-lg)',
+          }}
           role="listbox"
         >
           {results.map((r, i) => (
@@ -152,27 +214,34 @@ export default function SearchBar() {
               key={`${r.lat}-${r.lon}-${i}`}
               role="option"
               aria-selected={i === activeIndex}
-              className={`px-3 py-2 cursor-pointer text-sm border-b border-gray-700 last:border-b-0 ${
-                i === activeIndex
-                  ? 'bg-gray-700 text-white'
-                  : 'text-gray-200 hover:bg-gray-700'
-              }`}
+              className="px-3 py-2 cursor-pointer text-sm"
+              style={{
+                background: i === activeIndex ? 'var(--accent-muted)' : 'transparent',
+                borderBottom: i < results.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+              }}
               onClick={() => selectResult(r)}
               onMouseEnter={() => setActiveIndex(i)}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate flex-1">{r.name}</span>
-                <span className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="shrink-0" style={{ color: 'var(--text-tertiary)' }}>
+                  <CategoryIcon result={r} />
+                </span>
+                <span className="truncate flex-1" style={{ color: 'var(--text-primary)' }}>
+                  {r.name}
+                </span>
+                <span className="flex items-center gap-1.5 shrink-0">
                   {r.match_code?.housenumber === 'matched' && (
-                    <span className="text-[10px] px-1.5 py-0.5 bg-green-800 text-green-200 rounded font-medium">
-                      exact match
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                      style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}
+                    >
+                      exact
                     </span>
                   )}
-                  <span className="text-[10px] text-gray-500">{r.source}</span>
                 </span>
               </div>
-              <div className="text-[11px] text-gray-400 mt-0.5">
-                {r.type} &middot; {r.confidence}
+              <div className="text-[11px] mt-0.5 ml-6" style={{ color: 'var(--text-tertiary)' }}>
+                {r.type}{r.confidence && r.confidence !== 'high' ? ` \u00b7 ${r.confidence}` : ''}
               </div>
             </li>
           ))}
@@ -180,4 +249,6 @@ export default function SearchBar() {
       )}
     </div>
   )
-}
+})
+
+export default SearchBar
