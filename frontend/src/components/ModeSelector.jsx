@@ -1,9 +1,10 @@
+import { Car, Footprints, Bike } from 'lucide-react'
 import { useStore } from '../store'
 
 const MODES = [
-  { id: 'auto', label: 'Drive', icon: '🚗' },
-  { id: 'pedestrian', label: 'Walk', icon: '🚶' },
-  { id: 'bicycle', label: 'Bike', icon: '🚴' },
+  { id: 'auto', label: 'Drive', Icon: Car },
+  { id: 'pedestrian', label: 'Walk', Icon: Footprints },
+  { id: 'bicycle', label: 'Bike', Icon: Bike },
 ]
 
 export default function ModeSelector() {
@@ -11,23 +12,32 @@ export default function ModeSelector() {
   const setMode = useStore((s) => s.setMode)
 
   return (
-    <div className="flex gap-1" role="radiogroup" aria-label="Travel mode">
-      {MODES.map((m) => (
-        <button
-          key={m.id}
-          role="radio"
-          aria-checked={mode === m.id}
-          onClick={() => setMode(m.id)}
-          className={`flex-1 py-1.5 px-2 rounded text-xs font-medium transition-colors ${
-            mode === m.id
-              ? 'bg-cyan-600 text-white'
-              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-          }`}
-        >
-          <span className="mr-1">{m.icon}</span>
-          {m.label}
-        </button>
-      ))}
+    <div
+      className="flex rounded-lg overflow-hidden"
+      style={{ border: '1px solid var(--border)' }}
+      role="radiogroup"
+      aria-label="Travel mode"
+    >
+      {MODES.map((m) => {
+        const active = mode === m.id
+        return (
+          <button
+            key={m.id}
+            role="radio"
+            aria-checked={active}
+            onClick={() => setMode(m.id)}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 text-xs font-medium transition-colors duration-100"
+            style={{
+              background: active ? 'var(--accent-muted)' : 'transparent',
+              color: active ? 'var(--accent)' : 'var(--text-secondary)',
+              borderRight: m.id !== 'bicycle' ? '1px solid var(--border)' : 'none',
+            }}
+          >
+            <m.Icon size={14} />
+            {m.label}
+          </button>
+        )
+      })}
     </div>
   )
 }

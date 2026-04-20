@@ -1,17 +1,24 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useStore } from './store'
+import { useTheme } from './hooks/useTheme'
 import { requestRoute } from './api'
 import { decodePolyline } from './utils/decode'
 import MapView from './components/MapView'
 import Panel from './components/Panel'
+import PlaceDetail from './components/PlaceDetail'
 
 export default function App() {
   const mapViewRef = useRef(null)
   const routeDebounceRef = useRef(null)
 
+  // Initialize theme system
+  useTheme()
+
   const stops = useStore((s) => s.stops)
   const mode = useStore((s) => s.mode)
   const route = useStore((s) => s.route)
+  const gpsOrigin = useStore((s) => s.gpsOrigin)
+  const geoPermission = useStore((s) => s.geoPermission)
   const setRoute = useStore((s) => s.setRoute)
   const setRouteLoading = useStore((s) => s.setRouteLoading)
   const setRouteError = useStore((s) => s.setRouteError)
@@ -19,10 +26,8 @@ export default function App() {
   const setUserLocation = useStore((s) => s.setUserLocation)
   const setGeoPermission = useStore((s) => s.setGeoPermission)
 
-  // Request geolocation on first route action (2+ stops)
-  const requestGeo = useCallback(() => {
-    const { geoPermission } = useStore.getState()
-    if (geoPermission !== 'prompt') return
+  // Proactive geolocation request on mount
+  useEffect(() => {
     if (!navigator.geolocation) {
       setGeoPermission('denied')
       return
@@ -33,28 +38,33 @@ export default function App() {
         setGeoPermission('granted')
       },
       () => setGeoPermission('denied'),
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
     )
   }, [setUserLocation, setGeoPermission])
 
-  // Fetch route when stops or mode change (debounced 500ms)
+  // Fetch route when stops, mode, gpsOrigin, or geoPermission change (debounced 500ms)
+  // NOTE: userLocation is NOT a dep — read from store inside the callback to avoid re-routing on every GPS update
   useEffect(() => {
     if (routeDebounceRef.current) clearTimeout(routeDebounceRef.current)
 
-    if (stops.length < 2) {
-      clearRoute()
-      return
-    }
-
     routeDebounceRef.current = setTimeout(async () => {
-      // Try to get geolocation for potential use
-      requestGeo()
+      const { userLocation } = useStore.getState()
 
-      const locations = stops.map((s) => ({ lat: s.lat, lon: s.lon }))
+      // Build effective stop list
+      let effective = stops.map((s) => ({ lat: s.lat, lon: s.lon }))
+      if (gpsOrigin && geoPermission === 'granted' && userLocation) {
+        effective = [{ lat: userLocation.lat, lon: userLocation.lon }, ...effective]
+      }
+
+      if (effective.length < 2) {
+        clearRoute()
+        return
+      }
+
       setRouteLoading(true)
 
       try {
-        const data = await requestRoute(locations, mode)
+        const data = await requestRoute(effective, mode)
         if (data.trip) {
           setRoute(data.trip)
         } else {
@@ -70,7 +80,7 @@ export default function App() {
     return () => {
       if (routeDebounceRef.current) clearTimeout(routeDebounceRef.current)
     }
-  }, [stops, mode, clearRoute, setRoute, setRouteLoading, setRouteError, requestGeo])
+  }, [stops, mode, gpsOrigin, geoPermission, clearRoute, setRoute, setRouteLoading, setRouteError])
 
   // Handle maneuver click — fly to that point on the map
   const handleManeuverClick = useCallback(
@@ -92,9 +102,10 @@ export default function App() {
   )
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden">
+    <div className="relative w-screen h-screen overflow-hidden" style={{ background: 'var(--bg-base)' }}>
       <MapView ref={mapViewRef} />
       <Panel onManeuverClick={handleManeuverClick} />
+      <PlaceDetail />
     </div>
   )
 }

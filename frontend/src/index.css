@@ -1,38 +1,158 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════
+   NAVI DESIGN TOKENS
+   Warm grays, sage greens, khaki tans, deep blacks.
+   No blue in UI chrome.
+   ═══════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Typography ── */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* ── Type scale ── */
+  --text-xs: 0.6875rem;   /* 11px */
+  --text-sm: 0.8125rem;   /* 13px */
+  --text-base: 0.875rem;  /* 14px */
+  --text-md: 1rem;        /* 16px */
+  --text-lg: 1.125rem;    /* 18px */
+}
+
+/* ═══ DARK MODE (default) ═══ */
+[data-theme="dark"] {
+  --bg-base: #1c1917;        /* warm off-black (was #0f1210) */
+  --bg-raised: #252220;      /* raised surface (was #181d1a) */
+  --bg-overlay: #2e2a27;     /* overlay/dropdown (was #1e2522) */
+  --bg-input: #201d1a;       /* input fields (was #141a16) */
+
+  --text-primary: #dde3dc;
+  --text-secondary: #8f9a8e;
+  --text-tertiary: #5e6b5d;
+  --text-inverse: #1c1917;
+
+  --border: #3a3530;         /* warm brown-gray (was #2a3329) */
+  --border-subtle: #2a2624;  /* (was #1f261e) */
+
+  --accent: #7a9a6b;        /* sage green — interactive states */
+  --accent-hover: #8fad7f;
+  --accent-muted: #3d4d36;
+
+  --tan: #b8a88a;           /* khaki — secondary highlights */
+  --tan-muted: #4a4235;
+
+  --pin-origin: #6b8f5e;    /* sage */
+  --pin-destination: #a67c52; /* rust/tan */
+  --pin-intermediate: #6b7268; /* warm gray */
+  --pin-stroke: #1c1917;
+
+  --status-success: #6b8f5e;
+  --status-warning: #b89a4a;
+  --status-danger: #a65c52;
+
+  --route-line: #7a9a6b;
+
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+/* ═══ LIGHT MODE ═══ */
+[data-theme="light"] {
+  --bg-base: #ece8e1;          /* warm tan-gray (was #f5f2ed) */
+  --bg-raised: #f5f2ec;        /* raised surface (was #ffffff) */
+  --bg-overlay: #f0ece5;       /* overlay/dropdown (was #faf8f5) */
+  --bg-input: #f5f2ec;         /* input fields (was #ffffff) */
+
+  --text-primary: #1a1d1a;
+  --text-secondary: #5c6558;
+  --text-tertiary: #8a9486;
+  --text-inverse: #f5f2ed;
+
+  --border: #d4cfc5;
+  --border-subtle: #e8e3db;
+
+  --accent: #4a7040;
+  --accent-hover: #3d5e35;
+  --accent-muted: #dce8d6;
+
+  --tan: #8a7556;
+  --tan-muted: #f0e8d8;
+
+  --pin-origin: #4a7040;
+  --pin-destination: #8a5c35;
+  --pin-intermediate: #6b6960;
+  --pin-stroke: #1a1d1a;
+
+  --status-success: #4a7040;
+  --status-warning: #8a7040;
+  --status-danger: #8a4040;
+
+  --route-line: #4a7040;
+
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* ═══ BASE STYLES ═══ */
 html, body, #root {
   margin: 0;
   padding: 0;
   height: 100%;
   overflow: hidden;
+  font-family: var(--font-sans);
 }
 
-/* MapLibre popup styling to match dark theme */
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+/* Mono class utility */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* ═══ FOCUS RING — accent, never blue ═══ */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ═══ TRANSITIONS — respect reduced motion ═══ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ═══ MAPLIBRE POPUP ═══ */
 .maplibregl-popup-content {
-  background: #1f2937 !important;
-  border: 1px solid #374151 !important;
+  background: var(--bg-raised) !important;
+  border: 1px solid var(--border) !important;
   border-radius: 8px !important;
   padding: 8px 12px !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: var(--shadow-lg) !important;
+  color: var(--text-primary) !important;
 }
 
 .maplibregl-popup-tip {
-  border-top-color: #1f2937 !important;
-  border-bottom-color: #1f2937 !important;
+  border-top-color: var(--bg-raised) !important;
+  border-bottom-color: var(--bg-raised) !important;
 }
 
 .maplibregl-popup-close-button {
-  color: #9ca3af !important;
+  color: var(--text-secondary) !important;
   font-size: 16px !important;
   padding: 2px 6px !important;
 }
 
 .maplibregl-popup-close-button:hover {
-  color: #fff !important;
+  color: var(--text-primary) !important;
   background: transparent !important;
 }
 
-/* Custom scrollbar for panels */
+/* ═══ SCROLLBAR ═══ */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -42,10 +162,123 @@ html, body, #root {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4b5563;
+  background: var(--border);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+  background: var(--text-tertiary);
+}
+
+/* ═══ GPS CHEVRON MARKER ═══ */
+.navi-chevron {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.3s ease;
+}
+
+.navi-gps-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-raised);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* ═══ STOP PIN MARKERS (map) ═══ */
+.navi-pin {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  border: 2px solid var(--pin-stroke);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.navi-pin--origin { background: var(--pin-origin); }
+.navi-pin--destination { background: var(--pin-destination); }
+.navi-pin--intermediate { background: var(--pin-intermediate); }
+
+/* ═══ FORM ELEMENTS ═══ */
+.navi-input {
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text-primary);
+  transition: border-color 0.1s;
+}
+
+.navi-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.navi-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.navi-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.navi-btn-secondary {
+  padding: 0.375rem 0.75rem;
+  font-size: var(--text-xs);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  background: var(--tan-muted);
+  color: var(--tan);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.navi-btn-secondary:hover:not(:disabled) {
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.navi-btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ═══ PREVIEW PIN (selected but not committed) ═══ */
+.navi-pin-preview {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--accent);
+  background: transparent;
+  box-shadow: 0 0 0 3px var(--accent-muted), var(--shadow);
+  pointer-events: none;
+}
+
+/* ═══ PLACE DETAIL PANEL ═══ */
+.navi-place-detail {
+  transition: transform 150ms ease, opacity 150ms ease;
+}
+
+.navi-place-detail-enter {
+  transform: translateX(-10px);
+  opacity: 0;
+}
+
+.navi-place-detail-active {
+  transform: translateX(0);
+  opacity: 1;
 }
