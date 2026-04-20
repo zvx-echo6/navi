@@ -110,3 +110,34 @@ export async function fetchElevation(lat, lon) {
     return null
   }
 }
+
+const REVERSE_URL = "/api/reverse"
+
+/**
+ * Reverse geocode a point. Returns a place object or null.
+ * @param {number} lat
+ * @param {number} lon
+ * @returns {Promise<{lat, lon, name, address, type, source, raw}|null>}
+ */
+export async function fetchReverse(lat, lon) {
+  try {
+    const params = new URLSearchParams({ lat: String(lat), lon: String(lon) })
+    const resp = await fetch(`${REVERSE_URL}?${params}`, { timeout: 5000 })
+    if (!resp.ok) return null
+    const data = await resp.json()
+    if (!data.results || data.results.length === 0) return null
+    const r = data.results[0]
+    return {
+      lat: r.lat,
+      lon: r.lon,
+      name: r.name,
+      address: null,
+      type: r.type,
+      source: r.source,
+      matchCode: null,
+      raw: r.raw || {},
+    }
+  } catch {
+    return null
+  }
+}

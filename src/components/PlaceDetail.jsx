@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { X, Navigation, Plus, Bookmark, Share2 } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { X, Navigation, Plus, Bookmark, ChevronDown, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useStore } from '../store'
 import { fetchElevation } from '../api'
@@ -15,6 +15,77 @@ function buildAddress(place) {
   return parts.join(', ') || null
 }
 
+/** Copy popover — small dropdown beneath the Copy button */
+function CopyPopover({ address, selectedPlace, onClose }) {
+  const ref = useRef(null)
+
+  // Close on click-outside
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) onClose()
+    }
+    function handleKey(e) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [onClose])
+
+  const copyAddress = () => {
+    const text = [selectedPlace.name, address].filter(Boolean).join('\n')
+    navigator.clipboard.writeText(text).then(
+      () => toast('Address copied'),
+      () => toast.error('Failed to copy')
+    )
+    onClose()
+  }
+
+  const copyCoords = () => {
+    const text = `${selectedPlace.lat.toFixed(6)}, ${selectedPlace.lon.toFixed(6)}`
+    navigator.clipboard.writeText(text).then(
+      () => toast('Coordinates copied'),
+      () => toast.error('Failed to copy')
+    )
+    onClose()
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="absolute bottom-full mb-1 right-0 rounded-lg py-1 z-50 min-w-[140px]"
+      style={{
+        background: 'var(--bg-overlay)',
+        border: '1px solid var(--border)',
+        boxShadow: 'var(--shadow-lg)',
+      }}
+    >
+      <button
+        onClick={address ? copyAddress : undefined}
+        disabled={!address}
+        className="w-full text-left px-3 py-1.5 text-xs"
+        style={{
+          color: address ? 'var(--text-primary)' : 'var(--text-tertiary)',
+          cursor: address ? 'pointer' : 'not-allowed',
+        }}
+        title={!address ? 'No address available' : undefined}
+      >
+        Address
+      </button>
+      <button
+        onClick={copyCoords}
+        className="w-full text-left px-3 py-1.5 text-xs hover:opacity-80"
+        style={{ color: 'var(--text-primary)' }}
+      >
+        Coordinates
+      </button>
+    </div>
+  )
+}
+
 export default function PlaceDetail() {
   const selectedPlace = useStore((s) => s.selectedPlace)
   const clearSelectedPlace = useStore((s) => s.clearSelectedPlace)
@@ -25,6 +96,9 @@ export default function PlaceDetail() {
 
   const [elevResult, setElevResult] = useState({ lat: null, lon: null, value: null })
   const [isMobile, setIsMobile] = useState(false)
+  const [copyForPlace, setCopyForPlace] = useState(null)
+
+  const closeCopy = useCallback(() => setCopyForPlace(null), [])
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
@@ -32,6 +106,17 @@ export default function PlaceDetail() {
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
+
+
+  // Escape key closes panel
+  useEffect(() => {
+    if (!selectedPlace) return
+    function handleKey(e) {
+      if (e.key === 'Escape') clearSelectedPlace()
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [selectedPlace, clearSelectedPlace])
 
   // Fetch elevation when place changes
   const placeLat = selectedPlace?.lat
@@ -49,6 +134,7 @@ export default function PlaceDetail() {
   const elevLoading = placeLat != null && (elevResult.lat !== placeLat || elevResult.lon !== placeLon)
   const elevation = !elevLoading ? elevResult.value : null
 
+  const placeKey = selectedPlace ? `${selectedPlace.lat},${selectedPlace.lon}` : null
   if (!selectedPlace) return null
 
   const address = buildAddress(selectedPlace)
@@ -80,18 +166,6 @@ export default function PlaceDetail() {
 
   const handleSave = () => {
     toast('Saved places coming soon')
-  }
-
-  const handleShare = () => {
-    const text = [
-      selectedPlace.name,
-      address,
-      `${selectedPlace.lat.toFixed(6)}, ${selectedPlace.lon.toFixed(6)}`,
-    ].filter(Boolean).join('\n')
-    navigator.clipboard.writeText(text).then(
-      () => toast('Copied to clipboard'),
-      () => toast.error('Failed to copy')
-    )
   }
 
   const panelContent = (
@@ -191,14 +265,25 @@ export default function PlaceDetail() {
           <Bookmark size={14} />
         </button>
 
-        <button
-          onClick={handleShare}
-          className="p-2 rounded-lg"
-          style={{ background: 'var(--tan-muted)', color: 'var(--tan)', border: '1px solid var(--border)' }}
-          aria-label="Share place"
-        >
-          <Share2 size={14} />
-        </button>
+        {/* Copy dropdown */}
+        <div className="relative">
+          <button
+            onClick={() => setCopyForPlace((v) => v === placeKey ? null : placeKey)}
+            className="p-2 rounded-lg flex items-center gap-0.5"
+            style={{ background: 'var(--tan-muted)', color: 'var(--tan)', border: '1px solid var(--border)' }}
+            aria-label="Copy"
+          >
+            <Copy size={14} />
+            <ChevronDown size={10} />
+          </button>
+          {copyForPlace === placeKey && (
+            <CopyPopover
+              address={address}
+              selectedPlace={selectedPlace}
+              onClose={closeCopy}
+            />
+          )}
+        </div>
       </div>
     </>
   )
