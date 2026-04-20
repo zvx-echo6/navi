@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Protocol } from 'pmtiles'
-import { layersWithCustomTheme } from 'protomaps-themes-base'
+import { layers, namedTheme } from 'protomaps-themes-base'
 
 export default function App() {
   const mapContainer = useRef(null)
@@ -16,6 +16,7 @@ export default function App() {
       style: {
         version: 8,
         glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
+        sprite: 'https://protomaps.github.io/basemaps-assets/sprites/v4/dark',
         sources: {
           protomaps: {
             type: 'vector',
@@ -23,7 +24,7 @@ export default function App() {
             attribution: '<a href="https://protomaps.com">Protomaps</a> | <a href="https://openstreetmap.org">OSM</a>',
           },
         },
-        layers: layersWithCustomTheme('protomaps', 'dark'),
+        layers: layers('protomaps', namedTheme('dark'), { lang: 'en' }),
       },
       center: [-114.5, 44.0],
       zoom: 6,
