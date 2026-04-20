@@ -36,6 +36,10 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
     const protocol = new Protocol()
     maplibregl.addProtocol('pmtiles', protocol.tile)
 
+    // Default center: Matt's home (Filer, ID) — updated by geolocation if permitted
+    const DEFAULT_CENTER = [-114.6066, 42.5736]
+    const DEFAULT_ZOOM = 10
+
     const map = new maplibregl.Map({
       container: mapRef.current,
       style: {
@@ -45,25 +49,37 @@ const MapView = forwardRef(function MapView({ onMapClick }, ref) {
         sources: {
           protomaps: {
             type: 'vector',
-            url: 'pmtiles:///tiles/idaho.pmtiles',
+            url: 'pmtiles:///tiles/na.pmtiles',
             attribution:
               '<a href="https://protomaps.com">Protomaps</a> | <a href="https://openstreetmap.org">OSM</a>',
           },
         },
         layers: layers('protomaps', namedTheme('dark'), { lang: 'en' }),
       },
-      center: [-114.5, 44.0],
-      zoom: 6,
+      center: DEFAULT_CENTER,
+      zoom: DEFAULT_ZOOM,
     })
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
-    map.addControl(
-      new maplibregl.GeolocateControl({
-        positionOptions: { enableHighAccuracy: true },
-        trackUserLocation: false,
-      }),
-      'top-right'
-    )
+
+    // Request geolocation for initial view (not for routing — that's separate)
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords
+          // Only fly to user location if no stops have been added yet
+          if (useStore.getState().stops.length === 0) {
+            map.flyTo({ center: [longitude, latitude], zoom: 12, duration: 1500 })
+          }
+          useStore.getState().setUserLocation({ lat: latitude, lon: longitude })
+          useStore.getState().setGeoPermission('granted')
+        },
+        () => {
+          useStore.getState().setGeoPermission('denied')
+        },
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+      )
+    }
 
     map.on('click', () => {
       // Mobile: collapse sheet when map is tapped
