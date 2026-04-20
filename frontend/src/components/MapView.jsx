@@ -5,6 +5,7 @@ import { Protocol } from 'pmtiles'
 import { layers, namedTheme } from 'protomaps-themes-base'
 import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
+import { fetchReverse } from '../api'
 
 const ROUTE_SOURCE = 'route-source'
 const ROUTE_LAYER_PREFIX = 'route-layer-'
@@ -41,6 +42,8 @@ const MapView = forwardRef(function MapView(_, ref) {
   const previewMarkerRef = useRef(null)
   const watchIdRef = useRef(null)
   const currentThemeRef = useRef('dark')
+  // Flag to suppress map-click when a stop pin was clicked
+  const pinClickedRef = useRef(false)
 
   const stops = useStore((s) => s.stops)
   const route = useStore((s) => s.route)
@@ -110,9 +113,43 @@ const MapView = forwardRef(function MapView(_, ref) {
       )
     }
 
-    map.on('click', () => {
+    // Map click — drop pin and reverse geocode
+    map.on('click', (e) => {
+      // If a stop pin was just clicked, skip the pin-drop
+      if (pinClickedRef.current) {
+        pinClickedRef.current = false
+        return
+      }
+
       if (window.innerWidth < 768) setSheetState('collapsed')
-      useStore.getState().clearSelectedPlace()
+
+      const { lng, lat } = e.lngLat
+
+      // Immediately set a "Dropped pin" placeholder so PlaceDetail opens with coords
+      useStore.getState().setSelectedPlace({
+        lat,
+        lon: lng,
+        name: 'Dropped pin',
+        address: null,
+        type: null,
+        source: 'map_click',
+        matchCode: null,
+        raw: {},
+      })
+
+      // Reverse geocode in background — update place when result arrives
+      fetchReverse(lat, lng).then((place) => {
+        if (!place) return
+        // Only update if the selected place is still this pin (user hasn't clicked elsewhere)
+        const current = useStore.getState().selectedPlace
+        if (current && Math.abs(current.lat - lat) < 0.00001 && Math.abs(current.lon - lng) < 0.00001) {
+          useStore.getState().setSelectedPlace({
+            ...place,
+            lat,
+            lon: lng,
+          })
+        }
+      })
     })
 
     map.on('load', () => {
@@ -204,8 +241,10 @@ const MapView = forwardRef(function MapView(_, ref) {
 
     if (!selectedPlace) return
 
-    // Fly to selected place
-    map.flyTo({ center: [selectedPlace.lon, selectedPlace.lat], zoom: 14, duration: 800 })
+    // Only fly to place if it came from search (not map-click which already centered)
+    if (selectedPlace.source !== 'map_click') {
+      map.flyTo({ center: [selectedPlace.lon, selectedPlace.lat], zoom: 14, duration: 800 })
+    }
 
     // Create preview marker
     const el = document.createElement('div')
@@ -342,6 +381,8 @@ const MapView = forwardRef(function MapView(_, ref) {
 
       el.addEventListener('click', (e) => {
         e.stopPropagation()
+        // Flag so the map-level click handler doesn't fire
+        pinClickedRef.current = true
         if (popupRef.current) popupRef.current.remove()
         const popup = new maplibregl.Popup({ offset: 20, closeButton: true })
           .setLngLat([stop.lon, stop.lat])
