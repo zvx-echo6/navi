@@ -6,6 +6,7 @@ import { decodePolyline } from './utils/decode'
 import MapView from './components/MapView'
 import Panel from './components/Panel'
 import PlaceDetail from './components/PlaceDetail'
+import LayerControl from './components/LayerControl'
 
 export default function App() {
   const mapViewRef = useRef(null)
@@ -106,6 +107,7 @@ export default function App() {
       <MapView ref={mapViewRef} />
       <Panel onManeuverClick={handleManeuverClick} />
       <PlaceDetail />
+      <LayerControl mapRef={mapViewRef} />
     </div>
   )
 }

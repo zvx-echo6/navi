@@ -6,10 +6,14 @@ import { layers, namedTheme } from 'protomaps-themes-base'
 import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse } from '../api'
-import { getConfig } from '../config'
+import { getConfig, hasFeature } from '../config'
 
 const ROUTE_SOURCE = 'route-source'
 const ROUTE_LAYER_PREFIX = 'route-layer-'
+const HILLSHADE_SOURCE = 'hillshade-dem'
+const HILLSHADE_LAYER = 'hillshade-layer'
+const TRAFFIC_SOURCE = 'traffic-tiles'
+const TRAFFIC_LAYER = 'traffic-layer'
 
 /** Build a full MapLibre style object for the given theme */
 function buildStyle(themeName) {
@@ -37,6 +41,83 @@ const CHEVRON_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http
   <path d="M8 1 L14 13 L8 10 L2 13 Z" fill="var(--accent)" stroke="var(--bg-raised)" stroke-width="1.5" stroke-linejoin="round"/>
 </svg>`
 
+/** Add hillshade raster-dem source + layer to the map */
+function addHillshade(map) {
+  if (!map || map.getSource(HILLSHADE_SOURCE)) return
+  const config = getConfig()
+  const hs = config?.tileset_hillshade
+  if (!hs?.url) return
+
+  map.addSource(HILLSHADE_SOURCE, {
+    type: 'raster-dem',
+    url: `pmtiles://${hs.url}`,
+    encoding: hs.encoding || 'terrarium',
+    tileSize: 256,
+    maxzoom: hs.max_zoom || 12,
+  })
+
+  // Insert below the first symbol/label layer for proper z-ordering
+  let beforeId = undefined
+  for (const layer of map.getStyle().layers) {
+    if (layer.type === 'symbol') {
+      beforeId = layer.id
+      break
+    }
+  }
+
+  map.addLayer({
+    id: HILLSHADE_LAYER,
+    type: 'hillshade',
+    source: HILLSHADE_SOURCE,
+    paint: {
+      'hillshade-exaggeration': 0.5,
+      'hillshade-illumination-direction': 315,
+      'hillshade-shadow-color': '#000000',
+      'hillshade-highlight-color': '#ffffff',
+    },
+  }, beforeId)
+}
+
+/** Remove hillshade layer + source */
+function removeHillshade(map) {
+  if (!map) return
+  if (map.getLayer(HILLSHADE_LAYER)) map.removeLayer(HILLSHADE_LAYER)
+  if (map.getSource(HILLSHADE_SOURCE)) map.removeSource(HILLSHADE_SOURCE)
+}
+
+/** Add traffic raster tile source + layer */
+function addTraffic(map) {
+  if (!map || map.getSource(TRAFFIC_SOURCE)) return
+  const config = getConfig()
+  const tr = config?.traffic
+  if (!tr?.proxy_url) return
+
+  const tileUrl = tr.proxy_url.replace('{z}', '{z}').replace('{x}', '{x}').replace('{y}', '{y}')
+
+  map.addSource(TRAFFIC_SOURCE, {
+    type: 'raster',
+    tiles: [tileUrl],
+    tileSize: 256,
+    maxzoom: 18,
+  })
+
+  map.addLayer({
+    id: TRAFFIC_LAYER,
+    type: 'raster',
+    source: TRAFFIC_SOURCE,
+    paint: {
+      'raster-opacity': 0.6,
+    },
+  })
+}
+
+/** Remove traffic layer + source */
+function removeTraffic(map) {
+  if (!map) return
+  if (map.getLayer(TRAFFIC_LAYER)) map.removeLayer(TRAFFIC_LAYER)
+  if (map.getSource(TRAFFIC_SOURCE)) map.removeSource(TRAFFIC_SOURCE)
+}
+
 const MapView = forwardRef(function MapView(_, ref) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
@@ -46,6 +127,8 @@ const MapView = forwardRef(function MapView(_, ref) {
   const previewMarkerRef = useRef(null)
   const watchIdRef = useRef(null)
   const currentThemeRef = useRef('dark')
+  // Track which overlay layers are currently active (for theme swap re-add)
+  const activeLayersRef = useRef({ hillshade: false, traffic: false })
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
 
@@ -64,6 +147,30 @@ const MapView = forwardRef(function MapView(_, ref) {
     },
     getMap() {
       return mapInstance.current
+    },
+    addHillshadeLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      addHillshade(map)
+      activeLayersRef.current.hillshade = true
+    },
+    removeHillshadeLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      removeHillshade(map)
+      activeLayersRef.current.hillshade = false
+    },
+    addTrafficLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      addTraffic(map)
+      activeLayersRef.current.traffic = true
+    },
+    removeTrafficLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      removeTraffic(map)
+      activeLayersRef.current.traffic = false
     },
   }))
 
@@ -164,6 +271,26 @@ const MapView = forwardRef(function MapView(_, ref) {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       })
+
+      // Restore overlay layers from localStorage prefs
+      try {
+        const raw = localStorage.getItem('navi-layer-prefs')
+        if (raw) {
+          const prefs = JSON.parse(raw)
+          if (prefs.hillshade && hasFeature('has_hillshade')) {
+            addHillshade(map)
+            activeLayersRef.current.hillshade = true
+          }
+          if (prefs.traffic && hasFeature('has_traffic_overlay')) {
+            addTraffic(map)
+            activeLayersRef.current.traffic = true
+          }
+        } else if (hasFeature('has_hillshade')) {
+          // Default: hillshade ON if available
+          addHillshade(map)
+          activeLayersRef.current.hillshade = true
+        }
+      } catch {}
     })
 
     mapInstance.current = map
@@ -221,12 +348,17 @@ const MapView = forwardRef(function MapView(_, ref) {
 
     map.setStyle(buildStyle(theme), { diff: false })
 
-    // Re-add route source after style swap
+    // Re-add sources/layers after style swap
     map.once('style.load', () => {
       map.addSource(ROUTE_SOURCE, {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       })
+
+      // Re-add active overlay layers
+      if (activeLayersRef.current.hillshade) addHillshade(map)
+      if (activeLayersRef.current.traffic) addTraffic(map)
+
       // Restore view
       map.jumpTo({ center, zoom, bearing, pitch })
       // Re-render route if exists
