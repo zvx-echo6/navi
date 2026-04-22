@@ -242,3 +242,21 @@ export async function fetchNearbyContacts(lat, lon, radiusM, signal) {
     return []
   }
 }
+
+/**
+ * Fetch PAD-US land classification for a point.
+ * @param {number} lat
+ * @param {number} lon
+ * @param {AbortSignal} signal
+ * @returns {Promise<object|null>} Classification data or null on error
+ */
+export async function fetchLandclass(lat, lon, signal) {
+  try {
+    const params = new URLSearchParams({ lat: String(lat), lon: String(lon) })
+    const resp = await fetch(`/api/landclass?${params}`, { signal })
+    if (!resp.ok) return null
+    return resp.json()
+  } catch {
+    return null
+  }
+}

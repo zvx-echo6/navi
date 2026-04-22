@@ -1,12 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import {
   X, Navigation, Plus, Bookmark, ChevronDown, ChevronUp, Copy,
-  Clock, Phone, Globe, Mail, BookOpen, Info,
+  Clock, Phone, Globe, Mail, BookOpen, Info, Trees,
 } from 'lucide-react'
 import OpeningHours from 'opening_hours'
 import toast from 'react-hot-toast'
 import { useStore } from '../store'
-import { fetchElevation, fetchPlaceDetails, fetchDriveTime, fetchNearbyContacts } from '../api'
+import { fetchElevation, fetchPlaceDetails, fetchDriveTime, fetchNearbyContacts, fetchLandclass } from '../api'
 import { hasFeature } from '../config'
 import { buildAddress } from '../utils/place'
 
@@ -354,6 +354,46 @@ function EnrichmentSections({ details }) {
 
 // ── Skeleton loader ────────────────────────────────────────────────────
 
+
+// ── Land classification display ──────────────────────────────────────────────────────────────────────
+
+function LandclassSection({ data }) {
+  if (!data || data.is_public !== true || !data.classifications?.length) return null
+
+  return (
+    <DetailSection label="Public Land" icon={Trees}>
+      <div className="flex flex-col gap-2">
+        {data.classifications.map((c, i) => (
+          <div key={i} className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+              {c.unit_name}
+            </span>
+            {(c.owner_type || c.manager_name || c.designation_type) && (
+              <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                {[c.owner_type, c.manager_name, c.designation_type].filter(Boolean).join(' \u203a ')}
+              </span>
+            )}
+            {c.public_access && c.public_access !== 'Unknown' && (
+              <span className="category-badge" style={{ fontSize: '10px', width: 'fit-content' }}>
+                {c.public_access}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </DetailSection>
+  )
+}
+
+function PrivateLandIndicator({ data }) {
+  if (!data || data.is_private !== true) return null
+  return (
+    <p className="mt-1 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+      Private land
+    </p>
+  )
+}
+
 function EnrichmentSkeleton() {
   return (
     <div className="mt-3 flex flex-col gap-2.5 animate-pulse">
@@ -383,6 +423,7 @@ export default function PlaceDetail() {
   const [placeDetails, setPlaceDetails] = useState(null)
   const [driveTime, setDriveTime] = useState(null)
   const [nearbyLabel, setNearbyLabel] = useState(null)
+  const [landclass, setLandclass] = useState(null)
 
   const closeCopy = useCallback(() => setCopyOpen(false), [])
 
@@ -476,6 +517,28 @@ export default function PlaceDetail() {
         setNearbyLabel(nearby[0].label)
       } else if (!controller.signal.aborted) {
         setNearbyLabel(null)
+      }
+    })
+    return () => controller.abort()
+  }, [placeLat, placeLon])
+
+  // Fetch land classification when place changes (if feature enabled)
+  useEffect(() => {
+    if (!hasFeature('has_landclass') || placeLat == null || placeLon == null) {
+      setLandclass(null)
+      return
+    }
+    const controller = new AbortController()
+    fetchLandclass(placeLat, placeLon, controller.signal).then((data) => {
+      if (!controller.signal.aborted && data) {
+        setLandclass(data)
+        // Upgrade "Dropped pin" name to land summary if reverse geocode didn't resolve
+        if (data.summary && useStore.getState().selectedPlace?.name === 'Dropped pin') {
+          const current = useStore.getState().selectedPlace
+          useStore.getState().setSelectedPlace({ ...current, name: data.summary })
+        }
+      } else if (!controller.signal.aborted) {
+        setLandclass(null)
       }
     })
     return () => controller.abort()
@@ -597,6 +660,11 @@ export default function PlaceDetail() {
           {elevLoading ? '...' : elevFeet != null ? `${elevFeet.toLocaleString()} ft` : '\u2014'}
         </span>
       </div>
+
+      {/* OSM enrichment sections */}
+      {/* Land classification (PAD-US) */}
+      <LandclassSection data={landclass} />
+      <PrivateLandIndicator data={landclass} />
 
       {/* OSM enrichment sections */}
       {placeDetails === 'loading' && <EnrichmentSkeleton />}
