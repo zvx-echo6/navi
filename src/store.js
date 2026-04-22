@@ -101,4 +101,14 @@ export const useStore = create((set, get) => ({
       localStorage.removeItem('navi-theme-override')
     }
   },
+  // ── Contacts ──
+  contacts: [],
+  contactsLoaded: false,
+  activeTab: 'routes', // 'routes' | 'contacts'
+  editingContact: null, // null=closed, {}=new, {id:N}=edit
+
+  setContacts: (c) => set({ contacts: c, contactsLoaded: true }),
+  setActiveTab: (tab) => set({ activeTab: tab }),
+  setEditingContact: (c) => set({ editingContact: c }),
+  clearEditingContact: () => set({ editingContact: null }),
 }))

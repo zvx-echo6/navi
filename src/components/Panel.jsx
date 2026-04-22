@@ -1,10 +1,12 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
 import { Sun, Moon } from 'lucide-react'
 import { useStore } from '../store'
+import { hasFeature } from '../config'
 import SearchBar from './SearchBar'
 import StopList from './StopList'
 import ModeSelector from './ModeSelector'
 import ManeuverList from './ManeuverList'
+import ContactList from './ContactList'
 import { requestOptimizedRoute } from '../api'
 
 export default function Panel({ onManeuverClick }) {
@@ -24,12 +26,16 @@ export default function Panel({ onManeuverClick }) {
   const setThemeOverride = useStore((s) => s.setThemeOverride)
   const gpsOrigin = useStore((s) => s.gpsOrigin)
   const geoPermission = useStore((s) => s.geoPermission)
+  const activeTab = useStore((s) => s.activeTab)
+  const setActiveTab = useStore((s) => s.setActiveTab)
 
   const [isMobile, setIsMobile] = useState(false)
   const [optimizing, setOptimizing] = useState(false)
   const sheetRef = useRef(null)
   const dragStartY = useRef(0)
   const dragStartState = useRef('half')
+
+  const showContacts = hasFeature('has_contacts')
 
   // Responsive detection
   useEffect(() => {
@@ -60,7 +66,6 @@ export default function Panel({ onManeuverClick }) {
       }
       const data = await requestOptimizedRoute(locations, mode)
       if (data.trip) {
-        // If GPS origin was prepended, skip it from the result waypoints
         const wpOrder = hasGpsOrigin && userLocation
           ? (data.trip.locations || []).slice(1)
           : data.trip.locations
@@ -116,7 +121,7 @@ export default function Panel({ onManeuverClick }) {
 
   const showOptimize = effectiveCount >= 3
 
-  const content = (
+  const routesContent = (
     <>
       <SearchBar />
 
@@ -150,6 +155,29 @@ export default function Panel({ onManeuverClick }) {
           <p>Search and add stops to build your route</p>
         </div>
       )}
+    </>
+  )
+
+  const content = (
+    <>
+      {showContacts && (
+        <div className="navi-tab-bar mb-3">
+          <button
+            className={`navi-tab ${activeTab === 'routes' ? 'navi-tab-active' : ''}`}
+            onClick={() => setActiveTab('routes')}
+          >
+            Routes
+          </button>
+          <button
+            className={`navi-tab ${activeTab === 'contacts' ? 'navi-tab-active' : ''}`}
+            onClick={() => setActiveTab('contacts')}
+          >
+            Contacts
+          </button>
+        </div>
+      )}
+
+      {(!showContacts || activeTab === 'routes') ? routesContent : <ContactList />}
     </>
   )
 

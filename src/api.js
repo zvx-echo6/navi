@@ -141,3 +141,104 @@ export async function fetchReverse(lat, lon) {
     return null
   }
 }
+
+
+/**
+ * Fetch drive time between two points via Valhalla route.
+ * @param {number} oLat - Origin latitude
+ * @param {number} oLon - Origin longitude
+ * @param {number} dLat - Destination latitude
+ * @param {number} dLon - Destination longitude
+ * @param {AbortSignal} signal - AbortController signal
+ * @returns {Promise<number|null>} Drive time in seconds, or null on error
+ */
+export async function fetchDriveTime(oLat, oLon, dLat, dLon, signal) {
+  try {
+    const resp = await fetch(VALHALLA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: [{ lat: oLat, lon: oLon }, { lat: dLat, lon: dLon }],
+        costing: 'auto',
+      }),
+      signal,
+    })
+    if (!resp.ok) return null
+    const data = await resp.json()
+    return data.trip?.summary?.time ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Fetch enriched place details from the place detail proxy.
+ * @param {string} osmType - N, W, or R
+ * @param {number} osmId - OSM element ID
+ * @param {AbortSignal} signal - AbortController signal for cancellation
+ * @returns {Promise<object|null>} Cleaned place detail object, or null on error
+ */
+export async function fetchPlaceDetails(osmType, osmId, signal) {
+  try {
+    const resp = await fetch(`/api/place/${osmType}/${osmId}`, {
+      signal,
+      headers: { 'Accept': 'application/json' },
+    })
+    if (!resp.ok) return null
+    return resp.json()
+  } catch {
+    return null
+  }
+}
+
+// ── Contacts API ──
+
+export async function fetchContacts(signal) {
+  try {
+    const resp = await fetch('/api/contacts', { signal })
+    if (resp.status === 401) return { auth: false }
+    if (!resp.ok) throw new Error(`Contacts error: ${resp.status}`)
+    return resp.json()
+  } catch (e) {
+    if (e.name === 'AbortError') throw e
+    return []
+  }
+}
+
+export async function createContact(data) {
+  const resp = await fetch('/api/contacts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (resp.status === 401) return { auth: false }
+  return resp.json().then((d) => ({ ...d, _status: resp.status }))
+}
+
+export async function updateContact(id, data) {
+  const resp = await fetch(`/api/contacts/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (resp.status === 401) return { auth: false }
+  return resp.json()
+}
+
+export async function deleteContact(id) {
+  const resp = await fetch(`/api/contacts/${id}`, { method: 'DELETE' })
+  if (resp.status === 401) return { auth: false }
+  return resp.json()
+}
+
+export async function fetchNearbyContacts(lat, lon, radiusM, signal) {
+  try {
+    const params = new URLSearchParams({ lat: String(lat), lon: String(lon), radius_m: String(radiusM) })
+    const resp = await fetch(`/api/contacts/nearby?${params}`, { signal })
+    if (resp.status === 401) return []
+    if (!resp.ok) return []
+    return resp.json()
+  } catch {
+    return []
+  }
+}

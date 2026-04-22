@@ -6,6 +6,7 @@ import { decodePolyline } from './utils/decode'
 import MapView from './components/MapView'
 import Panel from './components/Panel'
 import PlaceDetail from './components/PlaceDetail'
+import ContactModal from './components/ContactModal'
 import LayerControl from './components/LayerControl'
 import LocateButton from './components/LocateButton'
 
@@ -27,14 +28,12 @@ export default function App() {
   const clearRoute = useStore((s) => s.clearRoute)
 
   // Fetch route when stops, mode, gpsOrigin, or geoPermission change (debounced 500ms)
-  // NOTE: userLocation is NOT a dep — read from store inside the callback to avoid re-routing on every GPS update
   useEffect(() => {
     if (routeDebounceRef.current) clearTimeout(routeDebounceRef.current)
 
     routeDebounceRef.current = setTimeout(async () => {
       const { userLocation } = useStore.getState()
 
-      // Build effective stop list
       let effective = stops.map((s) => ({ lat: s.lat, lon: s.lon }))
       if (gpsOrigin && geoPermission === 'granted' && userLocation) {
         effective = [{ lat: userLocation.lat, lon: userLocation.lon }, ...effective]
@@ -66,7 +65,7 @@ export default function App() {
     }
   }, [stops, mode, gpsOrigin, geoPermission, clearRoute, setRoute, setRouteLoading, setRouteError])
 
-  // Handle maneuver click — fly to that point on the map
+  // Handle maneuver click
   const handleManeuverClick = useCallback(
     (maneuver) => {
       if (!route || !route.legs) return
@@ -90,6 +89,7 @@ export default function App() {
       <MapView ref={mapViewRef} />
       <Panel onManeuverClick={handleManeuverClick} />
       <PlaceDetail />
+      <ContactModal />
       <LayerControl mapRef={mapViewRef} />
       <LocateButton mapRef={mapViewRef} />
     </div>
