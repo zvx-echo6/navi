@@ -26,7 +26,7 @@ export default function ModeSelector() {
             role="radio"
             aria-checked={active}
             onClick={() => setMode(m.id)}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 text-xs font-medium transition-colors duration-100"
+            className="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 px-2 text-xs font-medium transition-colors duration-100"
             style={{
               background: active ? 'var(--accent-muted)' : 'transparent',
               color: active ? 'var(--accent)' : 'var(--text-secondary)',

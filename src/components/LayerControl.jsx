@@ -40,27 +40,49 @@ export default function LayerControl({ mapRef }) {
 
   // Apply layers when prefs change
   useEffect(() => {
-    const map = mapRef?.current?.getMap?.()
-    if (!map || !map.isStyleLoaded()) return
+    const mapView = mapRef?.current
+    if (!mapView) return
+    const map = mapView.getMap?.()
+    if (!map) return
 
-    if (hillshade && hasFeature('has_hillshade')) {
-      mapRef.current.addHillshadeLayer?.()
+    const apply = () => {
+      if (hillshade && hasFeature('has_hillshade')) {
+        mapView.addHillshadeLayer?.()
+      } else {
+        mapView.removeHillshadeLayer?.()
+      }
+    }
+
+    if (map.isStyleLoaded()) {
+      apply()
     } else {
-      mapRef.current.removeHillshadeLayer?.()
+      map.once('style.load', apply)
     }
     savePrefs({ hillshade, traffic })
+    return () => map.off('style.load', apply)
   }, [hillshade, mapRef])
 
   useEffect(() => {
-    const map = mapRef?.current?.getMap?.()
-    if (!map || !map.isStyleLoaded()) return
+    const mapView = mapRef?.current
+    if (!mapView) return
+    const map = mapView.getMap?.()
+    if (!map) return
 
-    if (traffic && hasFeature('has_traffic_overlay')) {
-      mapRef.current.addTrafficLayer?.()
+    const apply = () => {
+      if (traffic && hasFeature('has_traffic_overlay')) {
+        mapView.addTrafficLayer?.()
+      } else {
+        mapView.removeTrafficLayer?.()
+      }
+    }
+
+    if (map.isStyleLoaded()) {
+      apply()
     } else {
-      mapRef.current.removeTrafficLayer?.()
+      map.once('style.load', apply)
     }
     savePrefs({ hillshade, traffic })
+    return () => map.off('style.load', apply)
   }, [traffic, mapRef])
 
   // Close on outside click
@@ -71,8 +93,8 @@ export default function LayerControl({ mapRef }) {
         setOpen(false)
       }
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    document.addEventListener('pointerdown', handleClick)
+    return () => document.removeEventListener('pointerdown', handleClick)
   }, [open])
 
   const showHillshade = hasFeature('has_hillshade')

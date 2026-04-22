@@ -7,6 +7,7 @@ import MapView from './components/MapView'
 import Panel from './components/Panel'
 import PlaceDetail from './components/PlaceDetail'
 import LayerControl from './components/LayerControl'
+import LocateButton from './components/LocateButton'
 
 export default function App() {
   const mapViewRef = useRef(null)
@@ -24,24 +25,6 @@ export default function App() {
   const setRouteLoading = useStore((s) => s.setRouteLoading)
   const setRouteError = useStore((s) => s.setRouteError)
   const clearRoute = useStore((s) => s.clearRoute)
-  const setUserLocation = useStore((s) => s.setUserLocation)
-  const setGeoPermission = useStore((s) => s.setGeoPermission)
-
-  // Proactive geolocation request on mount
-  useEffect(() => {
-    if (!navigator.geolocation) {
-      setGeoPermission('denied')
-      return
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserLocation({ lat: pos.coords.latitude, lon: pos.coords.longitude })
-        setGeoPermission('granted')
-      },
-      () => setGeoPermission('denied'),
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
-    )
-  }, [setUserLocation, setGeoPermission])
 
   // Fetch route when stops, mode, gpsOrigin, or geoPermission change (debounced 500ms)
   // NOTE: userLocation is NOT a dep — read from store inside the callback to avoid re-routing on every GPS update
@@ -108,6 +91,7 @@ export default function App() {
       <Panel onManeuverClick={handleManeuverClick} />
       <PlaceDetail />
       <LayerControl mapRef={mapViewRef} />
+      <LocateButton mapRef={mapViewRef} />
     </div>
   )
 }

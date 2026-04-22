@@ -215,7 +215,7 @@ export default function Panel({ onManeuverClick }) {
       </div>
 
       {sheetState !== 'collapsed' && (
-        <div className="px-4 pb-4 overflow-y-auto h-[calc(100%-2rem)]">
+        <div className="px-4 pb-4 overflow-y-auto overflow-x-hidden h-[calc(100%-2rem)]" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
           {header}
           {content}
         </div>
