@@ -1,8 +1,10 @@
 import { useRef, useEffect, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
-import { MapPin, Building2, Star, Crosshair, Coffee, Fuel, ShoppingBag, Hotel, X } from 'lucide-react'
+import { MapPin, Building2, Star, Crosshair, Coffee, Fuel, ShoppingBag, Hotel, X, User } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useStore } from '../store'
+import { buildAddress } from '../utils/place'
 import { searchGeocode } from '../api'
+import { hasFeature } from '../config'
 
 /** Get category icon based on result type/source */
 function CategoryIcon({ result }) {
@@ -10,6 +12,7 @@ function CategoryIcon({ result }) {
   const source = result.source || ''
   const size = 14
 
+  if (result._isContact) return <User size={size} />
   if (source === 'nickname') return <Star size={size} />
   if (type === 'coordinates') return <Crosshair size={size} />
   if (type === 'locality' || type === 'city') return <Building2 size={size} />
@@ -39,6 +42,7 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
   const autocompleteOpen = useStore((s) => s.autocompleteOpen)
   const stops = useStore((s) => s.stops)
   const pendingDestination = useStore((s) => s.pendingDestination)
+  const contacts = useStore((s) => s.contacts)
   const setQuery = useStore((s) => s.setQuery)
   const setResults = useStore((s) => s.setResults)
   const setSearchLoading = useStore((s) => s.setSearchLoading)
@@ -46,6 +50,7 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
   const setAutocompleteOpen = useStore((s) => s.setAutocompleteOpen)
   const addStop = useStore((s) => s.addStop)
   const setSelectedPlace = useStore((s) => s.setSelectedPlace)
+  const setEditingContact = useStore((s) => s.setEditingContact)
   const clearPendingDestination = useStore((s) => s.clearPendingDestination)
 
   useEffect(() => {
@@ -64,25 +69,56 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
         return
       }
 
+      // Prepend matching contacts
+      let contactResults = []
+      if (hasFeature('has_contacts') && contacts.length > 0) {
+        const lower = q.trim().toLowerCase()
+        contactResults = contacts
+          .filter((c) =>
+            (c.label || '').toLowerCase().startsWith(lower) ||
+            (c.name || '').toLowerCase().startsWith(lower) ||
+            (c.call_sign || '').toLowerCase().startsWith(lower)
+          )
+          .slice(0, 3)
+          .map((c) => ({
+            lat: c.lat,
+            lon: c.lon,
+            name: c.label,
+            address: c.address || c.name || '',
+            type: 'contact',
+            source: 'contacts',
+            match_code: null,
+            raw: { osm_type: c.osm_type, osm_id: c.osm_id, contact: c },
+            _isContact: true,
+          }))
+      }
+
       const ctrl = new AbortController()
       setAbortController(ctrl)
       setSearchLoading(true)
 
       try {
         const data = await searchGeocode(q.trim(), 6, ctrl.signal)
-        setResults(data.results || [])
-        setAutocompleteOpen(data.results?.length > 0)
+        const combined = [...contactResults, ...(data.results || [])]
+        setResults(combined)
+        setAutocompleteOpen(combined.length > 0)
         setActiveIndex(-1)
       } catch (e) {
         if (e.name !== 'AbortError') {
-          setResults([])
-          setAutocompleteOpen(false)
+          // Still show contacts even if geocode fails
+          if (contactResults.length > 0) {
+            setResults(contactResults)
+            setAutocompleteOpen(true)
+          } else {
+            setResults([])
+            setAutocompleteOpen(false)
+          }
         }
       } finally {
         setSearchLoading(false)
       }
     },
-    [setResults, setAutocompleteOpen, setSearchLoading, setAbortController]
+    [setResults, setAutocompleteOpen, setSearchLoading, setAbortController, contacts]
   )
 
   const handleChange = (e) => {
@@ -102,14 +138,22 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
   const selectResult = (result) => {
     const { pendingDestination: pending } = useStore.getState()
 
+    // Pure contact (no geo) → open edit modal
+    if (result._isContact && result.lat == null) {
+      setEditingContact(result.raw.contact)
+      setQuery('')
+      setResults([])
+      setAutocompleteOpen(false)
+      setActiveIndex(-1)
+      return
+    }
+
     if (pending) {
-      // GPS-denied Directions flow: this result becomes the starting point
       addStop({ lat: result.lat, lon: result.lon, name: result.name, source: result.source, matchCode: result.match_code })
       addStop({ lat: pending.lat, lon: pending.lon, name: pending.name, source: pending.source, matchCode: pending.matchCode })
       clearPendingDestination()
       toast(`Routing from ${result.name} to ${pending.name}`, { icon: '\u{1F9ED}' })
     } else {
-      // Normal flow: open PlaceDetail
       setSelectedPlace({
         lat: result.lat,
         lon: result.lon,
@@ -209,27 +253,45 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
           }}
           role="listbox"
         >
-          {results.map((r, i) => (
+          {results.map((r, i) => {
+            const isPoi = r.type === 'poi' && r.raw?.name
+            const isContact = r._isContact
+            const primary = isContact ? r.name : isPoi ? r.raw.name : r.name
+            const secondary = isContact ? (r.address || '') : isPoi ? buildAddress(r) : null
+            return (
             <li
               key={`${r.lat}-${r.lon}-${i}`}
               role="option"
               aria-selected={i === activeIndex}
               className="px-3 py-2 cursor-pointer text-sm"
               style={{
-                background: i === activeIndex ? 'var(--accent-muted)' : 'transparent',
+                background: i === activeIndex
+                  ? 'var(--accent-muted)'
+                  : isContact
+                    ? 'var(--accent-muted)'
+                    : 'transparent',
                 borderBottom: i < results.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                opacity: isContact && i !== activeIndex ? 0.85 : 1,
               }}
               onClick={() => selectResult(r)}
               onMouseEnter={() => setActiveIndex(i)}
             >
               <div className="flex items-center gap-2">
-                <span className="shrink-0" style={{ color: 'var(--text-tertiary)' }}>
+                <span className="shrink-0" style={{ color: isContact ? 'var(--accent)' : 'var(--text-tertiary)' }}>
                   <CategoryIcon result={r} />
                 </span>
                 <span className="truncate flex-1" style={{ color: 'var(--text-primary)' }}>
-                  {r.name}
+                  {primary}
                 </span>
                 <span className="flex items-center gap-1.5 shrink-0">
+                  {isContact && (
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                      style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}
+                    >
+                      saved
+                    </span>
+                  )}
                   {r.match_code?.housenumber === 'matched' && (
                     <span
                       className="text-[10px] px-1.5 py-0.5 rounded font-medium"
@@ -240,11 +302,14 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
                   )}
                 </span>
               </div>
-              <div className="text-[11px] mt-0.5 ml-6" style={{ color: 'var(--text-tertiary)' }}>
-                {r.type}{r.confidence && r.confidence !== 'high' ? ` \u00b7 ${r.confidence}` : ''}
-              </div>
+              {secondary && (
+                <div className="text-[11px] mt-0.5 ml-6 truncate" style={{ color: 'var(--text-tertiary)' }}>
+                  {secondary}
+                </div>
+              )}
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
     </div>
