@@ -58,18 +58,18 @@
 
 /* ═══ LIGHT MODE ═══ */
 [data-theme="light"] {
-  --bg-base: #ece8e1;          /* warm tan-gray (was #f5f2ed) */
-  --bg-raised: #f5f2ec;        /* raised surface (was #ffffff) */
-  --bg-overlay: #f0ece5;       /* overlay/dropdown (was #faf8f5) */
-  --bg-input: #f5f2ec;         /* input fields (was #ffffff) */
+  --bg-base: #ddd2b9;          /* warm khaki-tan (was #ece8e1) */
+  --bg-raised: #e8dec8;        /* raised surface (was #f5f2ec) */
+  --bg-overlay: #e3d9c1;       /* overlay/dropdown (was #f0ece5) */
+  --bg-input: #e8dec8;         /* input fields (was #f5f2ec) */
 
   --text-primary: #1a1d1a;
-  --text-secondary: #5c6558;
-  --text-tertiary: #8a9486;
+  --text-secondary: #4f5a49;   /* darkened for WCAG AA on new base (was #5c6558) */
+  --text-tertiary: #7a8674;    /* darkened proportionally (was #8a9486) */
   --text-inverse: #f5f2ed;
 
-  --border: #d4cfc5;
-  --border-subtle: #e8e3db;
+  --border: #c4b89e;           /* warmer border (was #d4cfc5) */
+  --border-subtle: #d5cab2;    /* warmer subtle border (was #e8e3db) */
 
   --accent: #4a7040;
   --accent-hover: #3d5e35;
@@ -381,4 +381,91 @@ body {
 
 .layer-control-toggle:checked::after {
   transform: translateX(14px);
+}
+
+
+/* ═══ PLACE DETAIL ENRICHMENT ═══ */
+.place-detail-section {
+  margin-top: 2px;
+}
+
+.place-detail-section-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.category-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-muted);
+  border-radius: 10px;
+}
+
+
+/* ═══ LOCATE BUTTON ═══ */
+.locate-btn {
+  position: absolute;
+  bottom: 80px;
+  right: 10px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.locate-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+/* ═══ STOP REMOVE BUTTON (touch-friendly) ═══ */
+.stop-remove-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.group:hover .stop-remove-btn {
+  opacity: 1;
+}
+
+/* ═══ MOBILE OVERRIDES ═══ */
+@media (max-width: 767px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .layer-control {
+    bottom: auto;
+    top: 120px;
+    right: 10px;
+  }
+
+  .locate-btn {
+    bottom: auto;
+    top: 166px;
+    right: 10px;
+  }
+
+  .stop-remove-btn {
+    opacity: 0.6;
+  }
 }

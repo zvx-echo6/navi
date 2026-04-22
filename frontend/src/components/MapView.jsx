@@ -197,36 +197,6 @@ const MapView = forwardRef(function MapView(_, ref) {
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
 
-    // GPS tracking — creates chevron or dot marker
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { latitude, longitude } = pos.coords
-          if (useStore.getState().stops.length === 0) {
-            map.flyTo({ center: [longitude, latitude], zoom: 12, duration: 1500 })
-          }
-          useStore.getState().setUserLocation({ lat: latitude, lon: longitude })
-          useStore.getState().setGeoPermission('granted')
-          createOrUpdateGpsMarker(map, latitude, longitude, null)
-        },
-        () => {
-          useStore.getState().setGeoPermission('denied')
-        },
-        { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
-      )
-
-      // Watch for heading changes
-      watchIdRef.current = navigator.geolocation.watchPosition(
-        (pos) => {
-          const { latitude, longitude, heading } = pos.coords
-          useStore.getState().setUserLocation({ lat: latitude, lon: longitude })
-          createOrUpdateGpsMarker(map, latitude, longitude, heading)
-        },
-        () => {},
-        { enableHighAccuracy: true, maximumAge: 5000 }
-      )
-    }
-
     // Map click — drop pin and reverse geocode
     map.on('click', (e) => {
       // If a stop pin was just clicked, skip the pin-drop
@@ -335,7 +305,34 @@ const MapView = forwardRef(function MapView(_, ref) {
     }
   }
 
-  // Swap map theme when store.theme changes
+  // React to permission changes from LocateButton (when user grants after initial denial)
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map || geoPermission !== 'granted') return
+
+    // If marker already exists, watchPosition is already running — nothing to do
+    if (gpsMarkerRef.current) return
+
+    // Permission was just granted (likely from LocateButton) — create marker + start tracking
+    const loc = useStore.getState().userLocation
+    if (loc) {
+      createOrUpdateGpsMarker(map, loc.lat, loc.lon, null)
+    }
+
+    if (!watchIdRef.current) {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude, heading } = pos.coords
+          useStore.getState().setUserLocation({ lat: latitude, lon: longitude })
+          createOrUpdateGpsMarker(map, latitude, longitude, heading)
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 5000 }
+      )
+    }
+  }, [geoPermission])
+
+    // Swap map theme when store.theme changes
   useEffect(() => {
     const map = mapInstance.current
     if (!map || currentThemeRef.current === theme) return

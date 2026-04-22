@@ -66,7 +66,7 @@ export default function StopItem({ stop, index, total, indexOffset = 0 }) {
       {/* Remove button */}
       <button
         onClick={() => removeStop(stop.id)}
-        className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5"
+        className="stop-remove-btn p-0.5"
         style={{ color: 'var(--text-tertiary)' }}
         aria-label={`Remove stop ${stop.name}`}
       >
