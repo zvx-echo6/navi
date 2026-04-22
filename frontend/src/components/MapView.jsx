@@ -14,6 +14,10 @@ const HILLSHADE_SOURCE = 'hillshade-dem'
 const HILLSHADE_LAYER = 'hillshade-layer'
 const TRAFFIC_SOURCE = 'traffic-tiles'
 const TRAFFIC_LAYER = 'traffic-layer'
+const PUBLIC_LANDS_SOURCE = 'public-lands-tiles'
+const PUBLIC_LANDS_FILL = 'public-lands-fill'
+const PUBLIC_LANDS_LINE = 'public-lands-line'
+const PUBLIC_LANDS_LABEL = 'public-lands-label'
 
 /** Build a full MapLibre style object for the given theme */
 function buildStyle(themeName) {
@@ -118,6 +122,150 @@ function removeTraffic(map) {
   if (map.getSource(TRAFFIC_SOURCE)) map.removeSource(TRAFFIC_SOURCE)
 }
 
+/** Add public lands vector tile overlay (PAD-US) */
+function addPublicLands(map) {
+  if (!map || map.getSource(PUBLIC_LANDS_SOURCE)) return
+
+  map.addSource(PUBLIC_LANDS_SOURCE, {
+    type: 'vector',
+    url: 'pmtiles:///tiles/public-lands.pmtiles',
+  })
+
+  // Insert below symbol layers for proper z-ordering
+  let beforeId = undefined
+  for (const layer of map.getStyle().layers) {
+    if (layer.type === 'symbol') {
+      beforeId = layer.id
+      break
+    }
+  }
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  const opacityMod = isDark ? 0.7 : 1.0
+
+  // Fill layer — data-driven color by agency + designation
+  map.addLayer({
+    id: PUBLIC_LANDS_FILL,
+    type: 'fill',
+    source: PUBLIC_LANDS_SOURCE,
+    'source-layer': 'public_lands',
+    paint: {
+      'fill-color': [
+        'case',
+        ['==', ['get', 'designation'], 'WA'], '#7c6b2f',
+        ['==', ['get', 'designation'], 'WSA'], '#7c6b2f',
+        ['==', ['get', 'agency'], 'NPS'], '#3d6b1f',
+        ['==', ['get', 'agency'], 'USFS'], '#5a7c2f',
+        ['==', ['get', 'agency'], 'BLM'], '#c4a672',
+        ['==', ['get', 'agency'], 'FWS'], '#4a7a5a',
+        ['any',
+          ['==', ['get', 'manager_type'], 'STAT'],
+          ['==', ['get', 'agency'], 'SPR'],
+          ['==', ['get', 'agency'], 'SDC'],
+          ['==', ['get', 'agency'], 'SLB']
+        ], '#5a8c7c',
+        ['any',
+          ['==', ['get', 'manager_type'], 'LOC'],
+          ['==', ['get', 'manager_type'], 'DIST']
+        ], '#8ca694',
+        '#a0a0a0'
+      ],
+      'fill-opacity': [
+        'case',
+        ['==', ['get', 'designation'], 'WA'], 0.30 * opacityMod,
+        ['==', ['get', 'designation'], 'WSA'], 0.30 * opacityMod,
+        ['==', ['get', 'agency'], 'NPS'], 0.30 * opacityMod,
+        ['==', ['get', 'agency'], 'USFS'], 0.25 * opacityMod,
+        ['==', ['get', 'agency'], 'BLM'], 0.20 * opacityMod,
+        ['any',
+          ['==', ['get', 'manager_type'], 'STAT'],
+          ['==', ['get', 'agency'], 'SPR']
+        ], 0.25 * opacityMod,
+        ['any',
+          ['==', ['get', 'manager_type'], 'LOC'],
+          ['==', ['get', 'manager_type'], 'DIST']
+        ], 0.20 * opacityMod,
+        0.15 * opacityMod
+      ],
+    },
+  }, beforeId)
+
+  // Outline layer
+  map.addLayer({
+    id: PUBLIC_LANDS_LINE,
+    type: 'line',
+    source: PUBLIC_LANDS_SOURCE,
+    'source-layer': 'public_lands',
+    paint: {
+      'line-color': [
+        'case',
+        ['==', ['get', 'designation'], 'WA'], '#5a4d20',
+        ['==', ['get', 'designation'], 'WSA'], '#5a4d20',
+        ['==', ['get', 'agency'], 'NPS'], '#2a4a15',
+        ['==', ['get', 'agency'], 'USFS'], '#3d5520',
+        ['==', ['get', 'agency'], 'BLM'], '#8a7343',
+        ['==', ['get', 'agency'], 'FWS'], '#2d5a3a',
+        ['any',
+          ['==', ['get', 'manager_type'], 'STAT'],
+          ['==', ['get', 'agency'], 'SPR']
+        ], '#3d6055',
+        ['any',
+          ['==', ['get', 'manager_type'], 'LOC'],
+          ['==', ['get', 'manager_type'], 'DIST']
+        ], '#5c6e66',
+        '#707070'
+      ],
+      'line-opacity': [
+        'case',
+        ['==', ['get', 'agency'], 'NPS'], 0.7,
+        ['==', ['get', 'agency'], 'USFS'], 0.6,
+        ['==', ['get', 'agency'], 'BLM'], 0.5,
+        0.5
+      ],
+      'line-width': [
+        'interpolate', ['linear'], ['zoom'],
+        4, 0.3,
+        8, 0.8,
+        12, 1.2
+      ],
+    },
+  }, beforeId)
+
+  // Label layer — unit names at zoom 10+
+  map.addLayer({
+    id: PUBLIC_LANDS_LABEL,
+    type: 'symbol',
+    source: PUBLIC_LANDS_SOURCE,
+    'source-layer': 'public_lands',
+    minzoom: 10,
+    layout: {
+      'text-field': ['get', 'name'],
+      'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 13],
+      'text-font': ['Noto Sans Regular'],
+      'symbol-placement': 'point',
+      'text-anchor': 'center',
+      'text-max-width': 8,
+      'text-allow-overlap': false,
+      'text-ignore-placement': false,
+    },
+    paint: {
+      'text-color': isDark ? '#c0c8b8' : '#3a4a30',
+      'text-halo-color': isDark ? '#1a1a1a' : '#ffffff',
+      'text-halo-width': 1.5,
+      'text-opacity': 0.85,
+    },
+  })
+}
+
+/** Remove public lands layers + source */
+function removePublicLands(map) {
+  if (!map) return
+  if (map.getLayer(PUBLIC_LANDS_LABEL)) map.removeLayer(PUBLIC_LANDS_LABEL)
+  if (map.getLayer(PUBLIC_LANDS_LINE)) map.removeLayer(PUBLIC_LANDS_LINE)
+  if (map.getLayer(PUBLIC_LANDS_FILL)) map.removeLayer(PUBLIC_LANDS_FILL)
+  if (map.getSource(PUBLIC_LANDS_SOURCE)) map.removeSource(PUBLIC_LANDS_SOURCE)
+}
+
 const MapView = forwardRef(function MapView(_, ref) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
@@ -171,6 +319,18 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (!map) return
       removeTraffic(map)
       activeLayersRef.current.traffic = false
+    },
+    addPublicLandsLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      addPublicLands(map)
+      activeLayersRef.current.publicLands = true
+    },
+    removePublicLandsLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      removePublicLands(map)
+      activeLayersRef.current.publicLands = false
     },
   }))
 
@@ -254,6 +414,10 @@ const MapView = forwardRef(function MapView(_, ref) {
           if (prefs.traffic && hasFeature('has_traffic_overlay')) {
             addTraffic(map)
             activeLayersRef.current.traffic = true
+          }
+          if (prefs.publicLands && hasFeature('has_public_lands_layer')) {
+            addPublicLands(map)
+            activeLayersRef.current.publicLands = true
           }
         } else if (hasFeature('has_hillshade')) {
           // Default: hillshade ON if available
@@ -355,6 +519,7 @@ const MapView = forwardRef(function MapView(_, ref) {
       // Re-add active overlay layers
       if (activeLayersRef.current.hillshade) addHillshade(map)
       if (activeLayersRef.current.traffic) addTraffic(map)
+      if (activeLayersRef.current.publicLands) addPublicLands(map)
 
       // Restore view
       map.jumpTo({ center, zoom, bearing, pitch })

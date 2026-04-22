@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Layers } from 'lucide-react'
+import { Layers, Trees } from 'lucide-react'
 import { hasFeature, getConfig } from '../config'
 
 const STORAGE_KEY = 'navi-layer-prefs'
@@ -20,6 +20,7 @@ export default function LayerControl({ mapRef }) {
   const [open, setOpen] = useState(false)
   const [hillshade, setHillshade] = useState(false)
   const [traffic, setTraffic] = useState(false)
+  const [publicLands, setPublicLands] = useState(false)
   const panelRef = useRef(null)
 
   // Initialize from localStorage or defaults on mount
@@ -28,13 +29,17 @@ export default function LayerControl({ mapRef }) {
     const hsAvailable = hasFeature('has_hillshade')
     const trAvailable = hasFeature('has_traffic_overlay')
 
+    const plAvailable = hasFeature('has_public_lands_layer')
+
     if (saved) {
       setHillshade(hsAvailable && (saved.hillshade ?? true))
       setTraffic(trAvailable && (saved.traffic ?? false))
+      setPublicLands(plAvailable && (saved.publicLands ?? false))
     } else {
-      // Defaults: hillshade ON if available, traffic OFF
+      // Defaults: hillshade ON if available, traffic + publicLands OFF
       setHillshade(hsAvailable)
       setTraffic(false)
+      setPublicLands(false)
     }
   }, [])
 
@@ -58,7 +63,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic })
+    savePrefs({ hillshade, traffic, publicLands })
     return () => map.off('style.load', apply)
   }, [hillshade, mapRef])
 
@@ -81,9 +86,32 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic })
+    savePrefs({ hillshade, traffic, publicLands })
     return () => map.off('style.load', apply)
   }, [traffic, mapRef])
+
+  useEffect(() => {
+    const mapView = mapRef?.current
+    if (!mapView) return
+    const map = mapView.getMap?.()
+    if (!map) return
+
+    const apply = () => {
+      if (publicLands && hasFeature('has_public_lands_layer')) {
+        mapView.addPublicLandsLayer?.()
+      } else {
+        mapView.removePublicLandsLayer?.()
+      }
+    }
+
+    if (map.isStyleLoaded()) {
+      apply()
+    } else {
+      map.once('style.load', apply)
+    }
+    savePrefs({ hillshade, traffic, publicLands })
+    return () => map.off('style.load', apply)
+  }, [publicLands, mapRef])
 
   // Close on outside click
   useEffect(() => {
@@ -99,9 +127,10 @@ export default function LayerControl({ mapRef }) {
 
   const showHillshade = hasFeature('has_hillshade')
   const showTraffic = hasFeature('has_traffic_overlay')
+  const showPublicLands = hasFeature('has_public_lands_layer')
 
   // Don't render if no overlay features available
-  if (!showHillshade && !showTraffic) return null
+  if (!showHillshade && !showTraffic && !showPublicLands) return null
 
   return (
     <div ref={panelRef} className="layer-control">
@@ -138,6 +167,18 @@ export default function LayerControl({ mapRef }) {
                 className="layer-control-toggle"
                 checked={traffic}
                 onChange={(e) => setTraffic(e.target.checked)}
+              />
+            </label>
+          )}
+
+          {showPublicLands && (
+            <label className="layer-control-item">
+              <span className="layer-control-label">Public Lands</span>
+              <input
+                type="checkbox"
+                className="layer-control-toggle"
+                checked={publicLands}
+                onChange={(e) => setPublicLands(e.target.checked)}
               />
             </label>
           )}
