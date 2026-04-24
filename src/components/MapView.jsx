@@ -18,6 +18,11 @@ const PUBLIC_LANDS_SOURCE = 'public-lands-tiles'
 const PUBLIC_LANDS_FILL = 'public-lands-fill'
 const PUBLIC_LANDS_LINE = 'public-lands-line'
 const PUBLIC_LANDS_LABEL = 'public-lands-label'
+const CONTOUR_SOURCE = 'contour-tiles'
+const CONTOUR_MINOR = 'contour-minor'
+const CONTOUR_INTERMEDIATE = 'contour-intermediate'
+const CONTOUR_INDEX = 'contour-index'
+const CONTOUR_LABEL = 'contour-label'
 
 /** Build a full MapLibre style object for the given theme */
 function buildStyle(themeName) {
@@ -266,6 +271,109 @@ function removePublicLands(map) {
   if (map.getSource(PUBLIC_LANDS_SOURCE)) map.removeSource(PUBLIC_LANDS_SOURCE)
 }
 
+/** Add topographic contour vector tile overlay */
+function addContours(map) {
+  if (!map || map.getSource(CONTOUR_SOURCE)) return
+
+  map.addSource(CONTOUR_SOURCE, {
+    type: 'vector',
+    url: 'pmtiles:///tiles/contours-na.pmtiles',
+  })
+
+  // Insert below first symbol layer (above hillshade, below labels)
+  let beforeId = undefined
+  for (const layer of map.getStyle().layers) {
+    if (layer.type === 'symbol') {
+      beforeId = layer.id
+      break
+    }
+  }
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  const opMod = isDark ? 0.8 : 1.0
+
+  // Minor contours (40ft) — visible z11+
+  map.addLayer({
+    id: CONTOUR_MINOR,
+    type: 'line',
+    source: CONTOUR_SOURCE,
+    'source-layer': 'contours',
+    minzoom: 11,
+    filter: ['==', ['get', 'tier'], 'minor'],
+    paint: {
+      'line-color': '#8b6f47',
+      'line-opacity': 0.4 * opMod,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.5, 14, 1.0],
+    },
+  }, beforeId)
+
+  // Intermediate contours (200ft) — visible z8+
+  map.addLayer({
+    id: CONTOUR_INTERMEDIATE,
+    type: 'line',
+    source: CONTOUR_SOURCE,
+    'source-layer': 'contours',
+    minzoom: 8,
+    filter: ['==', ['get', 'tier'], 'intermediate'],
+    paint: {
+      'line-color': '#8b6f47',
+      'line-opacity': 0.7 * opMod,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 14, 1.2],
+    },
+  }, beforeId)
+
+  // Index contours (1000ft) — visible z4+
+  map.addLayer({
+    id: CONTOUR_INDEX,
+    type: 'line',
+    source: CONTOUR_SOURCE,
+    'source-layer': 'contours',
+    minzoom: 4,
+    filter: ['==', ['get', 'tier'], 'index'],
+    paint: {
+      'line-color': '#6b4f2a',
+      'line-opacity': 0.9 * opMod,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.2, 14, 1.8],
+    },
+  }, beforeId)
+
+  // Elevation labels on index contours (z12+)
+  map.addLayer({
+    id: CONTOUR_LABEL,
+    type: 'symbol',
+    source: CONTOUR_SOURCE,
+    'source-layer': 'contours',
+    minzoom: 12,
+    filter: ['==', ['get', 'tier'], 'index'],
+    layout: {
+      'text-field': ['concat', ['to-string', ['get', 'elevation_ft']], "'"],
+      'text-size': 10,
+      'text-font': ['Noto Sans Regular'],
+      'symbol-placement': 'line',
+      'text-anchor': 'center',
+      'symbol-spacing': 400,
+      'text-max-angle': 30,
+      'text-allow-overlap': false,
+    },
+    paint: {
+      'text-color': isDark ? '#c0b898' : '#5a4020',
+      'text-halo-color': isDark ? '#1a1a1a' : '#ffffff',
+      'text-halo-width': 1.5,
+      'text-opacity': 0.85,
+    },
+  })
+}
+
+/** Remove contour layers + source */
+function removeContours(map) {
+  if (!map) return
+  if (map.getLayer(CONTOUR_LABEL)) map.removeLayer(CONTOUR_LABEL)
+  if (map.getLayer(CONTOUR_INDEX)) map.removeLayer(CONTOUR_INDEX)
+  if (map.getLayer(CONTOUR_INTERMEDIATE)) map.removeLayer(CONTOUR_INTERMEDIATE)
+  if (map.getLayer(CONTOUR_MINOR)) map.removeLayer(CONTOUR_MINOR)
+  if (map.getSource(CONTOUR_SOURCE)) map.removeSource(CONTOUR_SOURCE)
+}
+
 const MapView = forwardRef(function MapView(_, ref) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
@@ -276,7 +384,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const watchIdRef = useRef(null)
   const currentThemeRef = useRef('dark')
   // Track which overlay layers are currently active (for theme swap re-add)
-  const activeLayersRef = useRef({ hillshade: false, traffic: false })
+  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false })
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
 
@@ -331,6 +439,18 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (!map) return
       removePublicLands(map)
       activeLayersRef.current.publicLands = false
+    },
+    addContoursLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      addContours(map)
+      activeLayersRef.current.contours = true
+    },
+    removeContoursLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      removeContours(map)
+      activeLayersRef.current.contours = false
     },
   }))
 
@@ -418,6 +538,10 @@ const MapView = forwardRef(function MapView(_, ref) {
           if (prefs.publicLands && hasFeature('has_public_lands_layer')) {
             addPublicLands(map)
             activeLayersRef.current.publicLands = true
+          }
+          if (prefs.contours && hasFeature('has_contours')) {
+            addContours(map)
+            activeLayersRef.current.contours = true
           }
         } else if (hasFeature('has_hillshade')) {
           // Default: hillshade ON if available
@@ -520,6 +644,7 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (activeLayersRef.current.hillshade) addHillshade(map)
       if (activeLayersRef.current.traffic) addTraffic(map)
       if (activeLayersRef.current.publicLands) addPublicLands(map)
+      if (activeLayersRef.current.contours) addContours(map)
 
       // Restore view
       map.jumpTo({ center, zoom, bearing, pitch })

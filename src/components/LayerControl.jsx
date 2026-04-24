@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Layers, Trees } from 'lucide-react'
+import { Layers, Trees, Mountain } from 'lucide-react'
 import { hasFeature, getConfig } from '../config'
 
 const STORAGE_KEY = 'navi-layer-prefs'
@@ -21,6 +21,7 @@ export default function LayerControl({ mapRef }) {
   const [hillshade, setHillshade] = useState(false)
   const [traffic, setTraffic] = useState(false)
   const [publicLands, setPublicLands] = useState(false)
+  const [contours, setContours] = useState(false)
   const panelRef = useRef(null)
 
   // Initialize from localStorage or defaults on mount
@@ -30,16 +31,19 @@ export default function LayerControl({ mapRef }) {
     const trAvailable = hasFeature('has_traffic_overlay')
 
     const plAvailable = hasFeature('has_public_lands_layer')
+    const ctAvailable = hasFeature('has_contours')
 
     if (saved) {
       setHillshade(hsAvailable && (saved.hillshade ?? true))
       setTraffic(trAvailable && (saved.traffic ?? false))
       setPublicLands(plAvailable && (saved.publicLands ?? false))
+      setContours(ctAvailable && (saved.contours ?? false))
     } else {
-      // Defaults: hillshade ON if available, traffic + publicLands OFF
+      // Defaults: hillshade ON if available, others OFF
       setHillshade(hsAvailable)
       setTraffic(false)
       setPublicLands(false)
+      setContours(false)
     }
   }, [])
 
@@ -63,7 +67,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands })
+    savePrefs({ hillshade, traffic, publicLands, contours })
     return () => map.off('style.load', apply)
   }, [hillshade, mapRef])
 
@@ -86,7 +90,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands })
+    savePrefs({ hillshade, traffic, publicLands, contours })
     return () => map.off('style.load', apply)
   }, [traffic, mapRef])
 
@@ -109,9 +113,32 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands })
+    savePrefs({ hillshade, traffic, publicLands, contours })
     return () => map.off('style.load', apply)
   }, [publicLands, mapRef])
+
+  useEffect(() => {
+    const mapView = mapRef?.current
+    if (!mapView) return
+    const map = mapView.getMap?.()
+    if (!map) return
+
+    const apply = () => {
+      if (contours && hasFeature('has_contours')) {
+        mapView.addContoursLayer?.()
+      } else {
+        mapView.removeContoursLayer?.()
+      }
+    }
+
+    if (map.isStyleLoaded()) {
+      apply()
+    } else {
+      map.once('style.load', apply)
+    }
+    savePrefs({ hillshade, traffic, publicLands, contours })
+    return () => map.off('style.load', apply)
+  }, [contours, mapRef])
 
   // Close on outside click
   useEffect(() => {
@@ -128,9 +155,10 @@ export default function LayerControl({ mapRef }) {
   const showHillshade = hasFeature('has_hillshade')
   const showTraffic = hasFeature('has_traffic_overlay')
   const showPublicLands = hasFeature('has_public_lands_layer')
+  const showContours = hasFeature('has_contours')
 
   // Don't render if no overlay features available
-  if (!showHillshade && !showTraffic && !showPublicLands) return null
+  if (!showHillshade && !showTraffic && !showPublicLands && !showContours) return null
 
   return (
     <div ref={panelRef} className="layer-control">
@@ -179,6 +207,18 @@ export default function LayerControl({ mapRef }) {
                 className="layer-control-toggle"
                 checked={publicLands}
                 onChange={(e) => setPublicLands(e.target.checked)}
+              />
+            </label>
+          )}
+
+          {showContours && (
+            <label className="layer-control-item">
+              <span className="layer-control-label">Contours</span>
+              <input
+                type="checkbox"
+                className="layer-control-toggle"
+                checked={contours}
+                onChange={(e) => setContours(e.target.checked)}
               />
             </label>
           )}
