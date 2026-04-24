@@ -29,6 +29,7 @@ const FALLBACK_CONFIG = {
     has_traffic_overlay: false,
     has_landclass: false,
     has_public_lands_layer: false,
+    has_contours: true,
     has_address_book_write: false,
     has_contacts: false,
   },
