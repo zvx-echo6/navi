@@ -52,6 +52,7 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
   const setSelectedPlace = useStore((s) => s.setSelectedPlace)
   const setEditingContact = useStore((s) => s.setEditingContact)
   const clearPendingDestination = useStore((s) => s.clearPendingDestination)
+  const mapCenter = useStore((s) => s.mapCenter)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -98,7 +99,7 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
       setSearchLoading(true)
 
       try {
-        const data = await searchGeocode(q.trim(), 6, ctrl.signal)
+        const data = await searchGeocode(q.trim(), 6, ctrl.signal, mapCenter)
         const combined = [...contactResults, ...(data.results || [])]
         setResults(combined)
         setAutocompleteOpen(combined.length > 0)

@@ -40,6 +40,10 @@ export const useStore = create((set, get) => ({
   setUserLocation: (loc) => set({ userLocation: loc }),
   setGeoPermission: (p) => set({ geoPermission: p }),
 
+  // ── Map viewport (for search bias) ──
+  mapCenter: null, // { lat, lon, zoom }
+  setMapCenter: (center) => set({ mapCenter: center }),
+
   // ── Mode ──
   mode: 'auto', // 'auto' | 'pedestrian' | 'bicycle'
   setMode: (mode) => set({ mode }),
