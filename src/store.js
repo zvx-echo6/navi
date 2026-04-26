@@ -85,9 +85,7 @@ export const useStore = create((set, get) => ({
       addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
       set({ selectedPlace: null })
     } else {
-      // GPS denied, no stops: add destination, show empty origin slot
-      clearStops()
-      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
+      // GPS denied, no stops: set pendingDestination only; origin-picker will add both
       set({ pendingDestination: place, selectedPlace: null })
     }
   },
