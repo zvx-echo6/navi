@@ -305,15 +305,22 @@ export default function RadialMenu({
             fill: var(--text-tertiary);
           }
 
-          /* Auth-required hover — background still reacts, content stays muted */
+          /* Auth-required wedges — suppress hover highlight (still clickable) */
+          .radial-wedge.auth-required:hover .wedge-path,
+          .radial-wedge.auth-required.active .wedge-path {
+            fill: var(--bg-overlay);
+            fill-opacity: 0.92;
+          }
+
+          /* Auth-required hover — content stays muted */
           .radial-wedge.auth-required:hover .wedge-icon,
           .radial-wedge.auth-required.active .wedge-icon {
-            color: var(--text-secondary);
+            color: var(--text-tertiary);
           }
 
           .radial-wedge.auth-required:hover .wedge-label,
           .radial-wedge.auth-required.active .wedge-label {
-            fill: var(--text-secondary);
+            fill: var(--text-tertiary);
           }
 
           /* Center disc — raised surface */
