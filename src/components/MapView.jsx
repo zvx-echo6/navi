@@ -964,6 +964,13 @@ const MapView = forwardRef(function MapView(_, ref) {
         }
       }
     })
+    // Initialize mapCenter immediately when map loads (Fix 1: search viewport)
+    map.once('load', () => {
+      const center = map.getCenter()
+      const zoom = map.getZoom()
+      setMapCenter({ lat: center.lat, lon: center.lng, zoom })
+    })
+
     map.on('load', () => {
       map.addSource(ROUTE_SOURCE, {
         type: 'geojson',
