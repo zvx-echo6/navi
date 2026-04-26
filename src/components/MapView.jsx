@@ -28,6 +28,11 @@ const CONTOUR_TEST_MINOR = 'contour-test-minor'
 const CONTOUR_TEST_INTERMEDIATE = 'contour-test-intermediate'
 const CONTOUR_TEST_INDEX = 'contour-test-index'
 const CONTOUR_TEST_LABEL = 'contour-test-label'
+const CONTOUR_TEST_10FT_SOURCE = 'contour-test-10ft-tiles'
+const CONTOUR_TEST_10FT_MINOR = 'contour-test-10ft-minor'
+const CONTOUR_TEST_10FT_INTERMEDIATE = 'contour-test-10ft-intermediate'
+const CONTOUR_TEST_10FT_INDEX = 'contour-test-10ft-index'
+const CONTOUR_TEST_10FT_LABEL = 'contour-test-10ft-label'
 
 /** Build a full MapLibre style object for the given theme */
 function buildStyle(themeName) {
@@ -481,6 +486,108 @@ function removeContoursTest(map) {
   if (map.getSource(CONTOUR_TEST_SOURCE)) map.removeSource(CONTOUR_TEST_SOURCE)
 }
 
+/** Add TEST 10ft topographic contour overlay (green color scheme) */
+function addContoursTest10ft(map) {
+  if (!map || map.getSource(CONTOUR_TEST_10FT_SOURCE)) return
+
+  map.addSource(CONTOUR_TEST_10FT_SOURCE, {
+    type: "vector",
+    url: "pmtiles:///tiles/contours-test-10ft.pmtiles",
+  })
+
+  let beforeId = undefined
+  for (const layer of map.getStyle().layers) {
+    if (layer.type === "symbol") {
+      beforeId = layer.id
+      break
+    }
+  }
+
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark"
+  const opMod = isDark ? 0.8 : 1.0
+
+  // Minor contours (10ft) — green scheme
+  map.addLayer({
+    id: CONTOUR_TEST_10FT_MINOR,
+    type: "line",
+    source: CONTOUR_TEST_10FT_SOURCE,
+    "source-layer": "contours",
+    minzoom: 11,
+    filter: ["==", ["get", "tier"], "minor"],
+    paint: {
+      "line-color": "#3a7c4f",
+      "line-opacity": 0.4 * opMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.5, 14, 1.0],
+    },
+  }, beforeId)
+
+  // Intermediate contours (50ft) — green scheme
+  map.addLayer({
+    id: CONTOUR_TEST_10FT_INTERMEDIATE,
+    type: "line",
+    source: CONTOUR_TEST_10FT_SOURCE,
+    "source-layer": "contours",
+    minzoom: 8,
+    filter: ["==", ["get", "tier"], "intermediate"],
+    paint: {
+      "line-color": "#3a7c4f",
+      "line-opacity": 0.7 * opMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.8, 14, 1.2],
+    },
+  }, beforeId)
+
+  // Index contours (250ft) — darker green
+  map.addLayer({
+    id: CONTOUR_TEST_10FT_INDEX,
+    type: "line",
+    source: CONTOUR_TEST_10FT_SOURCE,
+    "source-layer": "contours",
+    minzoom: 4,
+    filter: ["==", ["get", "tier"], "index"],
+    paint: {
+      "line-color": "#2a5c3a",
+      "line-opacity": 0.9 * opMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.2, 14, 1.8],
+    },
+  }, beforeId)
+
+  // Elevation labels on index contours (z12+)
+  map.addLayer({
+    id: CONTOUR_TEST_10FT_LABEL,
+    type: "symbol",
+    source: CONTOUR_TEST_10FT_SOURCE,
+    "source-layer": "contours",
+    minzoom: 12,
+    filter: ["==", ["get", "tier"], "index"],
+    layout: {
+      "text-field": ["concat", ["to-string", ["get", "elevation_ft"]], "'"],
+      "text-size": 10,
+      "text-font": ["Noto Sans Regular"],
+      "symbol-placement": "line",
+      "text-anchor": "center",
+      "symbol-spacing": 400,
+      "text-max-angle": 30,
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": isDark ? "#98c0a8" : "#2a4030",
+      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
+      "text-halo-width": 1.5,
+      "text-opacity": 0.85,
+    },
+  })
+}
+
+/** Remove test 10ft contour layers + source */
+function removeContoursTest10ft(map) {
+  if (!map) return
+  if (map.getLayer(CONTOUR_TEST_10FT_LABEL)) map.removeLayer(CONTOUR_TEST_10FT_LABEL)
+  if (map.getLayer(CONTOUR_TEST_10FT_INDEX)) map.removeLayer(CONTOUR_TEST_10FT_INDEX)
+  if (map.getLayer(CONTOUR_TEST_10FT_INTERMEDIATE)) map.removeLayer(CONTOUR_TEST_10FT_INTERMEDIATE)
+  if (map.getLayer(CONTOUR_TEST_10FT_MINOR)) map.removeLayer(CONTOUR_TEST_10FT_MINOR)
+  if (map.getSource(CONTOUR_TEST_10FT_SOURCE)) map.removeSource(CONTOUR_TEST_10FT_SOURCE)
+}
+
 const MapView = forwardRef(function MapView(_, ref) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
@@ -491,7 +598,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const watchIdRef = useRef(null)
   const currentThemeRef = useRef('dark')
   // Track which overlay layers are currently active (for theme swap re-add)
-  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, contoursTest: false })
+  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, contoursTest: false, contoursTest10ft: false })
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
 
@@ -502,6 +609,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const gpsOrigin = useStore((s) => s.gpsOrigin)
   const geoPermission = useStore((s) => s.geoPermission)
   const setSheetState = useStore((s) => s.setSheetState)
+  const setMapCenter = useStore((s) => s.setMapCenter)
 
   // Zoom level indicator state
   const [zoomLevel, setZoomLevel] = useState(10)
@@ -573,6 +681,18 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (!map) return
       removeContoursTest(map)
       activeLayersRef.current.contoursTest = false
+    },
+    addContoursTest10ftLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      addContoursTest10ft(map)
+      activeLayersRef.current.contoursTest10ft = true
+    },
+    removeContoursTest10ftLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      removeContoursTest10ft(map)
+      activeLayersRef.current.contoursTest10ft = false
     },
   }))
 
@@ -991,6 +1111,33 @@ const MapView = forwardRef(function MapView(_, ref) {
       map.off("zoom", updateZoom)
     }
   }, [])
+
+
+  // Track map center for search viewport bias
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map) return
+
+    const updateCenter = () => {
+      const center = map.getCenter()
+      const zoom = map.getZoom()
+      setMapCenter({ lat: center.lat, lon: center.lng, zoom })
+    }
+
+    // Set initial center
+    if (map.loaded()) {
+      updateCenter()
+    } else {
+      map.once("load", updateCenter)
+    }
+
+    // Update on move end (not every frame)
+    map.on("moveend", updateCenter)
+
+    return () => {
+      map.off("moveend", updateCenter)
+    }
+  }, [setMapCenter])
 
   return (
     <div className="relative w-full h-full">

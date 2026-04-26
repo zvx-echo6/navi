@@ -10,8 +10,11 @@ const VALHALLA_HEIGHT_URL = '/valhalla/height'
  * @param {AbortSignal} signal
  * @returns {Promise<{query, results, count}>}
  */
-export async function searchGeocode(query, limit = 6, signal) {
+export async function searchGeocode(query, limit = 6, signal, viewport = null) {
   const params = new URLSearchParams({ q: query, limit: String(limit) })
+  if (viewport?.lat != null) params.set('lat', String(viewport.lat))
+  if (viewport?.lon != null) params.set('lon', String(viewport.lon))
+  if (viewport?.zoom != null) params.set('zoom', String(Math.round(viewport.zoom)))
   const resp = await fetch(`${GEOCODE_URL}?${params}`, { signal, timeout: 5000 })
   if (!resp.ok) throw new Error(`Geocode error: ${resp.status}`)
   return resp.json()
