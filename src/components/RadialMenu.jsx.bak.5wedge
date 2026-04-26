@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { Lock } from 'lucide-react'
 
 /**
  * RadialMenu - ATAK-style radial context menu
@@ -174,9 +175,8 @@ export default function RadialMenu({
           {wedges.map((wedge, i) => {
             const iconPos = getIconPosition(i)
             const Icon = wedge.icon
-            const wedgeClasses = `radial-wedge${wedge.requiresAuth ? ' auth-required' : ''}`
             return (
-              <g key={wedge.id} className={wedgeClasses} data-wedge-id={wedge.id}>
+              <g key={wedge.id} className="radial-wedge" data-wedge-id={wedge.id}>
                 <path
                   d={generateWedgePath(i)}
                   className="wedge-path"
@@ -193,6 +193,21 @@ export default function RadialMenu({
                       <Icon
                         size={18}
                         className="wedge-icon"
+                        strokeWidth={1.5}
+                      />
+                    </foreignObject>
+                  )}
+                  {wedge.requiresAuth && (
+                    <foreignObject
+                      x={4}
+                      y={-14}
+                      width={10}
+                      height={10}
+                      style={{ overflow: 'visible' }}
+                    >
+                      <Lock
+                        size={10}
+                        className="wedge-lock"
                         strokeWidth={1.5}
                       />
                     </foreignObject>
@@ -281,6 +296,11 @@ export default function RadialMenu({
             color: var(--text-primary);
           }
 
+          /* Lock icon — tertiary/muted */
+          .wedge-lock {
+            color: var(--text-tertiary);
+          }
+
           /* Wedge labels — secondary text */
           .wedge-label {
             font-family: var(--font-sans);
@@ -294,26 +314,6 @@ export default function RadialMenu({
           .radial-wedge:hover .wedge-label,
           .radial-wedge.active .wedge-label {
             fill: var(--text-primary);
-          }
-
-          /* Auth-required wedges — grayed out */
-          .radial-wedge.auth-required .wedge-icon {
-            color: var(--text-tertiary);
-          }
-
-          .radial-wedge.auth-required .wedge-label {
-            fill: var(--text-tertiary);
-          }
-
-          /* Auth-required hover — background still reacts, content stays muted */
-          .radial-wedge.auth-required:hover .wedge-icon,
-          .radial-wedge.auth-required.active .wedge-icon {
-            color: var(--text-secondary);
-          }
-
-          .radial-wedge.auth-required:hover .wedge-label,
-          .radial-wedge.auth-required.active .wedge-label {
-            fill: var(--text-secondary);
           }
 
           /* Center disc — raised surface */
