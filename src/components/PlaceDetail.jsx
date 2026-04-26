@@ -339,10 +339,10 @@ function EnrichmentSections({ details }) {
                 href={`https://www.wikidata.org/wiki/${et.wikidata}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 text-xs font-mono"
-                style={{ color: 'var(--text-tertiary)' }}
+                className="text-[11px]"
+                style={{ color: 'var(--text-tertiary)', textDecoration: 'underline' }}
               >
-                Wikidata: {et.wikidata}
+                View on Wikidata
               </a>
             )}
           </div>
@@ -474,6 +474,13 @@ export default function PlaceDetail() {
     fetchPlaceDetails(osmType, osmId, controller.signal).then((data) => {
       if (!controller.signal.aborted) {
         setPlaceDetails(data || null)
+        // Update selectedPlace with boundary if present
+        if (data?.boundary) {
+          const current = useStore.getState().selectedPlace
+          if (current) {
+            useStore.getState().setSelectedPlace({ ...current, boundary: data.boundary })
+          }
+        }
       }
     })
 
@@ -503,6 +510,13 @@ export default function PlaceDetail() {
             ...data.extratags,
           },
         }))
+        // Update selectedPlace with boundary if present
+        if (data?.boundary) {
+          const current = useStore.getState().selectedPlace
+          if (current) {
+            useStore.getState().setSelectedPlace({ ...current, boundary: data.boundary })
+          }
+        }
       }
     })
 
