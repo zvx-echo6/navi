@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   DndContext,
   closestCenter,
@@ -11,10 +12,54 @@ import {
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
+  useSortable,
 } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useStore } from '../store'
-import StopItem from './StopItem'
+import { PlaceCard } from './PlaceCard'
 import GpsOriginItem from './GpsOriginItem'
+
+// Wrapper to make PlaceCard sortable
+function SortableStopCard({ stop, index, indexOffset }) {
+  const removeStop = useStore((s) => s.removeStop)
+  const [expanded, setExpanded] = useState(false)
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: stop.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  // Convert stop to place format for PlaceCard
+  const place = {
+    lat: stop.lat,
+    lon: stop.lon,
+    name: stop.name,
+    source: stop.source,
+    matchCode: stop.matchCode,
+    type: stop.type || null,
+    raw: stop.raw || null,
+    wikidata: stop.wikidata || null,
+  }
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <PlaceCard
+        place={place}
+        variant="stop"
+        expanded={expanded}
+        onToggleExpand={() => setExpanded(!expanded)}
+        onRemove={() => removeStop(stop.id)}
+        stopIndex={index + indexOffset}
+        draggable={true}
+        dragHandleProps={{ ...attributes, ...listeners }}
+      />
+    </div>
+  )
+}
 
 export default function StopList() {
   const stops = useStore((s) => s.stops)
@@ -53,16 +98,15 @@ export default function StopList() {
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-2">
       {hasGpsOrigin && <GpsOriginItem />}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={stops.map((s) => s.id)} strategy={verticalListSortingStrategy}>
           {stops.map((stop, i) => (
-            <StopItem
+            <SortableStopCard
               key={stop.id}
               stop={stop}
               index={i}
-              total={stops.length}
               indexOffset={indexOffset}
             />
           ))}

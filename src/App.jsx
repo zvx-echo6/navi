@@ -5,7 +5,7 @@ import { requestRoute } from './api'
 import { decodePolyline } from './utils/decode'
 import MapView from './components/MapView'
 import Panel from './components/Panel'
-import PlaceDetail from './components/PlaceDetail'
+
 import ContactModal from './components/ContactModal'
 import LayerControl from './components/LayerControl'
 import LocateButton from './components/LocateButton'
@@ -88,7 +88,7 @@ export default function App() {
     <div className="relative w-screen h-screen overflow-hidden" style={{ background: 'var(--bg-base)' }}>
       <MapView ref={mapViewRef} />
       <Panel onManeuverClick={handleManeuverClick} />
-      <PlaceDetail />
+      
       <ContactModal />
       <LayerControl mapRef={mapViewRef} />
       <LocateButton mapRef={mapViewRef} />
