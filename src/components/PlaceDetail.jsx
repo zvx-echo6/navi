@@ -6,7 +6,7 @@ import {
 import OpeningHours from 'opening_hours'
 import toast from 'react-hot-toast'
 import { useStore } from '../store'
-import { fetchElevation, fetchPlaceDetails, fetchDriveTime, fetchNearbyContacts, fetchLandclass } from '../api'
+import { fetchElevation, fetchPlaceDetails, fetchPlaceByWikidata, fetchDriveTime, fetchNearbyContacts, fetchLandclass } from '../api'
 import { hasFeature } from '../config'
 import { buildAddress } from '../utils/place'
 
@@ -479,6 +479,35 @@ export default function PlaceDetail() {
 
     return () => controller.abort()
   }, [osmType, osmId])
+
+  // Fetch wikidata enrichment when place has wikidata but no OSM details
+  const wikidataId = selectedPlace?.wikidata || selectedPlace?.raw?.wikidata
+  useEffect(() => {
+    // Skip if OSM details are available (they provide richer data)
+    if (osmType && osmId) return
+    // Skip if no wikidata ID
+    if (!wikidataId) return
+
+    const controller = new AbortController()
+
+    fetchPlaceByWikidata(wikidataId, controller.signal).then((data) => {
+      if (!controller.signal.aborted && data) {
+        // Merge wikidata info into placeDetails (description, population, etc.)
+        setPlaceDetails((prev) => ({
+          ...(prev === 'loading' ? {} : prev || {}),
+          description: data.description,
+          population: data.population,
+          osm_relation_id: data.osm_relation_id,
+          extratags: {
+            ...(prev && prev !== 'loading' ? prev.extratags : {}),
+            ...data.extratags,
+          },
+        }))
+      }
+    })
+
+    return () => controller.abort()
+  }, [wikidataId, osmType, osmId])
 
   // Fetch drive time when place or user location changes
   useEffect(() => {

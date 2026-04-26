@@ -194,6 +194,19 @@ export async function fetchPlaceDetails(osmType, osmId, signal) {
   }
 }
 
+export async function fetchPlaceByWikidata(wikidataId, signal) {
+  try {
+    const resp = await fetch(`/api/place/wikidata/${wikidataId}`, {
+      signal,
+      headers: { "Accept": "application/json" },
+    })
+    if (!resp.ok) return null
+    return resp.json()
+  } catch {
+    return null
+  }
+}
+
 // ── Contacts API ──
 
 export async function fetchContacts(signal) {

@@ -605,6 +605,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, contoursTest: false, contoursTest10ft: false })
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
+  const highlightedFeatureRef = useRef(null) // { source, sourceLayer, id } for setFeatureState
 
   const stops = useStore((s) => s.stops)
   const route = useStore((s) => s.route)
@@ -870,24 +871,54 @@ const MapView = forwardRef(function MapView(_, ref) {
         // Find first feature with a name (respects layer order = priority)
         const labelFeature = features.find(f => f.properties?.name)
 
-        // Set click marker
-        store.setClickMarker({
-          lat,
-          lon: lng,
-          circleRadiusPx: MARKER_RADIUS_PX,
-        })
+        // Clear previous feature highlight
+          if (highlightedFeatureRef.current) {
+            const { source, sourceLayer, id } = highlightedFeatureRef.current
+            try {
+              map.setFeatureState({ source, sourceLayer, id }, { selected: false })
+            } catch (e) { /* ignore if layer removed */ }
+            highlightedFeatureRef.current = null
+          }
 
-        if (labelFeature) {
-          // Clicked a labeled feature — use its properties
+          if (labelFeature) {
+          // Clicked a labeled feature — snap to geometry and highlight
           const props = labelFeature.properties
+          const geom = labelFeature.geometry
+
+          // Get feature coordinates (Point geometry)
+          let featureLat = lat
+          let featureLon = lng
+          if (geom && geom.type === 'Point' && geom.coordinates) {
+            featureLon = geom.coordinates[0]
+            featureLat = geom.coordinates[1]
+          }
+
+          // Apply feature state highlight
+          const featureId = labelFeature.id ?? props.mvt_id
+          const sourceLayer = labelFeature.sourceLayer
+          const source = labelFeature.source
+          if (featureId != null && source) {
+            try {
+              map.setFeatureState({ source, sourceLayer, id: featureId }, { selected: true })
+              highlightedFeatureRef.current = { source, sourceLayer, id: featureId }
+            } catch (e) { console.warn('setFeatureState error:', e) }
+          }
+
+          // For feature clicks, don't show pin marker
+          store.clearClickMarker()
+
           store.setSelectedPlace({
-            lat,
-            lon: lng,
+            lat: featureLat,
+            lon: featureLon,
             name: props.name || 'Unknown',
             address: null,
             type: props.kind_detail || props.kind || null,
             source: 'basemap_label',
             matchCode: null,
+            mode: 'feature',
+            featureId: featureId,
+            featureLayer: labelFeature.layer?.id || null,
+            wikidata: props.wikidata || null,
             raw: {
               wikidata: props.wikidata || null,
               population: props.population || null,
@@ -897,7 +928,13 @@ const MapView = forwardRef(function MapView(_, ref) {
             },
           })
         } else {
-          // No labeled feature — fall back to reverse geocode
+          // No labeled feature — show reticle at click point
+          store.setClickMarker({
+            lat,
+            lon: lng,
+            circleRadiusPx: MARKER_RADIUS_PX,
+          })
+
           store.setSelectedPlace({
             lat,
             lon: lng,
@@ -906,6 +943,7 @@ const MapView = forwardRef(function MapView(_, ref) {
             type: null,
             source: 'map_click',
             matchCode: null,
+            mode: 'reticle',
             raw: {},
           })
 
@@ -1089,17 +1127,26 @@ const MapView = forwardRef(function MapView(_, ref) {
     if (!selectedPlace) return
 
     // Only fly to place if it came from search (not map-click which already centered)
-    if (selectedPlace.source !== 'map_click') {
+    if (selectedPlace.source !== 'map_click' && selectedPlace.source !== 'basemap_label') {
       map.flyTo({ center: [selectedPlace.lon, selectedPlace.lat], zoom: 14, duration: 800 })
     }
 
-    // Create preview marker
+    // Different visual feedback based on mode
+    const isFeatureMode = selectedPlace.mode === 'feature'
+
+    // Create marker element
     const el = document.createElement('div')
-    el.className = 'navi-pin-preview'
-    // Add precise center dot
-    const dot = document.createElement('div')
-    dot.className = 'navi-pin-center-dot'
-    el.appendChild(dot)
+    if (isFeatureMode) {
+      // Feature mode: subtle ring indicator
+      el.className = 'navi-feature-highlight'
+    } else {
+      // Reticle mode: pin with center dot
+      el.className = 'navi-pin-preview'
+      const dot = document.createElement('div')
+      dot.className = 'navi-pin-center-dot'
+      el.appendChild(dot)
+    }
+
     previewMarkerRef.current = new maplibregl.Marker({ element: el })
       .setLngLat([selectedPlace.lon, selectedPlace.lat])
       .addTo(map)
