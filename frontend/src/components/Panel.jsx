@@ -32,7 +32,7 @@ export default function Panel({ onManeuverClick }) {
   const activeTab = useStore((s) => s.activeTab)
   const setActiveTab = useStore((s) => s.setActiveTab)
 
-  const panelState = usePanelState()
+  const { hasPreview, routeState } = usePanelState()
 
   const [isMobile, setIsMobile] = useState(false)
   const [optimizing, setOptimizing] = useState(false)
@@ -126,11 +126,11 @@ export default function Panel({ onManeuverClick }) {
 
   const showOptimize = effectiveCount >= 3
 
-  // Determine what to show based on panel state
-  const showPreviewCard = panelState === 'PREVIEW' || panelState === 'PREVIEW_ROUTING'
-  const showRouteSection = panelState === 'ROUTING' || panelState === 'PREVIEW_ROUTING' || panelState === 'ROUTE_CALCULATED'
-  const showManeuvers = panelState === 'ROUTE_CALCULATED'
-  const showEmptyState = panelState === 'IDLE'
+  // Determine what to show based on panel state (preview and route are now orthogonal)
+  const showPreviewCard = hasPreview
+  const showRouteSection = routeState === 'ROUTING' || routeState === 'CALCULATED'
+  const showManeuvers = routeState === 'CALCULATED'
+  const showEmptyState = !hasPreview && routeState === 'NONE'
 
   // Routes tab content - now state-driven
   const routesContent = (

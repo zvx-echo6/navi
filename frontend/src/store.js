@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { shallow } from 'zustand/shallow'
 
 export const useStore = create((set, get) => ({
   // ── Search state ──
@@ -108,9 +109,6 @@ export const useStore = create((set, get) => ({
     if (override) {
       localStorage.setItem('navi-theme-override', override)
     } else {
-      // GPS denied, no stops: add destination, show empty origin slot
-      clearStops()
-      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
       localStorage.removeItem('navi-theme-override')
     }
   },
@@ -124,16 +122,14 @@ export const useStore = create((set, get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   setEditingContact: (c) => set({ editingContact: c }),
   clearEditingContact: () => set({ editingContact: null }),
-}))
+}), shallow)
 
 // ── Panel state selector ──
-// IDLE | PREVIEW | ROUTING | PREVIEW_ROUTING | ROUTE_CALCULATED
+// Returns { hasPreview: boolean, routeState: 'NONE' | 'ROUTING' | 'CALCULATED' }
+// Preview and route states are now orthogonal - preview can show alongside any route state
 export const usePanelState = () => {
-  return useStore((s) => {
-    if (s.route) return "ROUTE_CALCULATED"
-    if (s.selectedPlace && s.stops.length >= 1) return "PREVIEW_ROUTING"
-    if (s.selectedPlace) return "PREVIEW"
-    if (s.stops.length >= 1) return "ROUTING"
-    return "IDLE"
-  })
+  return useStore((s) => ({
+    hasPreview: !!s.selectedPlace,
+    routeState: s.route ? "CALCULATED" : (s.stops.length >= 1 ? "ROUTING" : "NONE")
+  }), shallow)
 }
