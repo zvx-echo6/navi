@@ -7,6 +7,10 @@ import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse } from '../api'
 import { getConfig, hasFeature } from '../config'
+import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star, Info } from 'lucide-react'
+import RadialMenu from './RadialMenu'
+import useContextMenu from '../hooks/useContextMenu'
+import toast from 'react-hot-toast'
 
 const ROUTE_SOURCE = 'route-source'
 const ROUTE_LAYER_PREFIX = 'route-layer-'
@@ -614,8 +618,114 @@ const MapView = forwardRef(function MapView(_, ref) {
   // Zoom level indicator state
   const [zoomLevel, setZoomLevel] = useState(10)
 
+  // Radial menu state
+  const [radialMenu, setRadialMenu] = useState({
+    open: false,
+    x: 0,
+    y: 0,
+    lat: 0,
+    lon: 0,
+    centerLabel: null,
+  })
+
   // Expose map methods to parent
-  useImperativeHandle(ref, () => ({
+  // Radial menu wedges configuration
+  const radialWedges = [
+    {
+      id: 'drop-pin',
+      label: 'Drop pin',
+      icon: MapPin,
+      onSelect: () => toast('Drop pin coming soon', { icon: '📍' }),
+    },
+    {
+      id: 'directions-to',
+      label: 'To here',
+      icon: ArrowDownLeft,
+      onSelect: () => toast('Directions to here coming soon', { icon: '🧭' }),
+    },
+    {
+      id: 'save-place',
+      label: 'Save',
+      icon: Star,
+      requiresAuth: true,
+      onSelect: () => toast('Save place coming soon', { icon: '⭐' }),
+    },
+    {
+      id: 'whats-here',
+      label: "What's here",
+      icon: Info,
+      onSelect: async ({ lat, lon }) => {
+        setRadialMenu((m) => ({ ...m, open: false }))
+        // Immediately show dropped pin
+        useStore.getState().setSelectedPlace({
+          lat,
+          lon,
+          name: 'Dropped pin',
+          address: null,
+          type: null,
+          source: 'radial_menu',
+          matchCode: null,
+          raw: {},
+        })
+        // Reverse geocode in background
+        const place = await fetchReverse(lat, lon)
+        if (place) {
+          const current = useStore.getState().selectedPlace
+          if (current && Math.abs(current.lat - lat) < 0.00001 && Math.abs(current.lon - lon) < 0.00001) {
+            useStore.getState().setSelectedPlace({ ...place, lat, lon })
+          }
+        }
+      },
+    },
+    {
+      id: 'add-stop',
+      label: 'Add stop',
+      icon: Plus,
+      onSelect: () => toast('Add stop coming soon', { icon: '➕' }),
+    },
+    {
+      id: 'directions-from',
+      label: 'From here',
+      icon: ArrowUpRight,
+      onSelect: () => toast('Directions from here coming soon', { icon: '🧭' }),
+    },
+  ]
+
+  // Context menu trigger handler
+  const handleContextMenuTrigger = ({ x, y }) => {
+    const map = mapInstance.current
+    if (!map || !mapRef.current) return
+
+    // Convert screen coords to lat/lon
+    const rect = mapRef.current.getBoundingClientRect()
+    const lngLat = map.unproject([x - rect.left, y - rect.top])
+
+    setRadialMenu({
+      open: true,
+      x,
+      y,
+      lat: lngLat.lat,
+      lon: lngLat.lng,
+      centerLabel: null,
+    })
+
+    // Async reverse geocode for center label
+    fetchReverse(lngLat.lat, lngLat.lng).then((place) => {
+      if (place) {
+        setRadialMenu((m) => {
+          if (m.open && Math.abs(m.lat - lngLat.lat) < 0.00001) {
+            return { ...m, centerLabel: place.name }
+          }
+          return m
+        })
+      }
+    })
+  }
+
+  // Context menu hook
+  const contextMenuHandlers = useContextMenu(handleContextMenuTrigger)
+
+    useImperativeHandle(ref, () => ({
     flyTo(lat, lon, zoom = 14) {
       mapInstance.current?.flyTo({ center: [lon, lat], zoom })
     },
@@ -1141,7 +1251,7 @@ const MapView = forwardRef(function MapView(_, ref) {
 
   return (
     <div className="relative w-full h-full">
-      <div ref={mapRef} className="w-full h-full" />
+      <div ref={mapRef} className="w-full h-full" {...contextMenuHandlers} />
       {/* Zoom level indicator - bottom-left corner */}
       <div
         className="absolute bottom-4 left-4 z-50 px-2 py-1 rounded-full text-xs font-mono pointer-events-none"
@@ -1155,6 +1265,17 @@ const MapView = forwardRef(function MapView(_, ref) {
       >
         Z {zoomLevel.toFixed(1)}
       </div>
+      {/* Radial context menu */}
+      <RadialMenu
+        open={radialMenu.open}
+        x={radialMenu.x}
+        y={radialMenu.y}
+        lat={radialMenu.lat}
+        lon={radialMenu.lon}
+        wedges={radialWedges}
+        centerLabel={radialMenu.centerLabel}
+        onDismiss={() => setRadialMenu((m) => ({ ...m, open: false }))}
+      />
     </div>
   )
 })
