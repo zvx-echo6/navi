@@ -12,6 +12,7 @@ import { requestOptimizedRoute } from '../api'
 
 export default function Panel({ onManeuverClick }) {
   const selectedPlace = useStore((s) => s.selectedPlace)
+  const pendingDestination = useStore((s) => s.pendingDestination)
   const clearSelectedPlace = useStore((s) => s.clearSelectedPlace)
   const stops = useStore((s) => s.stops)
   const mode = useStore((s) => s.mode)
@@ -128,9 +129,9 @@ export default function Panel({ onManeuverClick }) {
 
   // Determine what to show based on panel state
   const showPreviewCard = panelState.startsWith('PREVIEW')
-  const showRouteSection = ['ROUTING', 'ROUTE_CALCULATED', 'PREVIEW_ROUTING', 'PREVIEW_CALCULATED'].includes(panelState)
+  const showRouteSection = ['ROUTING', 'ROUTE_CALCULATED', 'PREVIEW_ROUTING', 'PREVIEW_CALCULATED'].includes(panelState) || !!pendingDestination
   const showManeuvers = panelState === 'ROUTE_CALCULATED' || panelState === 'PREVIEW_CALCULATED'
-  const showEmptyState = panelState === 'IDLE'
+  const showEmptyState = panelState === 'IDLE' && !pendingDestination
 
   // Routes tab content - now state-driven
   const routesContent = (
