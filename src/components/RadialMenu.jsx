@@ -4,6 +4,7 @@ import { Lock } from 'lucide-react'
 
 /**
  * RadialMenu - ATAK-style radial context menu
+ * Themed to match Navi light/dark palette using CSS custom properties.
  *
  * Props:
  * - open: boolean
@@ -138,17 +139,11 @@ export default function RadialMenu({
 
   const content = (
     <>
-      {/* Full-screen transparent backdrop for dismiss */}
+      {/* Full-screen backdrop for dismiss — matches modal overlay opacity */}
       <div
+        className="radial-backdrop"
         onClick={handleBackdropClick}
         onContextMenu={handleBackdropClick}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9998,
-          background: 'transparent',
-          cursor: 'default',
-        }}
       />
 
       {/* Radial menu container */}
@@ -163,6 +158,7 @@ export default function RadialMenu({
           zIndex: 9999,
           transform: 'translate(-50%, -50%)',
           animation: 'radialFadeIn 100ms ease-out',
+          filter: 'drop-shadow(var(--shadow-lg))',
         }}
         onMouseMove={handlePointerMove}
         onMouseUp={handlePointerUp}
@@ -183,35 +179,43 @@ export default function RadialMenu({
               <g key={wedge.id} className="radial-wedge" data-wedge-id={wedge.id}>
                 <path
                   d={generateWedgePath(i)}
-                  fill="rgba(30, 28, 26, 0.85)"
-                  stroke="rgba(180, 160, 140, 0.3)"
-                  strokeWidth="1"
-                  style={{ transition: 'fill 100ms ease' }}
                   className="wedge-path"
                 />
                 <g transform={`translate(${iconPos.x}, ${iconPos.y})`}>
                   {Icon && (
-                    <Icon
-                      size={18}
-                      stroke="rgba(230, 220, 210, 0.9)"
-                      strokeWidth={1.5}
-                      style={{ transform: 'translate(-9px, -12px)' }}
-                    />
+                    <foreignObject
+                      x={-9}
+                      y={-12}
+                      width={18}
+                      height={18}
+                      style={{ overflow: 'visible' }}
+                    >
+                      <Icon
+                        size={18}
+                        className="wedge-icon"
+                        strokeWidth={1.5}
+                      />
+                    </foreignObject>
                   )}
                   {wedge.requiresAuth && (
-                    <Lock
-                      size={10}
-                      stroke="rgba(230, 220, 210, 0.6)"
-                      strokeWidth={1.5}
-                      style={{ transform: 'translate(4px, -14px)' }}
-                    />
+                    <foreignObject
+                      x={4}
+                      y={-14}
+                      width={10}
+                      height={10}
+                      style={{ overflow: 'visible' }}
+                    >
+                      <Lock
+                        size={10}
+                        className="wedge-lock"
+                        strokeWidth={1.5}
+                      />
+                    </foreignObject>
                   )}
                   <text
                     y={10}
                     textAnchor="middle"
-                    fontSize="9"
-                    fill="rgba(230, 220, 210, 0.8)"
-                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                    className="wedge-label"
                   >
                     {wedge.label}
                   </text>
@@ -225,25 +229,19 @@ export default function RadialMenu({
             cx={0}
             cy={0}
             r={innerRadius - 2}
-            fill="rgba(50, 45, 40, 0.95)"
-            stroke="rgba(180, 160, 140, 0.4)"
-            strokeWidth="1"
+            className="center-disc"
           />
           <text
             y={-4}
             textAnchor="middle"
-            fontSize="10"
-            fontFamily="monospace"
-            fill="rgba(230, 220, 210, 0.9)"
+            className="center-coords"
           >
             {lat?.toFixed(4)}
           </text>
           <text
             y={8}
             textAnchor="middle"
-            fontSize="10"
-            fontFamily="monospace"
-            fill="rgba(230, 220, 210, 0.9)"
+            className="center-coords"
           >
             {lon?.toFixed(4)}
           </text>
@@ -251,9 +249,7 @@ export default function RadialMenu({
             <text
               y={20}
               textAnchor="middle"
-              fontSize="9"
-              fill="rgba(200, 180, 160, 0.9)"
-              style={{ fontStyle: 'italic' }}
+              className="center-label"
             >
               {centerLabel.length > 15 ? centerLabel.slice(0, 15) + '…' : centerLabel}
             </text>
@@ -261,12 +257,87 @@ export default function RadialMenu({
         </svg>
 
         <style>{`
-          .radial-wedge.active .wedge-path {
-            fill: rgba(180, 160, 140, 0.4) !important;
+          /* Backdrop — matches modal overlay */
+          .radial-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 9998;
+            background: rgba(0, 0, 0, 0.4);
+            cursor: default;
           }
+
+          /* Wedge paths — themed surface */
+          .wedge-path {
+            fill: var(--bg-overlay);
+            fill-opacity: 0.92;
+            stroke: var(--border);
+            stroke-width: 1;
+            transition: fill 100ms ease, fill-opacity 100ms ease;
+          }
+
           .radial-wedge:hover .wedge-path {
-            fill: rgba(180, 160, 140, 0.3);
+            fill: var(--accent-muted);
+            fill-opacity: 1;
           }
+
+          .radial-wedge.active .wedge-path {
+            fill: var(--accent-muted);
+            fill-opacity: 1;
+          }
+
+          /* Wedge icons — secondary text color */
+          .wedge-icon {
+            color: var(--text-secondary);
+            transition: color 100ms ease;
+          }
+
+          .radial-wedge:hover .wedge-icon,
+          .radial-wedge.active .wedge-icon {
+            color: var(--text-primary);
+          }
+
+          /* Lock icon — tertiary/muted */
+          .wedge-lock {
+            color: var(--text-tertiary);
+          }
+
+          /* Wedge labels — secondary text */
+          .wedge-label {
+            font-family: var(--font-sans);
+            font-size: 9px;
+            fill: var(--text-secondary);
+            pointer-events: none;
+            user-select: none;
+            transition: fill 100ms ease;
+          }
+
+          .radial-wedge:hover .wedge-label,
+          .radial-wedge.active .wedge-label {
+            fill: var(--text-primary);
+          }
+
+          /* Center disc — raised surface */
+          .center-disc {
+            fill: var(--bg-raised);
+            stroke: var(--border);
+            stroke-width: 1;
+          }
+
+          /* Center coordinates — monospace primary */
+          .center-coords {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            fill: var(--text-primary);
+          }
+
+          /* Center label — secondary italic */
+          .center-label {
+            font-family: var(--font-sans);
+            font-size: 9px;
+            font-style: italic;
+            fill: var(--text-secondary);
+          }
+
           @keyframes radialFadeIn {
             from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
             to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
