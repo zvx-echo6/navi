@@ -863,6 +863,13 @@ const MapView = forwardRef(function MapView(_, ref) {
         const { lng, lat } = e.lngLat
         const MARKER_RADIUS_PX = 14 // half of 28px preview marker
 
+        // Query rendered features at click point (label/POI priority)
+        const labelLayers = ['pois', 'places_subplace', 'places_locality', 'places_region', 'places_country']
+        const features = map.queryRenderedFeatures(e.point, { layers: labelLayers })
+        
+        // Find first feature with a name (respects layer order = priority)
+        const labelFeature = features.find(f => f.properties?.name)
+
         // Set click marker
         store.setClickMarker({
           lat,
@@ -870,30 +877,51 @@ const MapView = forwardRef(function MapView(_, ref) {
           circleRadiusPx: MARKER_RADIUS_PX,
         })
 
-        // Immediately set a "Dropped pin" placeholder
-        store.setSelectedPlace({
-          lat,
-          lon: lng,
-          name: 'Dropped pin',
-          address: null,
-          type: null,
-          source: 'map_click',
-          matchCode: null,
-          raw: {},
-        })
+        if (labelFeature) {
+          // Clicked a labeled feature — use its properties
+          const props = labelFeature.properties
+          store.setSelectedPlace({
+            lat,
+            lon: lng,
+            name: props.name || 'Unknown',
+            address: null,
+            type: props.kind_detail || props.kind || null,
+            source: 'basemap_label',
+            matchCode: null,
+            raw: {
+              wikidata: props.wikidata || null,
+              population: props.population || null,
+              kind: props.kind || null,
+              kind_detail: props.kind_detail || null,
+              elevation: props.elevation || null,
+            },
+          })
+        } else {
+          // No labeled feature — fall back to reverse geocode
+          store.setSelectedPlace({
+            lat,
+            lon: lng,
+            name: 'Dropped pin',
+            address: null,
+            type: null,
+            source: 'map_click',
+            matchCode: null,
+            raw: {},
+          })
 
-        // Reverse geocode in background
-        fetchReverse(lat, lng).then((place) => {
-          if (!place) return
-          const current = useStore.getState().selectedPlace
-          if (current && Math.abs(current.lat - lat) < 0.00001 && Math.abs(current.lon - lng) < 0.00001) {
-            useStore.getState().setSelectedPlace({
-              ...place,
-              lat,
-              lon: lng,
-            })
-          }
-        })
+          // Reverse geocode in background
+          fetchReverse(lat, lng).then((place) => {
+            if (!place) return
+            const current = useStore.getState().selectedPlace
+            if (current && Math.abs(current.lat - lat) < 0.00001 && Math.abs(current.lon - lng) < 0.00001) {
+              useStore.getState().setSelectedPlace({
+                ...place,
+                lat,
+                lon: lng,
+              })
+            }
+          })
+        }
       }
     })
     map.on('load', () => {
