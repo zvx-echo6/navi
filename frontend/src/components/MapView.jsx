@@ -7,7 +7,7 @@ import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse } from '../api'
 import { getConfig, hasFeature } from '../config'
-import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star, Info } from 'lucide-react'
+import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star } from 'lucide-react'
 import RadialMenu from './RadialMenu'
 import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
@@ -649,33 +649,6 @@ const MapView = forwardRef(function MapView(_, ref) {
       icon: Star,
       requiresAuth: true,
       onSelect: () => toast('Save place coming soon', { icon: '⭐' }),
-    },
-    {
-      id: 'whats-here',
-      label: "What's here",
-      icon: Info,
-      onSelect: async ({ lat, lon }) => {
-        setRadialMenu((m) => ({ ...m, open: false }))
-        // Immediately show dropped pin
-        useStore.getState().setSelectedPlace({
-          lat,
-          lon,
-          name: 'Dropped pin',
-          address: null,
-          type: null,
-          source: 'radial_menu',
-          matchCode: null,
-          raw: {},
-        })
-        // Reverse geocode in background
-        const place = await fetchReverse(lat, lon)
-        if (place) {
-          const current = useStore.getState().selectedPlace
-          if (current && Math.abs(current.lat - lat) < 0.00001 && Math.abs(current.lon - lon) < 0.00001) {
-            useStore.getState().setSelectedPlace({ ...place, lat, lon })
-          }
-        }
-      },
     },
     {
       id: 'add-stop',
