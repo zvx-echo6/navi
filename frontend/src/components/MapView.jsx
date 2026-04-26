@@ -13,6 +13,8 @@ import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
 
 const ROUTE_SOURCE = 'route-source'
+const BOUNDARY_SOURCE = 'boundary-source'
+const BOUNDARY_LAYER = 'boundary-layer'
 const ROUTE_LAYER_PREFIX = 'route-layer-'
 const HILLSHADE_SOURCE = 'hillshade-dem'
 const HILLSHADE_LAYER = 'hillshade-layer'
@@ -968,6 +970,23 @@ const MapView = forwardRef(function MapView(_, ref) {
         data: { type: 'FeatureCollection', features: [] },
       })
 
+      // Boundary polygon source for selected places
+      map.addSource(BOUNDARY_SOURCE, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+      map.addLayer({
+        id: BOUNDARY_LAYER,
+        type: 'line',
+        source: BOUNDARY_SOURCE,
+        paint: {
+          'line-color': 'var(--accent)',
+          'line-width': 2,
+          'line-opacity': 0.7,
+          'line-dasharray': [3, 2],
+        },
+      })
+
       // Restore overlay layers from localStorage prefs
       try {
         const raw = localStorage.getItem('navi-layer-prefs')
@@ -1099,6 +1118,23 @@ const MapView = forwardRef(function MapView(_, ref) {
         data: { type: 'FeatureCollection', features: [] },
       })
 
+      // Boundary polygon source
+      map.addSource(BOUNDARY_SOURCE, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+      map.addLayer({
+        id: BOUNDARY_LAYER,
+        type: 'line',
+        source: BOUNDARY_SOURCE,
+        paint: {
+          'line-color': 'var(--accent)',
+          'line-width': 2,
+          'line-opacity': 0.7,
+          'line-dasharray': [3, 2],
+        },
+      })
+
       // Re-add active overlay layers
       if (activeLayersRef.current.hillshade) addHillshade(map)
       if (activeLayersRef.current.traffic) addTraffic(map)
@@ -1155,6 +1191,81 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (previewMarkerRef.current) {
         previewMarkerRef.current.remove()
         previewMarkerRef.current = null
+      }
+    }
+  }, [selectedPlace])
+
+  // Boundary polygon and zoom-to-feature
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map || !map.isStyleLoaded()) return
+
+    const source = map.getSource(BOUNDARY_SOURCE)
+    if (!source) return
+
+    // Clear boundary if no place selected
+    if (!selectedPlace) {
+      source.setData({ type: 'FeatureCollection', features: [] })
+      return
+    }
+
+    // Get boundary from selectedPlace (may come from API response)
+    const boundary = selectedPlace.boundary || selectedPlace.raw?.boundary
+    
+    // Update boundary layer
+    if (boundary && (boundary.type === 'Polygon' || boundary.type === 'MultiPolygon')) {
+      source.setData({
+        type: 'Feature',
+        geometry: boundary,
+        properties: {},
+      })
+
+      // Zoom to fit boundary
+      try {
+        const coords = boundary.type === 'Polygon' 
+          ? boundary.coordinates[0]
+          : boundary.coordinates.flat(1)
+        
+        if (coords.length > 0) {
+          let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity
+          for (const [lng, lat] of coords) {
+            if (lng < minLng) minLng = lng
+            if (lng > maxLng) maxLng = lng
+            if (lat < minLat) minLat = lat
+            if (lat > maxLat) maxLat = lat
+          }
+          map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+            padding: 50,
+            duration: 700,
+            maxZoom: 16,
+          })
+        }
+      } catch (e) {
+        console.warn('fitBounds error:', e)
+      }
+    } else {
+      // No boundary - clear the layer and zoom based on feature kind
+      source.setData({ type: 'FeatureCollection', features: [] })
+      
+      // Only zoom for feature mode selections (not terrain clicks)
+      if (selectedPlace.mode === 'feature' && selectedPlace.source === 'basemap_label') {
+        const kind = selectedPlace.raw?.kind || selectedPlace.type || ''
+        let targetZoom = null
+        
+        if (kind.includes('country')) targetZoom = 5
+        else if (kind.includes('region' ) || kind.includes('state')) targetZoom = 7
+        else if (kind.includes('locality' ) || kind.includes('city')) targetZoom = 11
+        else if (kind.includes('subplace' ) || kind.includes('neighbourhood') || kind.includes('neighborhood')) targetZoom = 13
+        else if (kind.includes('poi')) targetZoom = 16
+        
+        // Only zoom in, never zoom out
+        if (targetZoom && map.getZoom() < targetZoom) {
+          map.flyTo({
+            center: [selectedPlace.lon, selectedPlace.lat],
+            zoom: targetZoom,
+            duration: 700,
+          })
+        }
       }
     }
   }, [selectedPlace])
