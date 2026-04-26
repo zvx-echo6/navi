@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { shallow } from 'zustand/shallow'
 
 export const useStore = create((set, get) => ({
   // ── Search state ──
@@ -122,14 +121,21 @@ export const useStore = create((set, get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   setEditingContact: (c) => set({ editingContact: c }),
   clearEditingContact: () => set({ editingContact: null }),
-}), shallow)
+}))
 
 // ── Panel state selector ──
-// Returns { hasPreview: boolean, routeState: 'NONE' | 'ROUTING' | 'CALCULATED' }
-// Preview and route states are now orthogonal - preview can show alongside any route state
+// Returns string state, prioritizing preview to allow it alongside any route state
 export const usePanelState = () => {
-  return useStore((s) => ({
-    hasPreview: !!s.selectedPlace,
-    routeState: s.route ? "CALCULATED" : (s.stops.length >= 1 ? "ROUTING" : "NONE")
-  }), shallow)
+  return useStore((s) => {
+    const hasPreview = !!s.selectedPlace
+    const hasRoute = !!s.route
+    const hasStops = s.stops.length >= 1
+
+    if (hasPreview && hasRoute) return "PREVIEW_CALCULATED"
+    if (hasPreview && hasStops) return "PREVIEW_ROUTING"
+    if (hasPreview) return "PREVIEW"
+    if (hasRoute) return "ROUTE_CALCULATED"
+    if (hasStops) return "ROUTING"
+    return "IDLE"
+  })
 }
