@@ -22,8 +22,6 @@ export default function LayerControl({ mapRef }) {
   const [traffic, setTraffic] = useState(false)
   const [publicLands, setPublicLands] = useState(false)
   const [contours, setContours] = useState(false)
-  const [contoursTest, setContoursTest] = useState(false)
-  const [contoursTest10ft, setContoursTest10ft] = useState(false)
   const panelRef = useRef(null)
 
   // Initialize from localStorage or defaults on mount
@@ -34,24 +32,18 @@ export default function LayerControl({ mapRef }) {
 
     const plAvailable = hasFeature('has_public_lands_layer')
     const ctAvailable = hasFeature('has_contours')
-    const ctTestAvailable = hasFeature('has_contours_test')
-    const ctTest10ftAvailable = hasFeature('has_contours_test_10ft')
 
     if (saved) {
       setHillshade(hsAvailable && (saved.hillshade ?? true))
       setTraffic(trAvailable && (saved.traffic ?? false))
       setPublicLands(plAvailable && (saved.publicLands ?? false))
       setContours(ctAvailable && (saved.contours ?? false))
-      setContoursTest(ctTestAvailable && (saved.contoursTest ?? false))
-      setContoursTest10ft(ctTest10ftAvailable && (saved.contoursTest10ft ?? false))
     } else {
       // Defaults: hillshade ON if available, others OFF
       setHillshade(hsAvailable)
       setTraffic(false)
       setPublicLands(false)
       setContours(false)
-      setContoursTest(false)
-      setContoursTest10ft(false)
     }
   }, [])
 
@@ -75,7 +67,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft })
+    savePrefs({ hillshade, traffic, publicLands, contours })
     return () => map.off('style.load', apply)
   }, [hillshade, mapRef])
 
@@ -98,7 +90,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft })
+    savePrefs({ hillshade, traffic, publicLands, contours })
     return () => map.off('style.load', apply)
   }, [traffic, mapRef])
 
@@ -121,7 +113,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft })
+    savePrefs({ hillshade, traffic, publicLands, contours })
     return () => map.off('style.load', apply)
   }, [publicLands, mapRef])
 
@@ -144,52 +136,9 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft })
+    savePrefs({ hillshade, traffic, publicLands, contours })
     return () => map.off('style.load', apply)
   }, [contours, mapRef])
-
-  useEffect(() => {
-    const mapView = mapRef?.current
-    if (!mapView) return
-    const map = mapView.getMap?.()
-    if (!map) return
-
-    const apply = () => {
-      if (contoursTest && hasFeature('has_contours_test')) {
-        mapView.addContoursTestLayer?.()
-      } else {
-        mapView.removeContoursTestLayer?.()
-      }
-    }
-
-    if (map.isStyleLoaded()) {
-      apply()
-    } else {
-      map.once('style.load', apply)
-    }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft })
-    return () => map.off('style.load', apply)
-  }, [contoursTest, mapRef])
-
-  // Apply contoursTest10ft layer
-  useEffect(() => {
-    const map = mapRef.current?.getMap?.()
-    if (!map) return
-
-    const apply = () => {
-      if (contoursTest10ft && hasFeature('has_contours_test_10ft')) {
-        mapRef.current?.addContoursTest10ftLayer?.()
-      } else {
-        mapRef.current?.removeContoursTest10ftLayer?.()
-      }
-    }
-
-    if (map.isStyleLoaded()) {
-      apply()
-    } else {
-      map.once('style.load', apply)
-    }
-  }, [contoursTest10ft, mapRef])
 
   // Close on outside click
   useEffect(() => {
@@ -207,11 +156,9 @@ export default function LayerControl({ mapRef }) {
   const showTraffic = hasFeature('has_traffic_overlay')
   const showPublicLands = hasFeature('has_public_lands_layer')
   const showContours = hasFeature('has_contours')
-  const showContoursTest = hasFeature('has_contours_test')
-  const showContoursTest10ft = hasFeature('has_contours_test_10ft')
 
   // Don't render if no overlay features available
-  if (!showHillshade && !showTraffic && !showPublicLands && !showContours && !showContoursTest && !showContoursTest10ft) return null
+  if (!showHillshade && !showTraffic && !showPublicLands && !showContours) return null
 
   return (
     <div ref={panelRef} className="layer-control">
@@ -272,30 +219,6 @@ export default function LayerControl({ mapRef }) {
                 className="layer-control-toggle"
                 checked={contours}
                 onChange={(e) => setContours(e.target.checked)}
-              />
-            </label>
-          )}
-
-          {showContoursTest && (
-            <label className="layer-control-item">
-              <span className="layer-control-label">Contours (Test)</span>
-              <input
-                type="checkbox"
-                className="layer-control-toggle"
-                checked={contoursTest}
-                onChange={(e) => setContoursTest(e.target.checked)}
-              />
-            </label>
-          )}
-
-          {showContoursTest10ft && (
-            <label className="layer-control-item">
-              <span className="layer-control-label">Contours (Test 10ft)</span>
-              <input
-                type="checkbox"
-                className="layer-control-toggle"
-                checked={contoursTest10ft}
-                onChange={(e) => setContoursTest10ft(e.target.checked)}
               />
             </label>
           )}
