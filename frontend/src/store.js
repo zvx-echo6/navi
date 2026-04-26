@@ -85,6 +85,9 @@ export const useStore = create((set, get) => ({
       addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
       set({ selectedPlace: null })
     } else {
+      // GPS denied, no stops: add destination, show empty origin slot
+      clearStops()
+      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
       set({ pendingDestination: place, selectedPlace: null })
     }
   },
@@ -105,6 +108,9 @@ export const useStore = create((set, get) => ({
     if (override) {
       localStorage.setItem('navi-theme-override', override)
     } else {
+      // GPS denied, no stops: add destination, show empty origin slot
+      clearStops()
+      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
       localStorage.removeItem('navi-theme-override')
     }
   },
@@ -119,3 +125,15 @@ export const useStore = create((set, get) => ({
   setEditingContact: (c) => set({ editingContact: c }),
   clearEditingContact: () => set({ editingContact: null }),
 }))
+
+// ── Panel state selector ──
+// IDLE | PREVIEW | ROUTING | PREVIEW_ROUTING | ROUTE_CALCULATED
+export const usePanelState = () => {
+  return useStore((s) => {
+    if (s.route) return "ROUTE_CALCULATED"
+    if (s.selectedPlace && s.stops.length >= 1) return "PREVIEW_ROUTING"
+    if (s.selectedPlace) return "PREVIEW"
+    if (s.stops.length >= 1) return "ROUTING"
+    return "IDLE"
+  })
+}

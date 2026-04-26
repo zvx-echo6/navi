@@ -1352,8 +1352,8 @@ const MapView = forwardRef(function MapView(_, ref) {
         (b, c) => b.extend(c),
         new maplibregl.LngLatBounds(allCoords[0], allCoords[0])
       )
-      const hasDetail = useStore.getState().selectedPlace != null
-      const leftPad = hasDetail ? 700 : 340
+      // Single-panel: no floating detail
+      const leftPad = 420  // 360px panel + margin
       map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: leftPad, right: 60 } })
     }
   }
@@ -1426,7 +1426,7 @@ const MapView = forwardRef(function MapView(_, ref) {
           (b, s) => b.extend([s.lon, s.lat]),
           new maplibregl.LngLatBounds([stops[0].lon, stops[0].lat], [stops[0].lon, stops[0].lat])
         )
-        map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: 340, right: 60 } })
+        map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: 420, right: 60 } })
       }
     }
   }, [stops, route, gpsOrigin, geoPermission])

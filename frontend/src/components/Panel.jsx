@@ -1,15 +1,18 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
 import { Sun, Moon } from 'lucide-react'
-import { useStore } from '../store'
+import { useStore, usePanelState } from '../store'
 import { hasFeature } from '../config'
 import SearchBar from './SearchBar'
 import StopList from './StopList'
 import ModeSelector from './ModeSelector'
 import ManeuverList from './ManeuverList'
 import ContactList from './ContactList'
+import { PlaceCard } from './PlaceCard'
 import { requestOptimizedRoute } from '../api'
 
 export default function Panel({ onManeuverClick }) {
+  const selectedPlace = useStore((s) => s.selectedPlace)
+  const clearSelectedPlace = useStore((s) => s.clearSelectedPlace)
   const stops = useStore((s) => s.stops)
   const mode = useStore((s) => s.mode)
   const route = useStore((s) => s.route)
@@ -28,6 +31,8 @@ export default function Panel({ onManeuverClick }) {
   const geoPermission = useStore((s) => s.geoPermission)
   const activeTab = useStore((s) => s.activeTab)
   const setActiveTab = useStore((s) => s.setActiveTab)
+
+  const panelState = usePanelState()
 
   const [isMobile, setIsMobile] = useState(false)
   const [optimizing, setOptimizing] = useState(false)
@@ -121,38 +126,62 @@ export default function Panel({ onManeuverClick }) {
 
   const showOptimize = effectiveCount >= 3
 
+  // Determine what to show based on panel state
+  const showPreviewCard = panelState === 'PREVIEW' || panelState === 'PREVIEW_ROUTING'
+  const showRouteSection = panelState === 'ROUTING' || panelState === 'PREVIEW_ROUTING' || panelState === 'ROUTE_CALCULATED'
+  const showManeuvers = panelState === 'ROUTE_CALCULATED'
+  const showEmptyState = panelState === 'IDLE'
+
+  // Routes tab content - now state-driven
   const routesContent = (
     <>
       <SearchBar />
 
-      <div className="mt-3">
-        <StopList />
-      </div>
-
-      {stops.length >= 1 && (
-        <div className="mt-3 flex flex-col gap-2">
-          <ModeSelector />
-          {showOptimize && (
-            <button
-              onClick={handleOptimize}
-              disabled={optimizing || routeLoading}
-              className="navi-btn-secondary w-full"
-            >
-              {optimizing ? 'Optimizing...' : 'Optimize stop order'}
-            </button>
-          )}
+      {/* Preview card when place is selected */}
+      {showPreviewCard && selectedPlace && (
+        <div className="mt-3">
+          <PlaceCard
+            place={selectedPlace}
+            variant="preview"
+            expanded={true}
+            onClose={clearSelectedPlace}
+          />
         </div>
       )}
 
-      {(route || routeLoading || routeError) && (
+      {/* Route section with stops */}
+      {showRouteSection && (
+        <>
+          <div className="mt-3">
+            <StopList />
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2">
+            <ModeSelector />
+            {showOptimize && (
+              <button
+                onClick={handleOptimize}
+                disabled={optimizing || routeLoading}
+                className="navi-btn-secondary w-full"
+              >
+                {optimizing ? 'Optimizing...' : 'Optimize stop order'}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Maneuvers when route is calculated */}
+      {showManeuvers && (route || routeLoading || routeError) && (
         <div className="mt-3">
           <ManeuverList onManeuverClick={onManeuverClick} />
         </div>
       )}
 
-      {stops.length === 0 && !route && (
+      {/* Empty state */}
+      {showEmptyState && (
         <div className="mt-6 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
-          <p>Search and add stops to build your route</p>
+          <p>Search or tap the map to explore</p>
         </div>
       )}
     </>
@@ -196,12 +225,13 @@ export default function Panel({ onManeuverClick }) {
     </div>
   )
 
-  // Desktop: side panel
+  // Desktop: side panel (now 360px to accommodate PlaceCard)
   if (!isMobile) {
     return (
       <div
-        className="absolute top-0 left-0 z-10 w-80 h-full overflow-y-auto p-4 flex flex-col"
+        className="absolute top-0 left-0 z-10 h-full overflow-y-auto p-4 flex flex-col"
         style={{
+          width: '400px',
           background: 'var(--bg-raised)',
           borderRight: '1px solid var(--border)',
         }}
