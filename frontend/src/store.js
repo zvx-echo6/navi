@@ -60,11 +60,14 @@ export const useStore = create((set, get) => ({
 
   // ── Place detail ──
   selectedPlace: null, // { lat, lon, name, address, type, source, matchCode, raw }
+  clickMarker: null, // { lat, lon, circleRadiusPx } — visual marker for two-click selection
   gpsOrigin: true, // whether GPS should be used as origin when available
   pendingDestination: null, // place waiting for a starting point (GPS-denied Directions flow)
 
   setSelectedPlace: (place) => set({ selectedPlace: place }),
-  clearSelectedPlace: () => set({ selectedPlace: null }),
+  clearSelectedPlace: () => set({ selectedPlace: null, clickMarker: null }),
+  setClickMarker: (marker) => set({ clickMarker: marker }),
+  clearClickMarker: () => set({ clickMarker: null }),
   setGpsOrigin: (val) => set({ gpsOrigin: val }),
   setPendingDestination: (place) => set({ pendingDestination: place }),
   clearPendingDestination: () => set({ pendingDestination: null }),

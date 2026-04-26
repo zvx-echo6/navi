@@ -610,6 +610,9 @@ const MapView = forwardRef(function MapView(_, ref) {
   const route = useStore((s) => s.route)
   const theme = useStore((s) => s.theme)
   const selectedPlace = useStore((s) => s.selectedPlace)
+  const clickMarker = useStore((s) => s.clickMarker)
+  const setClickMarker = useStore((s) => s.setClickMarker)
+  const clearClickMarker = useStore((s) => s.clearClickMarker)
   const gpsOrigin = useStore((s) => s.gpsOrigin)
   const geoPermission = useStore((s) => s.geoPermission)
   const setSheetState = useStore((s) => s.setSheetState)
@@ -802,45 +805,97 @@ const MapView = forwardRef(function MapView(_, ref) {
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
 
-    // Map click — drop pin and reverse geocode
+    // Map click — two-click selection model
     map.on('click', (e) => {
-      // If a stop pin was just clicked, skip the pin-drop
+      // If a stop pin was just clicked, skip
       if (pinClickedRef.current) {
         pinClickedRef.current = false
         return
       }
 
-      if (window.innerWidth < 768) setSheetState('collapsed')
+      const store = useStore.getState()
+      const marker = store.clickMarker
 
-      const { lng, lat } = e.lngLat
+      if (marker) {
+        // State B: marker present — check if click is inside the circle
+        const markerScreen = map.project([marker.lon, marker.lat])
+        const dx = e.point.x - markerScreen.x
+        const dy = e.point.y - markerScreen.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
 
-      // Immediately set a "Dropped pin" placeholder so PlaceDetail opens with coords
-      useStore.getState().setSelectedPlace({
-        lat,
-        lon: lng,
-        name: 'Dropped pin',
-        address: null,
-        type: null,
-        source: 'map_click',
-        matchCode: null,
-        raw: {},
-      })
+        if (dist <= marker.circleRadiusPx) {
+          // Inside circle → open radial at marker location
+          const rect = mapRef.current?.getBoundingClientRect()
+          const screenX = rect ? markerScreen.x + rect.left : markerScreen.x
+          const screenY = rect ? markerScreen.y + rect.top : markerScreen.y
 
-      // Reverse geocode in background — update place when result arrives
-      fetchReverse(lat, lng).then((place) => {
-        if (!place) return
-        // Only update if the selected place is still this pin (user hasn't clicked elsewhere)
-        const current = useStore.getState().selectedPlace
-        if (current && Math.abs(current.lat - lat) < 0.00001 && Math.abs(current.lon - lng) < 0.00001) {
-          useStore.getState().setSelectedPlace({
-            ...place,
-            lat,
-            lon: lng,
+          setRadialMenu({
+            open: true,
+            x: screenX,
+            y: screenY,
+            lat: marker.lat,
+            lon: marker.lon,
+            centerLabel: store.selectedPlace?.name || null,
           })
-        }
-      })
-    })
 
+          // Fetch reverse geocode for center label if not already loaded
+          if (!store.selectedPlace?.name || store.selectedPlace.name === 'Dropped pin') {
+            fetchReverse(marker.lat, marker.lon).then((place) => {
+              if (place) {
+                setRadialMenu((m) => {
+                  if (m.open && Math.abs(m.lat - marker.lat) < 0.00001) {
+                    return { ...m, centerLabel: place.name }
+                  }
+                  return m
+                })
+              }
+            })
+          }
+        } else {
+          // Outside circle → deselect, no new selection
+          store.clearClickMarker()
+          store.clearSelectedPlace()
+        }
+      } else {
+        // State A: nothing selected → select
+        if (window.innerWidth < 768) setSheetState('collapsed')
+
+        const { lng, lat } = e.lngLat
+        const MARKER_RADIUS_PX = 14 // half of 28px preview marker
+
+        // Set click marker
+        store.setClickMarker({
+          lat,
+          lon: lng,
+          circleRadiusPx: MARKER_RADIUS_PX,
+        })
+
+        // Immediately set a "Dropped pin" placeholder
+        store.setSelectedPlace({
+          lat,
+          lon: lng,
+          name: 'Dropped pin',
+          address: null,
+          type: null,
+          source: 'map_click',
+          matchCode: null,
+          raw: {},
+        })
+
+        // Reverse geocode in background
+        fetchReverse(lat, lng).then((place) => {
+          if (!place) return
+          const current = useStore.getState().selectedPlace
+          if (current && Math.abs(current.lat - lat) < 0.00001 && Math.abs(current.lon - lng) < 0.00001) {
+            useStore.getState().setSelectedPlace({
+              ...place,
+              lat,
+              lon: lng,
+            })
+          }
+        })
+      }
+    })
     map.on('load', () => {
       map.addSource(ROUTE_SOURCE, {
         type: 'geojson',
@@ -1000,6 +1055,10 @@ const MapView = forwardRef(function MapView(_, ref) {
     // Create preview marker
     const el = document.createElement('div')
     el.className = 'navi-pin-preview'
+    // Add precise center dot
+    const dot = document.createElement('div')
+    dot.className = 'navi-pin-center-dot'
+    el.appendChild(dot)
     previewMarkerRef.current = new maplibregl.Marker({ element: el })
       .setLngLat([selectedPlace.lon, selectedPlace.lat])
       .addTo(map)
