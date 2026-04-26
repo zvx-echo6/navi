@@ -44,24 +44,6 @@ export default function RadialMenu({
     return () => window.removeEventListener('keydown', handleKey)
   }, [open, onDismiss])
 
-  // Handle click outside
-  useEffect(() => {
-    if (!open) return
-    const handleClick = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        onDismiss?.()
-      }
-    }
-    // Delay to avoid triggering on the same click that opened the menu
-    const timer = setTimeout(() => {
-      window.addEventListener('click', handleClick)
-    }, 50)
-    return () => {
-      clearTimeout(timer)
-      window.removeEventListener('click', handleClick)
-    }
-  }, [open, onDismiss])
-
   // Calculate which wedge the pointer is over
   const getWedgeAtPoint = useCallback((clientX, clientY) => {
     const dx = clientX - x
@@ -109,6 +91,17 @@ export default function RadialMenu({
     onDismiss?.()
   }, [getWedgeAtPoint, lat, lon, onDismiss])
 
+  // Handle backdrop click (dismiss menu)
+  const handleBackdropClick = useCallback((e) => {
+    e.stopPropagation()
+    onDismiss?.()
+  }, [onDismiss])
+
+  // Prevent menu container clicks from reaching backdrop
+  const handleContainerClick = useCallback((e) => {
+    e.stopPropagation()
+  }, [])
+
   // Generate wedge paths
   const generateWedgePath = (index) => {
     const startAngle = (index * wedgeAngle - 90) * (Math.PI / 180)
@@ -144,126 +137,143 @@ export default function RadialMenu({
   const clampedY = Math.max(padding, Math.min(window.innerHeight - padding, y))
 
   const content = (
-    <div
-      ref={containerRef}
-      className="radial-menu-container"
-      style={{
-        position: 'fixed',
-        left: clampedX,
-        top: clampedY,
-        zIndex: 9999,
-        transform: 'translate(-50%, -50%)',
-        animation: 'radialFadeIn 100ms ease-out',
-      }}
-      onMouseMove={handlePointerMove}
-      onMouseUp={handlePointerUp}
-      onTouchMove={handlePointerMove}
-      onTouchEnd={handlePointerUp}
-    >
-      <svg
-        width={outerRadius * 2 + 40}
-        height={outerRadius * 2 + 40}
-        viewBox={`${-outerRadius - 20} ${-outerRadius - 20} ${outerRadius * 2 + 40} ${outerRadius * 2 + 40}`}
-        style={{ overflow: 'visible' }}
+    <>
+      {/* Full-screen transparent backdrop for dismiss */}
+      <div
+        onClick={handleBackdropClick}
+        onContextMenu={handleBackdropClick}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9998,
+          background: 'transparent',
+          cursor: 'default',
+        }}
+      />
+
+      {/* Radial menu container */}
+      <div
+        ref={containerRef}
+        className="radial-menu-container"
+        onClick={handleContainerClick}
+        style={{
+          position: 'fixed',
+          left: clampedX,
+          top: clampedY,
+          zIndex: 9999,
+          transform: 'translate(-50%, -50%)',
+          animation: 'radialFadeIn 100ms ease-out',
+        }}
+        onMouseMove={handlePointerMove}
+        onMouseUp={handlePointerUp}
+        onTouchMove={handlePointerMove}
+        onTouchEnd={handlePointerUp}
       >
-        {/* Wedges */}
-        {wedges.map((wedge, i) => {
-          const iconPos = getIconPosition(i)
-          const Icon = wedge.icon
-          return (
-            <g key={wedge.id} className="radial-wedge" data-wedge-id={wedge.id}>
-              <path
-                d={generateWedgePath(i)}
-                fill="rgba(30, 28, 26, 0.85)"
-                stroke="rgba(180, 160, 140, 0.3)"
-                strokeWidth="1"
-                style={{ transition: 'fill 100ms ease' }}
-                className="wedge-path"
-              />
-              <g transform={`translate(${iconPos.x}, ${iconPos.y})`}>
-                {Icon && (
-                  <Icon
-                    size={18}
-                    stroke="rgba(230, 220, 210, 0.9)"
-                    strokeWidth={1.5}
-                    style={{ transform: 'translate(-9px, -12px)' }}
-                  />
-                )}
-                {wedge.requiresAuth && (
-                  <Lock
-                    size={10}
-                    stroke="rgba(230, 220, 210, 0.6)"
-                    strokeWidth={1.5}
-                    style={{ transform: 'translate(4px, -14px)' }}
-                  />
-                )}
-                <text
-                  y={10}
-                  textAnchor="middle"
-                  fontSize="9"
-                  fill="rgba(230, 220, 210, 0.8)"
-                  style={{ pointerEvents: 'none', userSelect: 'none' }}
-                >
-                  {wedge.label}
-                </text>
+        <svg
+          width={outerRadius * 2 + 40}
+          height={outerRadius * 2 + 40}
+          viewBox={`${-outerRadius - 20} ${-outerRadius - 20} ${outerRadius * 2 + 40} ${outerRadius * 2 + 40}`}
+          style={{ overflow: 'visible' }}
+        >
+          {/* Wedges */}
+          {wedges.map((wedge, i) => {
+            const iconPos = getIconPosition(i)
+            const Icon = wedge.icon
+            return (
+              <g key={wedge.id} className="radial-wedge" data-wedge-id={wedge.id}>
+                <path
+                  d={generateWedgePath(i)}
+                  fill="rgba(30, 28, 26, 0.85)"
+                  stroke="rgba(180, 160, 140, 0.3)"
+                  strokeWidth="1"
+                  style={{ transition: 'fill 100ms ease' }}
+                  className="wedge-path"
+                />
+                <g transform={`translate(${iconPos.x}, ${iconPos.y})`}>
+                  {Icon && (
+                    <Icon
+                      size={18}
+                      stroke="rgba(230, 220, 210, 0.9)"
+                      strokeWidth={1.5}
+                      style={{ transform: 'translate(-9px, -12px)' }}
+                    />
+                  )}
+                  {wedge.requiresAuth && (
+                    <Lock
+                      size={10}
+                      stroke="rgba(230, 220, 210, 0.6)"
+                      strokeWidth={1.5}
+                      style={{ transform: 'translate(4px, -14px)' }}
+                    />
+                  )}
+                  <text
+                    y={10}
+                    textAnchor="middle"
+                    fontSize="9"
+                    fill="rgba(230, 220, 210, 0.8)"
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {wedge.label}
+                  </text>
+                </g>
               </g>
-            </g>
-          )
-        })}
+            )
+          })}
 
-        {/* Center disc */}
-        <circle
-          cx={0}
-          cy={0}
-          r={innerRadius - 2}
-          fill="rgba(50, 45, 40, 0.95)"
-          stroke="rgba(180, 160, 140, 0.4)"
-          strokeWidth="1"
-        />
-        <text
-          y={-4}
-          textAnchor="middle"
-          fontSize="10"
-          fontFamily="monospace"
-          fill="rgba(230, 220, 210, 0.9)"
-        >
-          {lat?.toFixed(4)}
-        </text>
-        <text
-          y={8}
-          textAnchor="middle"
-          fontSize="10"
-          fontFamily="monospace"
-          fill="rgba(230, 220, 210, 0.9)"
-        >
-          {lon?.toFixed(4)}
-        </text>
-        {centerLabel && (
+          {/* Center disc */}
+          <circle
+            cx={0}
+            cy={0}
+            r={innerRadius - 2}
+            fill="rgba(50, 45, 40, 0.95)"
+            stroke="rgba(180, 160, 140, 0.4)"
+            strokeWidth="1"
+          />
           <text
-            y={20}
+            y={-4}
             textAnchor="middle"
-            fontSize="9"
-            fill="rgba(200, 180, 160, 0.9)"
-            style={{ fontStyle: 'italic' }}
+            fontSize="10"
+            fontFamily="monospace"
+            fill="rgba(230, 220, 210, 0.9)"
           >
-            {centerLabel.length > 15 ? centerLabel.slice(0, 15) + '…' : centerLabel}
+            {lat?.toFixed(4)}
           </text>
-        )}
-      </svg>
+          <text
+            y={8}
+            textAnchor="middle"
+            fontSize="10"
+            fontFamily="monospace"
+            fill="rgba(230, 220, 210, 0.9)"
+          >
+            {lon?.toFixed(4)}
+          </text>
+          {centerLabel && (
+            <text
+              y={20}
+              textAnchor="middle"
+              fontSize="9"
+              fill="rgba(200, 180, 160, 0.9)"
+              style={{ fontStyle: 'italic' }}
+            >
+              {centerLabel.length > 15 ? centerLabel.slice(0, 15) + '…' : centerLabel}
+            </text>
+          )}
+        </svg>
 
-      <style>{`
-        .radial-wedge.active .wedge-path {
-          fill: rgba(180, 160, 140, 0.4) !important;
-        }
-        .radial-wedge:hover .wedge-path {
-          fill: rgba(180, 160, 140, 0.3);
-        }
-        @keyframes radialFadeIn {
-          from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
-          to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        }
-      `}</style>
-    </div>
+        <style>{`
+          .radial-wedge.active .wedge-path {
+            fill: rgba(180, 160, 140, 0.4) !important;
+          }
+          .radial-wedge:hover .wedge-path {
+            fill: rgba(180, 160, 140, 0.3);
+          }
+          @keyframes radialFadeIn {
+            from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+            to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          }
+        `}</style>
+      </div>
+    </>
   )
 
   return createPortal(content, document.body)
