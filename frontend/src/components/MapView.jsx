@@ -643,9 +643,6 @@ const MapView = forwardRef(function MapView(_, ref) {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       })
-      // Initialize zoom indicator and subscribe to zoom changes
-      setZoomLevel(map.getZoom())
-      map.on("zoom", () => setZoomLevel(map.getZoom()))
 
       // Restore overlay layers from localStorage prefs
       try {
@@ -973,6 +970,27 @@ const MapView = forwardRef(function MapView(_, ref) {
     }
   }, [stops, route, gpsOrigin, geoPermission])
 
+  // Track zoom level for indicator
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map) return
+
+    const updateZoom = () => setZoomLevel(map.getZoom())
+    
+    // Set initial zoom
+    if (map.loaded()) {
+      updateZoom()
+    } else {
+      map.once("load", updateZoom)
+    }
+    
+    // Subscribe to zoom changes
+    map.on("zoom", updateZoom)
+    
+    return () => {
+      map.off("zoom", updateZoom)
+    }
+  }, [])
 
   return (
     <div className="relative w-full h-full">
