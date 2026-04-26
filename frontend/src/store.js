@@ -59,7 +59,7 @@ export const useStore = create((set, get) => ({
   clearRoute: () => set({ route: null, routeError: null }),
 
   // ── Place detail ──
-  selectedPlace: null, // { lat, lon, name, address, type, source, matchCode, raw }
+  selectedPlace: null, // { lat, lon, name, address, type, source, matchCode, raw, mode?, featureId?, featureLayer?, wikidata? }
   clickMarker: null, // { lat, lon, circleRadiusPx } — visual marker for two-click selection
   gpsOrigin: true, // whether GPS should be used as origin when available
   pendingDestination: null, // place waiting for a starting point (GPS-denied Directions flow)
