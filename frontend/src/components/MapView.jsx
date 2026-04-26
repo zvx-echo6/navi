@@ -929,6 +929,19 @@ const MapView = forwardRef(function MapView(_, ref) {
           activeLayersRef.current.hillshade = true
         }
       } catch {}
+
+      // POI/label hover affordance — cursor pointer
+      const interactiveLayers = ['pois', 'places_locality', 'places_region', 'places_country', 'places_subplace']
+      
+      interactiveLayers.forEach(layerId => {
+        map.on('mouseenter', layerId, () => {
+          map.getCanvas().style.cursor = 'pointer'
+        })
+        
+        map.on('mouseleave', layerId, () => {
+          map.getCanvas().style.cursor = ''
+        })
+      })
     })
 
     mapInstance.current = map
