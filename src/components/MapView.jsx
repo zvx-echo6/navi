@@ -979,7 +979,7 @@ const MapView = forwardRef(function MapView(_, ref) {
       <div ref={mapRef} className="w-full h-full" />
       {/* Zoom level indicator - bottom-left corner */}
       <div
-        className="absolute bottom-4 left-4 px-2 py-1 rounded-full text-xs font-mono pointer-events-none"
+        className="absolute bottom-4 left-4 z-50 px-2 py-1 rounded-full text-xs font-mono pointer-events-none"
         style={{
           backgroundColor: "rgba(0, 0, 0, 0.6)",
           color: "white",
