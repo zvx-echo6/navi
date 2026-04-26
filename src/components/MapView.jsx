@@ -1,4 +1,4 @@
-import { useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Protocol } from 'pmtiles'
@@ -23,6 +23,11 @@ const CONTOUR_MINOR = 'contour-minor'
 const CONTOUR_INTERMEDIATE = 'contour-intermediate'
 const CONTOUR_INDEX = 'contour-index'
 const CONTOUR_LABEL = 'contour-label'
+const CONTOUR_TEST_SOURCE = 'contour-test-tiles'
+const CONTOUR_TEST_MINOR = 'contour-test-minor'
+const CONTOUR_TEST_INTERMEDIATE = 'contour-test-intermediate'
+const CONTOUR_TEST_INDEX = 'contour-test-index'
+const CONTOUR_TEST_LABEL = 'contour-test-label'
 
 /** Build a full MapLibre style object for the given theme */
 function buildStyle(themeName) {
@@ -374,6 +379,108 @@ function removeContours(map) {
   if (map.getSource(CONTOUR_SOURCE)) map.removeSource(CONTOUR_SOURCE)
 }
 
+/** Add TEST topographic contour overlay (blue color scheme) */
+function addContoursTest(map) {
+  if (!map || map.getSource(CONTOUR_TEST_SOURCE)) return
+
+  map.addSource(CONTOUR_TEST_SOURCE, {
+    type: "vector",
+    url: "pmtiles:///tiles/contours-test.pmtiles",
+  })
+
+  let beforeId = undefined
+  for (const layer of map.getStyle().layers) {
+    if (layer.type === "symbol") {
+      beforeId = layer.id
+      break
+    }
+  }
+
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark"
+  const opMod = isDark ? 0.8 : 1.0
+
+  // Minor contours (40ft) — blue scheme
+  map.addLayer({
+    id: CONTOUR_TEST_MINOR,
+    type: "line",
+    source: CONTOUR_TEST_SOURCE,
+    "source-layer": "contours",
+    minzoom: 11,
+    filter: ["==", ["get", "tier"], "minor"],
+    paint: {
+      "line-color": "#4a7c9b",
+      "line-opacity": 0.4 * opMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.5, 14, 1.0],
+    },
+  }, beforeId)
+
+  // Intermediate contours (200ft)
+  map.addLayer({
+    id: CONTOUR_TEST_INTERMEDIATE,
+    type: "line",
+    source: CONTOUR_TEST_SOURCE,
+    "source-layer": "contours",
+    minzoom: 8,
+    filter: ["==", ["get", "tier"], "intermediate"],
+    paint: {
+      "line-color": "#4a7c9b",
+      "line-opacity": 0.7 * opMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.8, 14, 1.2],
+    },
+  }, beforeId)
+
+  // Index contours (1000ft)
+  map.addLayer({
+    id: CONTOUR_TEST_INDEX,
+    type: "line",
+    source: CONTOUR_TEST_SOURCE,
+    "source-layer": "contours",
+    minzoom: 4,
+    filter: ["==", ["get", "tier"], "index"],
+    paint: {
+      "line-color": "#2a5a7c",
+      "line-opacity": 0.9 * opMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.2, 14, 1.8],
+    },
+  }, beforeId)
+
+  // Labels
+  map.addLayer({
+    id: CONTOUR_TEST_LABEL,
+    type: "symbol",
+    source: CONTOUR_TEST_SOURCE,
+    "source-layer": "contours",
+    minzoom: 12,
+    filter: ["==", ["get", "tier"], "index"],
+    layout: {
+      "text-field": ["concat", ["to-string", ["get", "elevation_ft"]], ""],
+      "text-size": 10,
+      "text-font": ["Noto Sans Regular"],
+      "symbol-placement": "line",
+      "text-anchor": "center",
+      "symbol-spacing": 400,
+      "text-max-angle": 30,
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": isDark ? "#98b8d0" : "#205080",
+      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
+      "text-halo-width": 1.5,
+      "text-opacity": 0.85,
+    },
+  })
+}
+
+/** Remove TEST contour layers + source */
+function removeContoursTest(map) {
+  if (!map) return
+  if (map.getLayer(CONTOUR_TEST_LABEL)) map.removeLayer(CONTOUR_TEST_LABEL)
+  if (map.getLayer(CONTOUR_TEST_INDEX)) map.removeLayer(CONTOUR_TEST_INDEX)
+  if (map.getLayer(CONTOUR_TEST_INTERMEDIATE)) map.removeLayer(CONTOUR_TEST_INTERMEDIATE)
+  if (map.getLayer(CONTOUR_TEST_MINOR)) map.removeLayer(CONTOUR_TEST_MINOR)
+  if (map.getSource(CONTOUR_TEST_SOURCE)) map.removeSource(CONTOUR_TEST_SOURCE)
+}
+
 const MapView = forwardRef(function MapView(_, ref) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
@@ -384,7 +491,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const watchIdRef = useRef(null)
   const currentThemeRef = useRef('dark')
   // Track which overlay layers are currently active (for theme swap re-add)
-  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false })
+  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, contoursTest: false })
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
 
@@ -395,6 +502,9 @@ const MapView = forwardRef(function MapView(_, ref) {
   const gpsOrigin = useStore((s) => s.gpsOrigin)
   const geoPermission = useStore((s) => s.geoPermission)
   const setSheetState = useStore((s) => s.setSheetState)
+
+  // Zoom level indicator state
+  const [zoomLevel, setZoomLevel] = useState(10)
 
   // Expose map methods to parent
   useImperativeHandle(ref, () => ({
@@ -451,6 +561,18 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (!map) return
       removeContours(map)
       activeLayersRef.current.contours = false
+    },
+    addContoursTestLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      addContoursTest(map)
+      activeLayersRef.current.contoursTest = true
+    },
+    removeContoursTestLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      removeContoursTest(map)
+      activeLayersRef.current.contoursTest = false
     },
   }))
 
@@ -521,6 +643,9 @@ const MapView = forwardRef(function MapView(_, ref) {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       })
+      // Initialize zoom indicator and subscribe to zoom changes
+      setZoomLevel(map.getZoom())
+      map.on("zoom", () => setZoomLevel(map.getZoom()))
 
       // Restore overlay layers from localStorage prefs
       try {
@@ -848,7 +973,25 @@ const MapView = forwardRef(function MapView(_, ref) {
     }
   }, [stops, route, gpsOrigin, geoPermission])
 
-  return <div ref={mapRef} className="w-full h-full" />
+
+  return (
+    <div className="relative w-full h-full">
+      <div ref={mapRef} className="w-full h-full" />
+      {/* Zoom level indicator - bottom-left corner */}
+      <div
+        className="absolute bottom-4 left-4 px-2 py-1 rounded-full text-xs font-mono pointer-events-none"
+        style={{
+          backgroundColor: "rgba(0, 0, 0, 0.6)",
+          color: "white",
+          fontSize: "12px",
+          padding: "4px 8px",
+          borderRadius: "12px",
+        }}
+      >
+        Z {zoomLevel.toFixed(1)}
+      </div>
+    </div>
+  )
 })
 
 export default MapView
