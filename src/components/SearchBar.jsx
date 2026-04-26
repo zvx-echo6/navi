@@ -50,6 +50,7 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
   const setAutocompleteOpen = useStore((s) => s.setAutocompleteOpen)
   const addStop = useStore((s) => s.addStop)
   const setSelectedPlace = useStore((s) => s.setSelectedPlace)
+  const setClickMarker = useStore((s) => s.setClickMarker)
   const setEditingContact = useStore((s) => s.setEditingContact)
   const clearPendingDestination = useStore((s) => s.clearPendingDestination)
   const mapCenter = useStore((s) => s.mapCenter)
@@ -164,6 +165,12 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
         source: result.source,
         matchCode: result.match_code,
         raw: result.raw || {},
+      })
+      // Set click marker for two-click model consistency
+      setClickMarker({
+        lat: result.lat,
+        lon: result.lon,
+        circleRadiusPx: 14, // matches preview marker size
       })
     }
 

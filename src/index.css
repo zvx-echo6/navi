@@ -259,12 +259,24 @@ body {
 
 /* ═══ PREVIEW PIN (selected but not committed) ═══ */
 .navi-pin-preview {
+  position: relative;
   width: 28px;
   height: 28px;
   border-radius: 50%;
   border: 3px solid var(--accent);
   background: transparent;
   box-shadow: 0 0 0 3px var(--accent-muted), var(--shadow);
+  pointer-events: none;
+}
+.navi-pin-center-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
   pointer-events: none;
 }
 
