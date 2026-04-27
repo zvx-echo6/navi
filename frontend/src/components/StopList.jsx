@@ -85,14 +85,55 @@ export default function StopList() {
     reorderStops(arrayMove(stops, oldIndex, newIndex))
   }
 
+  // When pendingDestination is set, show it as the destination with origin prompt
+  if (stops.length === 0 && !hasGpsOrigin && pendingDestination) {
+    return (
+      <div className="flex flex-col gap-2">
+        {/* Origin slot - empty, prompting user to search */}
+        <div
+          className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs"
+          style={{
+            background: 'var(--bg-muted)',
+            border: '1px dashed var(--border)',
+            color: 'var(--text-secondary)'
+          }}
+        >
+          <span
+            className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+            style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}
+          >
+            A
+          </span>
+          <span className="flex-1">Search for a starting point above</span>
+        </div>
+        {/* Destination - show pendingDestination as read-only card */}
+        <div
+          className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs"
+          style={{
+            background: 'var(--bg-raised)',
+            border: '1px solid var(--border)'
+          }}
+        >
+          <span
+            className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
+          >
+            B
+          </span>
+          <span className="flex-1 truncate" style={{ color: 'var(--text-primary)' }}>
+            {pendingDestination.name || 'Destination'}
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   if (stops.length === 0 && !hasGpsOrigin) {
     return (
       <div className="text-xs px-2 py-3 text-center" style={{ color: 'var(--text-tertiary)' }}>
-        {pendingDestination
-          ? 'Search for a starting point above'
-          : geoPermission === 'denied'
-            ? 'Add a starting point and destination above'
-            : 'Search and add stops to build your route'}
+        {geoPermission === 'denied'
+          ? 'Add a starting point and destination above'
+          : 'Search and add stops to build your route'}
       </div>
     )
   }
