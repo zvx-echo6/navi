@@ -61,7 +61,7 @@ export default function Panel({ onManeuverClick }) {
   }
 
   // Auth handlers
-  const handleLogin = () => { window.location.href = '/api/auth/whoami' }
+  const handleLogin = () => { window.location.href = '/login' }
   const handleLogout = () => { window.location.href = '/outpost.goauthentik.io/sign_out' }
 
   // Optimize stops
