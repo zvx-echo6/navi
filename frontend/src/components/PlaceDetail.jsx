@@ -677,7 +677,7 @@ export default function PlaceDetail() {
         {(() => {
           const cat = placeDetails && placeDetails !== 'loading' ? placeDetails.category : null
           const parts = []
-          if (cat) parts.push(cat)
+          if (cat && !["poi", "unknown", ""].includes(cat.toLowerCase())) parts.push(cat)
           if (nearbyLabel) parts.push(`near ${nearbyLabel}`)
           if (driveTime != null) parts.push(formatDriveTime(driveTime))
           if (parts.length === 0) return null
