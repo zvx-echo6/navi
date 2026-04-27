@@ -1,0 +1,283 @@
+import { useRef, useCallback, useEffect, useState } from 'react'
+import { Sun, Moon } from 'lucide-react'
+import { useStore, usePanelState } from '../store'
+import { hasFeature } from '../config'
+import SearchBar from './SearchBar'
+import StopList from './StopList'
+import ModeSelector from './ModeSelector'
+import ManeuverList from './ManeuverList'
+import ContactList from './ContactList'
+import { PlaceCard } from './PlaceCard'
+import { requestOptimizedRoute } from '../api'
+
+export default function Panel({ onManeuverClick }) {
+  const selectedPlace = useStore((s) => s.selectedPlace)
+  const clearSelectedPlace = useStore((s) => s.clearSelectedPlace)
+  const stops = useStore((s) => s.stops)
+  const mode = useStore((s) => s.mode)
+  const route = useStore((s) => s.route)
+  const routeLoading = useStore((s) => s.routeLoading)
+  const routeError = useStore((s) => s.routeError)
+  const setStops = useStore((s) => s.setStops)
+  const setRoute = useStore((s) => s.setRoute)
+  const setRouteError = useStore((s) => s.setRouteError)
+  const setRouteLoading = useStore((s) => s.setRouteLoading)
+  const sheetState = useStore((s) => s.sheetState)
+  const setSheetState = useStore((s) => s.setSheetState)
+  const theme = useStore((s) => s.theme)
+  const themeOverride = useStore((s) => s.themeOverride)
+  const setThemeOverride = useStore((s) => s.setThemeOverride)
+  const gpsOrigin = useStore((s) => s.gpsOrigin)
+  const geoPermission = useStore((s) => s.geoPermission)
+  const activeTab = useStore((s) => s.activeTab)
+  const setActiveTab = useStore((s) => s.setActiveTab)
+
+  const panelState = usePanelState()
+
+  const [isMobile, setIsMobile] = useState(false)
+  const [optimizing, setOptimizing] = useState(false)
+  const sheetRef = useRef(null)
+  const dragStartY = useRef(0)
+  const dragStartState = useRef('half')
+
+  const showContacts = hasFeature('has_contacts')
+
+  // Responsive detection
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+
+  // Theme toggle
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setThemeOverride(next)
+  }
+
+  // Optimize stops
+  const hasGpsOrigin = gpsOrigin && geoPermission === 'granted'
+  const effectiveCount = stops.length + (hasGpsOrigin ? 1 : 0)
+
+  const handleOptimize = useCallback(async () => {
+    if (effectiveCount < 3 || optimizing) return
+    setOptimizing(true)
+    try {
+      const { userLocation } = useStore.getState()
+      let locations = stops.map((s) => ({ lat: s.lat, lon: s.lon }))
+      if (hasGpsOrigin && userLocation) {
+        locations = [{ lat: userLocation.lat, lon: userLocation.lon }, ...locations]
+      }
+      const data = await requestOptimizedRoute(locations, mode)
+      if (data.trip) {
+        const wpOrder = hasGpsOrigin && userLocation
+          ? (data.trip.locations || []).slice(1)
+          : data.trip.locations
+        if (wpOrder && wpOrder.length === stops.length) {
+          const reordered = wpOrder.map((wp) => {
+            let closest = stops[0]
+            let minDist = Infinity
+            for (const s of stops) {
+              const d = Math.abs(s.lat - wp.lat) + Math.abs(s.lon - wp.lon)
+              if (d < minDist) {
+                minDist = d
+                closest = s
+              }
+            }
+            return closest
+          })
+          const seen = new Set()
+          const unique = reordered.filter((s) => {
+            if (seen.has(s.id)) return false
+            seen.add(s.id)
+            return true
+          })
+          if (unique.length === stops.length) {
+            setStops(unique)
+          }
+        }
+        setRoute(data.trip)
+      }
+    } catch (e) {
+      setRouteError(e.message)
+    } finally {
+      setOptimizing(false)
+    }
+  }, [stops, mode, optimizing, effectiveCount, hasGpsOrigin, setStops, setRoute, setRouteError])
+
+  // Mobile sheet drag handling
+  const handleTouchStart = useCallback((e) => {
+    dragStartY.current = e.touches[0].clientY
+    dragStartState.current = sheetState
+  }, [sheetState])
+
+  const handleTouchEnd = useCallback((e) => {
+    const deltaY = e.changedTouches[0].clientY - dragStartY.current
+    if (Math.abs(deltaY) < 30) return
+    if (deltaY < 0) {
+      if (dragStartState.current === 'collapsed') setSheetState('half')
+      else if (dragStartState.current === 'half') setSheetState('full')
+    } else {
+      if (dragStartState.current === 'full') setSheetState('half')
+      else if (dragStartState.current === 'half') setSheetState('collapsed')
+    }
+  }, [setSheetState])
+
+  const showOptimize = effectiveCount >= 3
+
+  // Determine what to show based on panel state
+  const showPreviewCard = panelState.startsWith('PREVIEW')
+  const showRouteSection = ['ROUTING', 'ROUTE_CALCULATED', 'PREVIEW_ROUTING', 'PREVIEW_CALCULATED'].includes(panelState)
+  const showManeuvers = panelState === 'ROUTE_CALCULATED' || panelState === 'PREVIEW_CALCULATED'
+  const showEmptyState = panelState === 'IDLE'
+
+  // Routes tab content - now state-driven
+  const routesContent = (
+    <>
+      <SearchBar />
+
+      {/* Preview card when place is selected */}
+      {showPreviewCard && selectedPlace && (
+        <div className="mt-3">
+          <PlaceCard
+            place={selectedPlace}
+            variant="preview"
+            expanded={true}
+            onClose={clearSelectedPlace}
+          />
+        </div>
+      )}
+
+      {/* Route section with stops */}
+      {showRouteSection && (
+        <>
+          <div className="mt-3">
+            <StopList />
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2">
+            <ModeSelector />
+            {showOptimize && (
+              <button
+                onClick={handleOptimize}
+                disabled={optimizing || routeLoading}
+                className="navi-btn-secondary w-full"
+              >
+                {optimizing ? 'Optimizing...' : 'Optimize stop order'}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Maneuvers when route is calculated */}
+      {showManeuvers && (route || routeLoading || routeError) && (
+        <div className="mt-3">
+          <ManeuverList onManeuverClick={onManeuverClick} />
+        </div>
+      )}
+
+      {/* Empty state */}
+      {showEmptyState && (
+        <div className="mt-6 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          <p>Search or tap the map to explore</p>
+        </div>
+      )}
+    </>
+  )
+
+  const content = (
+    <>
+      {showContacts && (
+        <div className="navi-tab-bar mb-3">
+          <button
+            className={`navi-tab ${activeTab === 'routes' ? 'navi-tab-active' : ''}`}
+            onClick={() => setActiveTab('routes')}
+          >
+            Routes
+          </button>
+          <button
+            className={`navi-tab ${activeTab === 'contacts' ? 'navi-tab-active' : ''}`}
+            onClick={() => setActiveTab('contacts')}
+          >
+            Contacts
+          </button>
+        </div>
+      )}
+
+      {(!showContacts || activeTab === 'routes') ? routesContent : <ContactList />}
+    </>
+  )
+
+  const header = (
+    <div className="flex items-center justify-between mb-3">
+      <h1 className="text-md font-semibold" style={{ color: 'var(--accent)' }}>Navi</h1>
+      <button
+        onClick={toggleTheme}
+        className="p-1.5 rounded"
+        style={{ color: 'var(--text-secondary)' }}
+        aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+        title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+      >
+        {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+      </button>
+    </div>
+  )
+
+  // Desktop: side panel (now 360px to accommodate PlaceCard)
+  if (!isMobile) {
+    return (
+      <div
+        className="absolute top-0 left-0 z-10 h-full overflow-y-auto p-4 flex flex-col"
+        style={{
+          width: '400px',
+          background: 'var(--bg-raised)',
+          borderRight: '1px solid var(--border)',
+        }}
+      >
+        {header}
+        {content}
+      </div>
+    )
+  }
+
+  // Mobile: bottom sheet
+  const sheetHeights = {
+    collapsed: 'h-12',
+    half: 'h-[45vh]',
+    full: 'h-[85vh]',
+  }
+
+  return (
+    <div
+      ref={sheetRef}
+      className={`absolute bottom-0 left-0 right-0 z-10 rounded-t-2xl transition-all duration-200 ${sheetHeights[sheetState]}`}
+      style={{
+        background: 'var(--bg-raised)',
+        borderTop: '1px solid var(--border)',
+      }}
+    >
+      {/* Drag handle */}
+      <div
+        className="flex justify-center py-2 cursor-grab"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onClick={() => {
+          if (sheetState === 'collapsed') setSheetState('half')
+          else if (sheetState === 'half') setSheetState('full')
+          else setSheetState('half')
+        }}
+      >
+        <div className="w-10 h-1 rounded-full" style={{ background: 'var(--border)' }} />
+      </div>
+
+      {sheetState !== 'collapsed' && (
+        <div className="px-4 pb-4 overflow-y-auto overflow-x-hidden h-[calc(100%-2rem)]" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+          {header}
+          {content}
+        </div>
+      )}
+    </div>
+  )
+}

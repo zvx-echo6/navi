@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useStore } from './store'
 import { useTheme } from './hooks/useTheme'
-import { requestRoute } from './api'
+import { requestRoute, fetchAuthState } from './api'
 import { decodePolyline } from './utils/decode'
 import MapView from './components/MapView'
 import Panel from './components/Panel'
@@ -26,6 +26,12 @@ export default function App() {
   const setRouteLoading = useStore((s) => s.setRouteLoading)
   const setRouteError = useStore((s) => s.setRouteError)
   const clearRoute = useStore((s) => s.clearRoute)
+  const setAuth = useStore((s) => s.setAuth)
+
+  // Initialize auth state on app load (single fetch, no polling)
+  useEffect(() => {
+    fetchAuthState().then(setAuth)
+  }, [setAuth])
 
   // Fetch route when stops, mode, gpsOrigin, or geoPermission change (debounced 500ms)
   useEffect(() => {

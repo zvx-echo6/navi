@@ -59,15 +59,12 @@ export const useStore = create((set, get) => ({
   clearRoute: () => set({ route: null, routeError: null }),
 
   // ── Place detail ──
-  selectedPlace: null, // { lat, lon, name, address, type, source, matchCode, raw, mode?, featureId?, featureLayer?, wikidata? }
-  clickMarker: null, // { lat, lon, circleRadiusPx } — visual marker for two-click selection
+  selectedPlace: null, // { lat, lon, name, address, type, source, matchCode, raw }
   gpsOrigin: true, // whether GPS should be used as origin when available
   pendingDestination: null, // place waiting for a starting point (GPS-denied Directions flow)
 
   setSelectedPlace: (place) => set({ selectedPlace: place }),
-  clearSelectedPlace: () => set({ selectedPlace: null, clickMarker: null }),
-  setClickMarker: (marker) => set({ clickMarker: marker }),
-  clearClickMarker: () => set({ clickMarker: null }),
+  clearSelectedPlace: () => set({ selectedPlace: null }),
   setGpsOrigin: (val) => set({ gpsOrigin: val }),
   setPendingDestination: (place) => set({ pendingDestination: place }),
   clearPendingDestination: () => set({ pendingDestination: null }),
@@ -85,7 +82,6 @@ export const useStore = create((set, get) => ({
       addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
       set({ selectedPlace: null })
     } else {
-      // GPS denied, no stops: set pendingDestination only; origin-picker will add both
       set({ pendingDestination: place, selectedPlace: null })
     }
   },
@@ -120,20 +116,3 @@ export const useStore = create((set, get) => ({
   setEditingContact: (c) => set({ editingContact: c }),
   clearEditingContact: () => set({ editingContact: null }),
 }))
-
-// ── Panel state selector ──
-// Returns string state, prioritizing preview to allow it alongside any route state
-export const usePanelState = () => {
-  return useStore((s) => {
-    const hasPreview = !!s.selectedPlace
-    const hasRoute = !!s.route
-    const hasStops = s.stops.length >= 1
-
-    if (hasPreview && hasRoute) return "PREVIEW_CALCULATED"
-    if (hasPreview && hasStops) return "PREVIEW_ROUTING"
-    if (hasPreview) return "PREVIEW"
-    if (hasRoute) return "ROUTE_CALCULATED"
-    if (hasStops) return "ROUTING"
-    return "IDLE"
-  })
-}

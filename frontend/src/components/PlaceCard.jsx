@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import {
-  X, Navigation, Plus, Bookmark, ChevronDown, ChevronUp, Copy,
+  X, Navigation, Plus, Bookmark, ChevronDown, ChevronUp, Copy, LogIn,
   Clock, Phone, Globe, Mail, BookOpen, Info, Trees, GripVertical,
 } from "lucide-react"
 import OpeningHours from "opening_hours"
@@ -245,7 +245,15 @@ function CopyPopover({ address, place, onClose }) {
 }
 
 export function PlaceCard({ place, variant = "preview", expanded = true, onToggleExpand, onClose, onRemove, stopIndex, draggable = false, dragHandleProps = {} }) {
-  const { contacts, userLocation, stops, geoPermission, addStop, startDirections, clearSelectedPlace, setEditingContact } = useStore()
+  const contacts = useStore((s) => s.contacts)
+  const userLocation = useStore((s) => s.userLocation)
+  const stops = useStore((s) => s.stops)
+  const geoPermission = useStore((s) => s.geoPermission)
+  const addStop = useStore((s) => s.addStop)
+  const startDirections = useStore((s) => s.startDirections)
+  const clearSelectedPlace = useStore((s) => s.clearSelectedPlace)
+  const setEditingContact = useStore((s) => s.setEditingContact)
+  const auth = useStore((s) => s.auth)
   const [elevResult, setElevResult] = useState({ lat: null, lon: null, value: null })
   const [placeDetails, setPlaceDetails] = useState(null)
   const [driveTime, setDriveTime] = useState(null)
@@ -421,7 +429,11 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
           </>
         )}
         {variant === "stop" && onRemove && <button onClick={onRemove} className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium" style={{ background: "var(--tan-muted)", color: "var(--tan)", border: "1px solid var(--border)" }}><X size={13} />Remove</button>}
-        <button onClick={handleSave} className="p-2 rounded-lg" style={{ background: savedContact ? "var(--accent-muted)" : "var(--tan-muted)", color: savedContact ? "var(--accent)" : "var(--tan)", border: "1px solid var(--border)" }} aria-label={savedContact ? "Edit saved contact" : "Save place"}><Bookmark size={14} fill={savedContact ? "currentColor" : "none"} /></button>
+        {auth.authenticated ? (
+          <button onClick={handleSave} className="p-2 rounded-lg" style={{ background: savedContact ? "var(--accent-muted)" : "var(--tan-muted)", color: savedContact ? "var(--accent)" : "var(--tan)", border: "1px solid var(--border)" }} aria-label={savedContact ? "Edit saved contact" : "Save place"}><Bookmark size={14} fill={savedContact ? "currentColor" : "none"} /></button>
+        ) : (
+          <button onClick={() => { window.location.href = "/api/auth/whoami" }} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs" style={{ background: "var(--accent-muted)", color: "var(--accent)", border: "1px solid var(--border)" }} title="Log in to save places"><LogIn size={12} /><span>Save</span></button>
+        )}
         <div className="relative">
           <button onClick={() => setCopyOpen((v) => !v)} className="p-2 rounded-lg flex items-center gap-0.5" style={{ background: "var(--tan-muted)", color: "var(--tan)", border: "1px solid var(--border)" }} aria-label="Copy"><Copy size={14} /><ChevronDown size={10} /></button>
           {copyOpen && <CopyPopover address={address} place={place} onClose={closeCopy} />}
