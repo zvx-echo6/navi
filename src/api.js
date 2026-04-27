@@ -286,3 +286,27 @@ export async function fetchLandclass(lat, lon, signal) {
     return null
   }
 }
+
+
+// ── Auth API ──
+
+/**
+ * Check authentication state via whoami endpoint.
+ * Uses redirect: manual to detect auth without triggering navigation.
+ * @returns {Promise<{authenticated: boolean, username: string|null}>}
+ */
+export async function fetchAuthState() {
+  try {
+    const resp = await fetch('/api/auth/whoami', { redirect: 'manual' })
+    // Redirect response means unauthenticated (Authentik SSO flow)
+    if (resp.type === 'opaqueredirect' || resp.status === 302) {
+      return { authenticated: false, username: null }
+    }
+    if (!resp.ok) {
+      return { authenticated: false, username: null }
+    }
+    return resp.json()
+  } catch {
+    return { authenticated: false, username: null }
+  }
+}

@@ -109,6 +109,10 @@ export const useStore = create((set, get) => ({
       localStorage.removeItem('navi-theme-override')
     }
   },
+  // ── Auth state ──
+  auth: { authenticated: false, username: null, loaded: false },
+  setAuth: (auth) => set({ auth: { ...auth, loaded: true } }),
+
   // ── Contacts ──
   contacts: [],
   contactsLoaded: false,

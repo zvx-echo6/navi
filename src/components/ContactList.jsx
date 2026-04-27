@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, MapPin, User, Phone, Radio } from 'lucide-react'
+import { Plus, MapPin, User, Phone, Radio, LogIn } from 'lucide-react'
 import { useStore } from '../store'
 import { fetchContacts } from '../api'
 
@@ -9,30 +9,40 @@ export default function ContactList() {
   const setContacts = useStore((s) => s.setContacts)
   const setEditingContact = useStore((s) => s.setEditingContact)
   const setSelectedPlace = useStore((s) => s.setSelectedPlace)
+  const auth = useStore((s) => s.auth)
 
   const [filter, setFilter] = useState('')
-  const [authFailed, setAuthFailed] = useState(false)
 
   const loadContacts = useCallback(async () => {
+    // Skip fetch entirely if not authenticated
+    if (!auth.authenticated) return
     const data = await fetchContacts()
-    if (data?.auth === false) {
-      setAuthFailed(true)
-      return
-    }
     if (Array.isArray(data)) {
       setContacts(data)
-      setAuthFailed(false)
     }
-  }, [setContacts])
+  }, [setContacts, auth.authenticated])
 
   useEffect(() => {
-    if (!contactsLoaded) loadContacts()
-  }, [contactsLoaded, loadContacts])
+    if (auth.loaded && auth.authenticated && !contactsLoaded) {
+      loadContacts()
+    }
+  }, [auth.loaded, auth.authenticated, contactsLoaded, loadContacts])
 
-  if (authFailed) {
+  // Show login prompt if not authenticated
+  if (auth.loaded && !auth.authenticated) {
     return (
-      <div className="mt-4 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
-        <p>Sign in to use contacts</p>
+      <div className="mt-6 text-center">
+        <p className="text-xs mb-3" style={{ color: 'var(--text-tertiary)' }}>
+          Sign in to save and sync your contacts
+        </p>
+        <button
+          onClick={() => { window.location.href = '/api/auth/whoami' }}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
+        >
+          <LogIn size={12} />
+          Log in
+        </button>
       </div>
     )
   }
