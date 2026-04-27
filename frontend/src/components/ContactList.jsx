@@ -36,7 +36,7 @@ export default function ContactList() {
           Sign in to save and sync your contacts
         </p>
         <button
-          onClick={() => { window.location.href = '/login' }}
+          onClick={() => { window.location.href = '/outpost.goauthentik.io/start?rd=%2F' }}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
           style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
         >

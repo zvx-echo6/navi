@@ -758,7 +758,7 @@ export default function PlaceDetail() {
           </button>
         ) : (
           <button
-            onClick={() => { window.location.href = '/login' }}
+            onClick={() => { window.location.href = '/outpost.goauthentik.io/start?rd=%2F' }}
             className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs"
             style={{ background: 'var(--accent-muted)', color: 'var(--accent)', border: '1px solid var(--border)' }}
             title="Log in to save places"

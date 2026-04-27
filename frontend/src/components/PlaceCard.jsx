@@ -432,7 +432,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
         {auth.authenticated ? (
           <button onClick={handleSave} className="p-2 rounded-lg" style={{ background: savedContact ? "var(--accent-muted)" : "var(--tan-muted)", color: savedContact ? "var(--accent)" : "var(--tan)", border: "1px solid var(--border)" }} aria-label={savedContact ? "Edit saved contact" : "Save place"}><Bookmark size={14} fill={savedContact ? "currentColor" : "none"} /></button>
         ) : (
-          <button onClick={() => { window.location.href = "/login" }} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs" style={{ background: "var(--accent-muted)", color: "var(--accent)", border: "1px solid var(--border)" }} title="Log in to save places"><LogIn size={12} /><span>Save</span></button>
+          <button onClick={() => { window.location.href = "/outpost.goauthentik.io/start?rd=%2F" }} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs" style={{ background: "var(--accent-muted)", color: "var(--accent)", border: "1px solid var(--border)" }} title="Log in to save places"><LogIn size={12} /><span>Save</span></button>
         )}
         <div className="relative">
           <button onClick={() => setCopyOpen((v) => !v)} className="p-2 rounded-lg flex items-center gap-0.5" style={{ background: "var(--tan-muted)", color: "var(--tan)", border: "1px solid var(--border)" }} aria-label="Copy"><Copy size={14} /><ChevronDown size={10} /></button>
