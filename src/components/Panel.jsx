@@ -61,7 +61,7 @@ export default function Panel({ onManeuverClick }) {
   }
 
   // Auth handlers
-  const handleLogin = () => { window.location.href = '/login' }
+  const handleLogin = () => { window.location.href = '/outpost.goauthentik.io/start?rd=%2F' }
   const handleLogout = () => { window.location.href = '/outpost.goauthentik.io/sign_out' }
 
   // Optimize stops

@@ -1046,7 +1046,14 @@ const MapView = forwardRef(function MapView(_, ref) {
 
     mapInstance.current = map
 
+    // ResizeObserver to handle layout settling, panel changes, window resize
+    const ro = new ResizeObserver(() => {
+      map.resize()
+    })
+    ro.observe(mapRef.current)
+
     return () => {
+      ro.disconnect()
       if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current)
       if (gpsMarkerRef.current) gpsMarkerRef.current.remove()
       maplibregl.removeProtocol('pmtiles')
