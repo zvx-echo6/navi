@@ -326,7 +326,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
   }, [variant, userLocation?.lat, userLocation?.lon, placeLat, placeLon])
 
   useEffect(() => {
-    if (!hasFeature("has_contacts") || placeLat == null || placeLon == null) { setNearbyLabel(null); return }
+    if (!hasFeature("has_contacts") || !auth.authenticated || placeLat == null || placeLon == null) { setNearbyLabel(null); return }
     const controller = new AbortController()
     fetchNearbyContacts(placeLat, placeLon, 75, controller.signal).then((nearby) => {
       if (!controller.signal.aborted && nearby.length > 0) setNearbyLabel(nearby[0].label)

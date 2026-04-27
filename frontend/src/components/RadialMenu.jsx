@@ -287,7 +287,6 @@ export default function RadialMenu({
             font-size: 9px;
             fill: var(--text-secondary);
             pointer-events: none;
-            user-select: none;
             transition: fill 100ms ease;
           }
 

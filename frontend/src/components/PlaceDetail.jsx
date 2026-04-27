@@ -551,7 +551,7 @@ export default function PlaceDetail() {
 
   // Fetch nearby contacts for proximity annotation
   useEffect(() => {
-    if (!hasFeature('has_contacts') || placeLat == null || placeLon == null) {
+    if (!hasFeature('has_contacts') || !auth.authenticated || placeLat == null || placeLon == null) {
       setNearbyLabel(null)
       return
     }

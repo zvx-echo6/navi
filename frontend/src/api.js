@@ -25,7 +25,7 @@ export async function searchGeocode(query, limit = 6, signal) {
   if (mapCenter?.zoom != null && Number.isFinite(mapCenter.zoom)) {
     params.set('zoom', String(Math.round(mapCenter.zoom)))
   }
-  const resp = await fetch(`${GEOCODE_URL}?${params}`, { signal, timeout: 5000 })
+  const resp = await fetch(`${GEOCODE_URL}?${params}`, { signal: signal ?? AbortSignal.timeout(5000) })
   if (!resp.ok) throw new Error(`Geocode error: ${resp.status}`)
   return resp.json()
 }
@@ -135,7 +135,7 @@ const REVERSE_URL = "/api/reverse"
 export async function fetchReverse(lat, lon) {
   try {
     const params = new URLSearchParams({ lat: String(lat), lon: String(lon) })
-    const resp = await fetch(`${REVERSE_URL}?${params}`, { timeout: 5000 })
+    const resp = await fetch(`${REVERSE_URL}?${params}`, { signal: AbortSignal.timeout(5000) })
     if (!resp.ok) return null
     const data = await resp.json()
     if (!data.results || data.results.length === 0) return null
