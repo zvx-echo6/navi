@@ -677,7 +677,7 @@ export default function PlaceDetail() {
         {(() => {
           const cat = placeDetails && placeDetails !== 'loading' ? placeDetails.category : null
           const parts = []
-          if (cat && !["poi", "unknown", ""].includes(cat.toLowerCase())) parts.push(cat)
+          if (cat && !cat.includes("_") && !["poi", "unknown", "yes", "no", "other", ""].includes(cat.toLowerCase())) parts.push(cat)
           if (nearbyLabel) parts.push(`near ${nearbyLabel}`)
           if (driveTime != null) parts.push(formatDriveTime(driveTime))
           if (parts.length === 0) return null
@@ -718,16 +718,16 @@ export default function PlaceDetail() {
       <div className="mt-auto pt-4 flex gap-2">
         <button
           onClick={handleDirections}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium"
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium"
           style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
         >
           <Navigation size={13} />
-          Directions
+          Get Directions
         </button>
 
         {existingStopIndex >= 0 ? (
           <span
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium"
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium"
             style={{ background: 'var(--accent-muted)', color: 'var(--accent)' }}
           >
             Added as stop {String.fromCharCode(65 + existingStopIndex)}
@@ -735,7 +735,7 @@ export default function PlaceDetail() {
         ) : (
           <button
             onClick={handleAddStop}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium"
+            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium"
             style={{ background: 'var(--tan-muted)', color: 'var(--tan)', border: '1px solid var(--border)' }}
           >
             <Plus size={13} />

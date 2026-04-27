@@ -396,7 +396,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
           <div className="flex flex-col min-w-0">
             <span className="text-sm font-medium truncate" style={{ color: "var(--text-primary)" }}>{(place.raw?.name || place.name) || "Unknown place"}</span>
             <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-              {place.type && !["poi", "unknown", ""].includes(place.type.toLowerCase()) && <span className="capitalize">{place.type}</span>}
+              {place.type && !place.type.includes("_") && !["poi", "unknown", "yes", "no", "other", ""].includes(place.type.toLowerCase()) && <span className="capitalize">{place.type}</span>}
               {driveTime != null && <><span>{"\u00b7"}</span><span>{formatDriveTime(driveTime)} drive</span></>}
               {nearbyLabel && <><span>{"\u00b7"}</span><span>Near {nearbyLabel}</span></>}
             </div>
@@ -420,15 +420,15 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
       <div className="mt-3 pt-3 flex gap-2" style={{ borderTop: "1px solid var(--border)" }}>
         {variant === "preview" && (
           <>
-            {stops.length < 2 && <button onClick={handleDirections} className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium" style={{ background: "var(--accent)", color: "var(--text-inverse)" }}><Navigation size={13} />Directions</button>}
+            {stops.length < 2 && <button onClick={handleDirections} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium" style={{ background: "var(--accent)", color: "var(--text-inverse)" }}><Navigation size={13} />Get Directions</button>}
             {existingStopIndex >= 0 ? (
-              <span className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium" style={{ background: "var(--accent-muted)", color: "var(--accent)" }}>Stop {String.fromCharCode(65 + existingStopIndex)}</span>
+              <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium" style={{ background: "var(--accent-muted)", color: "var(--accent)" }}>Stop {String.fromCharCode(65 + existingStopIndex)}</span>
             ) : (
-              <button onClick={handleAddStop} className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium" style={{ background: "var(--tan-muted)", color: "var(--tan)", border: "1px solid var(--border)" }}><Plus size={13} />Add stop</button>
+              <button onClick={handleAddStop} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium" style={{ background: "var(--tan-muted)", color: "var(--tan)", border: "1px solid var(--border)" }}><Plus size={13} />Add stop</button>
             )}
           </>
         )}
-        {variant === "stop" && onRemove && <button onClick={onRemove} className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-medium" style={{ background: "var(--tan-muted)", color: "var(--tan)", border: "1px solid var(--border)" }}><X size={13} />Remove</button>}
+        {variant === "stop" && onRemove && <button onClick={onRemove} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium" style={{ background: "var(--tan-muted)", color: "var(--tan)", border: "1px solid var(--border)" }}><X size={13} />Remove</button>}
         {auth.authenticated ? (
           <button onClick={handleSave} className="p-2 rounded-lg" style={{ background: savedContact ? "var(--accent-muted)" : "var(--tan-muted)", color: savedContact ? "var(--accent)" : "var(--tan)", border: "1px solid var(--border)" }} aria-label={savedContact ? "Edit saved contact" : "Save place"}><Bookmark size={14} fill={savedContact ? "currentColor" : "none"} /></button>
         ) : (
