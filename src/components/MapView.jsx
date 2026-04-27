@@ -1504,7 +1504,7 @@ const MapView = forwardRef(function MapView(_, ref) {
       >
         Z {zoomLevel.toFixed(1)}
       </div>
-      {/* Radial menu disabled until actions are wired
+      {/* Radial context menu */}
       <RadialMenu
         open={radialMenu.open}
         x={radialMenu.x}
@@ -1515,7 +1515,6 @@ const MapView = forwardRef(function MapView(_, ref) {
         centerLabel={radialMenu.centerLabel}
         onDismiss={() => setRadialMenu((m) => ({ ...m, open: false }))}
       />
-      */}
     </div>
   )
 })
