@@ -593,6 +593,28 @@ function removeContoursTest10ft(map) {
   if (map.getLayer(CONTOUR_TEST_10FT_MINOR)) map.removeLayer(CONTOUR_TEST_10FT_MINOR)
   if (map.getSource(CONTOUR_TEST_10FT_SOURCE)) map.removeSource(CONTOUR_TEST_10FT_SOURCE)
 }
+/** Add boundary polygon layer with computed accent color (MapLibre rejects CSS vars in paint) */
+function addBoundaryLayer(map) {
+  if (!map || map.getLayer(BOUNDARY_LAYER)) return
+  if (!map.getSource(BOUNDARY_SOURCE)) {
+    map.addSource(BOUNDARY_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    })
+  }
+  const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#7a9a6b"
+  map.addLayer({
+    id: BOUNDARY_LAYER,
+    type: "line",
+    source: BOUNDARY_SOURCE,
+    paint: {
+      "line-color": accentColor,
+      "line-width": 2,
+      "line-opacity": 0.7,
+      "line-dasharray": [3, 2],
+    },
+  })
+}
 
 const MapView = forwardRef(function MapView(_, ref) {
   const mapRef = useRef(null)
@@ -977,22 +999,8 @@ const MapView = forwardRef(function MapView(_, ref) {
         data: { type: 'FeatureCollection', features: [] },
       })
 
-      // Boundary polygon source for selected places
-      map.addSource(BOUNDARY_SOURCE, {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      })
-      map.addLayer({
-        id: BOUNDARY_LAYER,
-        type: 'line',
-        source: BOUNDARY_SOURCE,
-        paint: {
-          'line-color': 'var(--accent)',
-          'line-width': 2,
-          'line-opacity': 0.7,
-          'line-dasharray': [3, 2],
-        },
-      })
+      // Boundary polygon layer for selected places
+      addBoundaryLayer(map)
 
       // Restore overlay layers from localStorage prefs
       try {
@@ -1125,22 +1133,8 @@ const MapView = forwardRef(function MapView(_, ref) {
         data: { type: 'FeatureCollection', features: [] },
       })
 
-      // Boundary polygon source
-      map.addSource(BOUNDARY_SOURCE, {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      })
-      map.addLayer({
-        id: BOUNDARY_LAYER,
-        type: 'line',
-        source: BOUNDARY_SOURCE,
-        paint: {
-          'line-color': 'var(--accent)',
-          'line-width': 2,
-          'line-opacity': 0.7,
-          'line-dasharray': [3, 2],
-        },
-      })
+      // Boundary polygon layer
+      addBoundaryLayer(map)
 
       // Re-add active overlay layers
       if (activeLayersRef.current.hillshade) addHillshade(map)

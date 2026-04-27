@@ -14,6 +14,7 @@ export default function Panel({ onManeuverClick }) {
   const selectedPlace = useStore((s) => s.selectedPlace)
   const pendingDestination = useStore((s) => s.pendingDestination)
   const clearSelectedPlace = useStore((s) => s.clearSelectedPlace)
+  const clearPendingDestination = useStore((s) => s.clearPendingDestination)
   const stops = useStore((s) => s.stops)
   const mode = useStore((s) => s.mode)
   const route = useStore((s) => s.route)
@@ -172,6 +173,14 @@ export default function Panel({ onManeuverClick }) {
                 className="navi-btn-secondary w-full"
               >
                 {optimizing ? 'Optimizing...' : 'Optimize stop order'}
+              </button>
+            )}
+            {pendingDestination && stops.length === 0 && (
+              <button
+                onClick={clearPendingDestination}
+                className="navi-btn-secondary w-full"
+              >
+                Cancel
               </button>
             )}
           </div>
