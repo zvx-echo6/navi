@@ -292,7 +292,18 @@ export async function fetchLandclass(lat, lon, signal) {
 
 /**
  * Check authentication state via whoami endpoint.
- * Uses redirect: manual to detect auth without triggering navigation.
+ *
+ * PATTERN: Uses fetch with redirect:'manual' to detect Authentik SSO state
+ * without triggering browser navigation. When unauthenticated, Caddy's
+ * forward_auth returns a 302 redirect to Authentik. With redirect:'manual',
+ * the browser exposes this as resp.type === 'opaqueredirect' instead of
+ * following the redirect.
+ *
+ * DEPENDENCIES:
+ * - /api/auth/whoami must be in Caddy's @authed_user path matcher
+ * - Authentik proxy outpost must return 302 (not 401) for unauthed requests
+ * - If Authentik changes to return 401, update the status check below
+ *
  * @returns {Promise<{authenticated: boolean, username: string|null}>}
  */
 export async function fetchAuthState() {
