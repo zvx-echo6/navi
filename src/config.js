@@ -31,7 +31,7 @@ const FALLBACK_CONFIG = {
     has_public_lands_layer: false,
     has_contours: true,
     has_contours_test: true,
-    has_contours_test_10ft: true,
+    has_contours_test_10ft: false,
     has_address_book_write: false,
     has_contacts: false,
   },
