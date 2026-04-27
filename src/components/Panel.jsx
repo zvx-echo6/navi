@@ -62,7 +62,7 @@ export default function Panel({ onManeuverClick }) {
 
   // Auth handlers
   const handleLogin = () => { window.location.href = '/outpost.goauthentik.io/start?rd=%2F' }
-  const handleLogout = () => { window.location.href = '/outpost.goauthentik.io/sign_out' }
+  const handleLogout = () => { window.location.href = 'https://auth.echo6.co/if/flow/default-invalidation-flow/?next=https://navi.echo6.co/' }
 
   // Optimize stops
   const hasGpsOrigin = gpsOrigin && geoPermission === 'granted'
