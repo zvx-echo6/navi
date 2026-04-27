@@ -1284,8 +1284,8 @@ const MapView = forwardRef(function MapView(_, ref) {
     if (!map) return
     if (!map.isStyleLoaded()) {
       const handler = () => updateRoute(map, route)
-      map.once('load', handler)
-      return () => map.off('load', handler)
+      map.once('idle', handler)
+      return () => map.off('idle', handler)
     }
     updateRoute(map, route)
   }, [route])
