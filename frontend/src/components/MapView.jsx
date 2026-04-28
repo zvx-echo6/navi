@@ -830,6 +830,12 @@ const MapView = forwardRef(function MapView(_, ref) {
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
 
+    // Scale bar control
+    map.addControl(new maplibregl.ScaleControl({
+      maxWidth: 120,
+      unit: 'imperial',
+    }), 'bottom-right')
+
     // Map click — two-click selection model
     map.on('click', (e) => {
       // If a stop pin was just clicked, skip
