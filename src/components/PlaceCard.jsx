@@ -420,7 +420,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
       <div className="mt-3 pt-3 flex gap-2" style={{ borderTop: "1px solid var(--border)" }}>
         {variant === "preview" && (
           <>
-            {stops.length < 2 && <button onClick={handleDirections} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium" style={{ background: "var(--accent)", color: "var(--text-inverse)" }}><Navigation size={13} />Get Directions</button>}
+            {stops.length < 2 && <button onClick={handleDirections} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium" style={{ background: "var(--accent)", color: "var(--text-inverse)", whiteSpace: "nowrap" }}><Navigation size={13} />Get Directions</button>}
             {existingStopIndex >= 0 ? (
               <span className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-medium" style={{ background: "var(--accent-muted)", color: "var(--accent)" }}>Stop {String.fromCharCode(65 + existingStopIndex)}</span>
             ) : (
