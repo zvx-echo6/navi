@@ -7,7 +7,7 @@ import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse } from '../api'
 import { getConfig, hasFeature } from '../config'
-import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star, Ruler } from 'lucide-react'
+import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star, Ruler, X } from 'lucide-react'
 import RadialMenu from './RadialMenu'
 import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
@@ -653,6 +653,9 @@ const MapView = forwardRef(function MapView(_, ref) {
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
   const highlightedFeatureRef = useRef(null) // { source, sourceLayer, id } for setFeatureState
+  // Refs for measurement state (accessible in click handlers)
+  const measuringRef = useRef({ active: false, points: [] })
+  const measureLabelsRef = useRef([]) // HTML label elements
 
   const stops = useStore((s) => s.stops)
   const route = useStore((s) => s.route)
@@ -681,15 +684,20 @@ const MapView = forwardRef(function MapView(_, ref) {
     lon: 0,
     centerLabel: null,
   })
-  // Measurement mode state
-  const [measuring, setMeasuring] = useState({ active: false, points: [] })
+  // Measurement mode state (for UI rendering)
+  const [measuring, setMeasuring] = useState({ active: false, points: [], totalMeters: 0 })
 
+  // Sync state to ref for click handler access
+  const updateMeasuringState = (newState) => {
+    measuringRef.current = newState
+    setMeasuring(newState)
+  }
 
   // Update measurement layer with current points
   const updateMeasureLayer = (points) => {
     const map = mapInstance.current
     if (!map || !map.getSource(MEASURE_SOURCE)) return
-    
+
     const features = []
     // Add points
     points.forEach((p, i) => {
@@ -716,16 +724,167 @@ const MapView = forwardRef(function MapView(_, ref) {
     })
   }
 
-  // Clear measurement mode
+  // Update segment labels (HTML overlays)
+  const updateMeasureLabels = (points) => {
+    const map = mapInstance.current
+    if (!map) return
+
+    // Remove old labels
+    measureLabelsRef.current.forEach(el => el.remove())
+    measureLabelsRef.current = []
+
+    if (points.length < 2) return
+
+    const container = mapRef.current
+    if (!container) return
+
+    // Create label for each segment
+    for (let i = 1; i < points.length; i++) {
+      const p1 = points[i - 1]
+      const p2 = points[i]
+      const midLat = (p1.lat + p2.lat) / 2
+      const midLon = (p1.lon + p2.lon) / 2
+      const dist = haversineDistance(p1.lat, p1.lon, p2.lat, p2.lon)
+
+      const label = document.createElement('div')
+      label.className = 'measure-label'
+      label.textContent = formatDistance(dist)
+      label.style.cssText = `
+        position: absolute;
+        background: rgba(0, 0, 0, 0.75);
+        color: white;
+        padding: 2px 6px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 500;
+        pointer-events: none;
+        white-space: nowrap;
+        z-index: 100;
+        transform: translate(-50%, -50%);
+      `
+
+      const pos = map.project([midLon, midLat])
+      label.style.left = pos.x + 'px'
+      label.style.top = pos.y + 'px'
+
+      container.appendChild(label)
+      measureLabelsRef.current.push(label)
+    }
+  }
+
+  // Reposition labels on map move/zoom
+  const repositionLabels = () => {
+    const map = mapInstance.current
+    const points = measuringRef.current.points
+    if (!map || points.length < 2) return
+
+    measureLabelsRef.current.forEach((label, i) => {
+      if (i >= points.length - 1) return
+      const p1 = points[i]
+      const p2 = points[i + 1]
+      const midLat = (p1.lat + p2.lat) / 2
+      const midLon = (p1.lon + p2.lon) / 2
+      const pos = map.project([midLon, midLat])
+      label.style.left = pos.x + 'px'
+      label.style.top = pos.y + 'px'
+    })
+  }
+
+  // Clear measurement mode completely
   const clearMeasuring = () => {
     const map = mapInstance.current
-    setMeasuring({ active: false, points: [] })
+    updateMeasuringState({ active: false, points: [], totalMeters: 0 })
+
+    // Remove labels
+    measureLabelsRef.current.forEach(el => el.remove())
+    measureLabelsRef.current = []
+
     if (map) {
       map.getCanvas().style.cursor = ""
+      map.doubleClickZoom.enable()
       if (map.getLayer(MEASURE_LINE_LAYER)) map.removeLayer(MEASURE_LINE_LAYER)
       if (map.getLayer(MEASURE_POINT_LAYER)) map.removeLayer(MEASURE_POINT_LAYER)
       if (map.getSource(MEASURE_SOURCE)) map.removeSource(MEASURE_SOURCE)
     }
+  }
+
+  // End measurement (keep line visible, exit active mode)
+  const endMeasuring = () => {
+    const map = mapInstance.current
+    if (map) {
+      map.getCanvas().style.cursor = ""
+      map.doubleClickZoom.enable()
+    }
+    updateMeasuringState({ ...measuringRef.current, active: false })
+  }
+
+  // Start new measurement
+  const startMeasuring = (lat, lon) => {
+    const map = mapInstance.current
+    if (!map) return
+
+    // Clear any existing measurement first
+    measureLabelsRef.current.forEach(el => el.remove())
+    measureLabelsRef.current = []
+    if (map.getLayer(MEASURE_LINE_LAYER)) map.removeLayer(MEASURE_LINE_LAYER)
+    if (map.getLayer(MEASURE_POINT_LAYER)) map.removeLayer(MEASURE_POINT_LAYER)
+    if (map.getSource(MEASURE_SOURCE)) map.removeSource(MEASURE_SOURCE)
+
+    // Set up new measurement
+    updateMeasuringState({ active: true, points: [{ lat, lon }], totalMeters: 0 })
+    map.getCanvas().style.cursor = "crosshair"
+    map.doubleClickZoom.disable()
+
+    // Add source and layers
+    map.addSource(MEASURE_SOURCE, {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    })
+    const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#7a9a6b"
+    map.addLayer({
+      id: MEASURE_LINE_LAYER,
+      type: "line",
+      source: MEASURE_SOURCE,
+      paint: {
+        "line-color": accentColor,
+        "line-width": 2,
+        "line-dasharray": [8, 4],
+      },
+    })
+    map.addLayer({
+      id: MEASURE_POINT_LAYER,
+      type: "circle",
+      source: MEASURE_SOURCE,
+      filter: ["==", "$type", "Point"],
+      paint: {
+        "circle-radius": 5,
+        "circle-color": accentColor,
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#1a1a1a",
+      },
+    })
+    updateMeasureLayer([{ lat, lon }])
+  }
+
+  // Add a point to the measurement
+  const addMeasurePoint = (lat, lon) => {
+    const current = measuringRef.current
+    if (!current.active) return
+
+    const newPoints = [...current.points, { lat, lon }]
+
+    // Calculate total distance
+    let totalMeters = 0
+    for (let i = 1; i < newPoints.length; i++) {
+      totalMeters += haversineDistance(
+        newPoints[i - 1].lat, newPoints[i - 1].lon,
+        newPoints[i].lat, newPoints[i].lon
+      )
+    }
+
+    updateMeasuringState({ active: true, points: newPoints, totalMeters })
+    updateMeasureLayer(newPoints)
+    updateMeasureLabels(newPoints)
   }
 
   const radialWedges = [
@@ -814,40 +973,7 @@ const MapView = forwardRef(function MapView(_, ref) {
       icon: Ruler,
       onSelect: () => {
         setRadialMenu((m) => ({ ...m, open: false }))
-        const map = mapInstance.current
-        if (!map) return
-        setMeasuring({ active: true, points: [{ lat: radialMenu.lat, lon: radialMenu.lon }] })
-        map.getCanvas().style.cursor = "crosshair"
-        if (!map.getSource(MEASURE_SOURCE)) {
-          map.addSource(MEASURE_SOURCE, {
-            type: "geojson",
-            data: { type: "FeatureCollection", features: [] },
-          })
-          const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#7a9a6b"
-          map.addLayer({
-            id: MEASURE_LINE_LAYER,
-            type: "line",
-            source: MEASURE_SOURCE,
-            paint: {
-              "line-color": accentColor,
-              "line-width": 2,
-              "line-dasharray": [8, 4],
-            },
-          })
-          map.addLayer({
-            id: MEASURE_POINT_LAYER,
-            type: "circle",
-            source: MEASURE_SOURCE,
-            filter: ["==", "$type", "Point"],
-            paint: {
-              "circle-radius": 4,
-              "circle-color": accentColor,
-              "circle-stroke-width": 1,
-              "circle-stroke-color": "#fff",
-            },
-          })
-        }
-        updateMeasureLayer([{ lat: radialMenu.lat, lon: radialMenu.lon }])
+        startMeasuring(radialMenu.lat, radialMenu.lon)
       },
     },
   ]
@@ -855,6 +981,9 @@ const MapView = forwardRef(function MapView(_, ref) {
   const handleContextMenuTrigger = ({ x, y }) => {
     const map = mapInstance.current
     if (!map || !mapRef.current) return
+
+    // Suppress context menu during measurement mode
+    if (measuringRef.current.active) return
 
     // Convert screen coords to lat/lon
     const rect = mapRef.current.getBoundingClientRect()
@@ -1003,24 +1132,10 @@ const MapView = forwardRef(function MapView(_, ref) {
         return
       }
 
-      // Handle measuring mode
-      const measureState = measuring
-      if (measureState.active) {
+      // CRITICAL: Check measuring mode FIRST using ref (not stale closure)
+      if (measuringRef.current.active) {
         const { lng, lat } = e.lngLat
-        const newPoints = [...measureState.points, { lat, lon: lng }]
-        setMeasuring({ ...measureState, points: newPoints })
-        updateMeasureLayer(newPoints)
-        // Calculate and show total distance
-        if (newPoints.length > 1) {
-          let totalMeters = 0
-          for (let i = 1; i < newPoints.length; i++) {
-            totalMeters += haversineDistance(
-              newPoints[i - 1].lat, newPoints[i - 1].lon,
-              newPoints[i].lat, newPoints[i].lon
-            )
-          }
-          toast(formatDistance(totalMeters), { icon: "📏", duration: 2000 })
-        }
+        addMeasurePoint(lat, lng)
         return
       }
 
@@ -1107,7 +1222,7 @@ const MapView = forwardRef(function MapView(_, ref) {
         // Query rendered features at click point (label/POI priority)
         const labelLayers = ['pois', 'places_subplace', 'places_locality', 'places_region', 'places_country']
         const features = map.queryRenderedFeatures(e.point, { layers: labelLayers })
-        
+
         // Find first feature with a name (respects layer order = priority)
         const labelFeature = features.find(f => f.properties?.name)
 
@@ -1203,15 +1318,19 @@ const MapView = forwardRef(function MapView(_, ref) {
       }
     })
 
-    // Double-click ends measurement mode
+    // Double-click ends measurement mode (and prevents zoom)
     map.on('dblclick', (e) => {
-      if (measuring.active) {
+      if (measuringRef.current.active) {
         e.preventDefault()
-        // Keep the measurement visible but exit measuring mode
-        setMeasuring((m) => ({ ...m, active: false }))
-        map.getCanvas().style.cursor = ''
+        // Add final point and end
+        const { lng, lat } = e.lngLat
+        addMeasurePoint(lat, lng)
+        endMeasuring()
       }
     })
+
+    // Reposition measure labels on map move
+    map.on('move', repositionLabels)
 
     // Initialize mapCenter immediately when map loads (Fix 1: search viewport)
     map.once('load', () => {
@@ -1259,14 +1378,18 @@ const MapView = forwardRef(function MapView(_, ref) {
 
       // POI/label hover affordance — cursor pointer
       const interactiveLayers = ['pois', 'places_locality', 'places_region', 'places_country', 'places_subplace']
-      
+
       interactiveLayers.forEach(layerId => {
         map.on('mouseenter', layerId, () => {
-          map.getCanvas().style.cursor = 'pointer'
+          if (!measuringRef.current.active) {
+            map.getCanvas().style.cursor = 'pointer'
+          }
         })
-        
+
         map.on('mouseleave', layerId, () => {
-          map.getCanvas().style.cursor = ''
+          if (!measuringRef.current.active) {
+            map.getCanvas().style.cursor = ''
+          }
         })
       })
     })
@@ -1283,6 +1406,9 @@ const MapView = forwardRef(function MapView(_, ref) {
       ro.disconnect()
       if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current)
       if (gpsMarkerRef.current) gpsMarkerRef.current.remove()
+      // Clean up measure labels
+      measureLabelsRef.current.forEach(el => el.remove())
+      measureLabelsRef.current = []
       maplibregl.removeProtocol('pmtiles')
       map.remove()
     }
@@ -1446,7 +1572,7 @@ const MapView = forwardRef(function MapView(_, ref) {
 
     // Get boundary from selectedPlace (may come from API response)
     const boundary = selectedPlace.boundary || selectedPlace.raw?.boundary
-    
+
     // Update boundary layer
     if (boundary && (boundary.type === 'Polygon' || boundary.type === 'MultiPolygon')) {
       source.setData({
@@ -1457,10 +1583,10 @@ const MapView = forwardRef(function MapView(_, ref) {
 
       // Zoom to fit boundary
       try {
-        const coords = boundary.type === 'Polygon' 
+        const coords = boundary.type === 'Polygon'
           ? boundary.coordinates[0]
           : boundary.coordinates.flat(1)
-        
+
         if (coords.length > 0) {
           let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity
           for (const [lng, lat] of coords) {
@@ -1481,18 +1607,18 @@ const MapView = forwardRef(function MapView(_, ref) {
     } else {
       // No boundary - clear the layer and zoom based on feature kind
       source.setData({ type: 'FeatureCollection', features: [] })
-      
+
       // Only zoom for feature mode selections (not terrain clicks)
       if (selectedPlace.mode === 'feature' && selectedPlace.source === 'basemap_label') {
         const kind = selectedPlace.raw?.kind || selectedPlace.type || ''
         let targetZoom = null
-        
+
         if (kind.includes('country')) targetZoom = 5
         else if (kind.includes('region' ) || kind.includes('state')) targetZoom = 7
         else if (kind.includes('locality' ) || kind.includes('city')) targetZoom = 11
         else if (kind.includes('subplace' ) || kind.includes('neighbourhood') || kind.includes('neighborhood')) targetZoom = 13
         else if (kind.includes('poi')) targetZoom = 16
-        
+
         // Only zoom in, never zoom out
         if (targetZoom && map.getZoom() < targetZoom) {
           map.flyTo({
@@ -1670,13 +1796,13 @@ const MapView = forwardRef(function MapView(_, ref) {
   // ESC key handler for measurement mode
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === "Escape" && measuring.active) {
-        clearMeasuring()
+      if (e.key === "Escape" && measuringRef.current.active) {
+        endMeasuring()
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [measuring.active])
+  }, [])
 
   // Handle location pick mode for contacts
   useEffect(() => {
@@ -1686,11 +1812,11 @@ const MapView = forwardRef(function MapView(_, ref) {
       map.getCanvas().style.cursor = 'crosshair'
     }
     return () => {
-      if (map && !measuring.active) {
+      if (map && !measuringRef.current.active) {
         map.getCanvas().style.cursor = ''
       }
     }
-  }, [pickingLocationFor, measuring.active])
+  }, [pickingLocationFor])
 
   // ESC key handler for location pick mode
   useEffect(() => {
@@ -1714,17 +1840,17 @@ const MapView = forwardRef(function MapView(_, ref) {
     if (!map) return
 
     const updateZoom = () => setZoomLevel(map.getZoom())
-    
+
     // Set initial zoom
     if (map.loaded()) {
       updateZoom()
     } else {
       map.once("load", updateZoom)
     }
-    
+
     // Subscribe to zoom changes
     map.on("zoom", updateZoom)
-    
+
     return () => {
       map.off("zoom", updateZoom)
     }
@@ -1773,6 +1899,59 @@ const MapView = forwardRef(function MapView(_, ref) {
       >
         Z {zoomLevel.toFixed(1)}
       </div>
+
+      {/* Measurement info bar */}
+      {(measuring.active || measuring.points.length > 1) && (
+        <div
+          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2 rounded-lg"
+          style={{
+            backgroundColor: "rgba(0, 0, 0, 0.8)",
+            color: "white",
+            fontSize: "13px",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+          }}
+        >
+          <Ruler size={16} style={{ opacity: 0.8 }} />
+          <span>
+            <strong>{formatDistance(measuring.totalMeters)}</strong>
+            <span style={{ opacity: 0.7, marginLeft: "6px" }}>
+              ({measuring.points.length} {measuring.points.length === 1 ? "point" : "points"})
+            </span>
+          </span>
+          {measuring.active && (
+            <span style={{ opacity: 0.6, fontSize: "11px" }}>
+              Click to add points
+            </span>
+          )}
+          <button
+            onClick={endMeasuring}
+            className="px-2 py-1 rounded text-xs font-medium"
+            style={{
+              background: "var(--accent)",
+              color: "white",
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            Done
+          </button>
+          <button
+            onClick={clearMeasuring}
+            className="p-1 rounded"
+            style={{
+              background: "transparent",
+              color: "white",
+              border: "none",
+              cursor: "pointer",
+              opacity: 0.7,
+            }}
+            title="Clear measurement"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {/* Radial context menu */}
       <RadialMenu
         open={radialMenu.open}
