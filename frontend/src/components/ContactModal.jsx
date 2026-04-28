@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, Trash2 } from 'lucide-react'
+import { X, Trash2, MapPin } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useStore } from '../store'
-import { createContact, updateContact, deleteContact, fetchContacts } from '../api'
+import { createContact, updateContact, deleteContact, fetchContacts, fetchReverse } from '../api'
 
 const CATEGORIES = ['family', 'friend', 'business', 'emergency', 'ham', 'bug-out', 'favorite']
 
@@ -34,6 +34,25 @@ export default function ContactModal() {
     }
   }, [editingContact])
 
+  // Auto-populate address from reverse geocode when lat/lon exist but address is empty
+  useEffect(() => {
+    if (!editingContact) return
+    const hasGeo = form.lat != null && form.lon != null
+    const addressEmpty = !form.address || form.address.trim() === ''
+    if (hasGeo && addressEmpty) {
+      let cancelled = false
+      fetchReverse(form.lat, form.lon).then((place) => {
+        if (!cancelled && place) {
+          const addr = place.address || place.name || ''
+          if (addr) {
+            setForm((f) => ({ ...f, address: addr }))
+          }
+        }
+      })
+      return () => { cancelled = true }
+    }
+  }, [editingContact, form.lat, form.lon])
+
   const close = useCallback(() => clearEditingContact(), [clearEditingContact])
 
   useEffect(() => {
@@ -46,6 +65,7 @@ export default function ContactModal() {
   if (!editingContact) return null
 
   const isEdit = editingContact.id != null
+  const hasGeo = form.lat != null && form.lon != null
 
   const setField = (key, val) => setForm((f) => ({ ...f, [key]: val }))
 
@@ -102,8 +122,6 @@ export default function ContactModal() {
     }
   }
 
-  const hasGeo = form.lat != null && form.lon != null
-
   return (
     <div className="contact-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close() }}>
       <div className="contact-modal">
@@ -143,6 +161,32 @@ export default function ContactModal() {
             onChange={(e) => setField('label', e.target.value)}
             placeholder="e.g. Home, Work, Mom, Bug Out"
           />
+        </div>
+
+        {/* Address */}
+        <div className="mb-3">
+          <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>Address</label>
+          <input
+            className="navi-input w-full"
+            value={form.address}
+            onChange={(e) => setField('address', e.target.value)}
+            placeholder="Street address, city, state..."
+          />
+        </div>
+
+        {/* Location */}
+        <div className="mb-3">
+          <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>Location</label>
+          {hasGeo ? (
+            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-primary)' }}>
+              <MapPin size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+              <span>{form.lat.toFixed(6)}, {form.lon.toFixed(6)}</span>
+            </div>
+          ) : (
+            <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              No location — save from a place card to attach coordinates
+            </div>
+          )}
         </div>
 
         {/* Category */}
@@ -205,14 +249,6 @@ export default function ContactModal() {
           />
           Show "near {form.label || '...'}" on nearby places
         </label>
-
-        {/* Geo info (read-only) */}
-        {hasGeo && (
-          <div className="mb-3 text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>
-            {form.lat.toFixed(6)}, {form.lon.toFixed(6)}
-            {form.address && <span className="ml-2">{form.address}</span>}
-          </div>
-        )}
 
         {/* Actions */}
         <div className="flex gap-2 mt-4">
