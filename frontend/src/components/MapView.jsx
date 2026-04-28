@@ -665,6 +665,9 @@ const MapView = forwardRef(function MapView(_, ref) {
   const geoPermission = useStore((s) => s.geoPermission)
   const setSheetState = useStore((s) => s.setSheetState)
   const setMapCenter = useStore((s) => s.setMapCenter)
+  const pickingLocationFor = useStore((s) => s.pickingLocationFor)
+  const setEditingContact = useStore((s) => s.setEditingContact)
+  const clearPickingLocationFor = useStore((s) => s.clearPickingLocationFor)
 
   // Zoom level indicator state
   const [zoomLevel, setZoomLevel] = useState(10)
@@ -1020,6 +1023,35 @@ const MapView = forwardRef(function MapView(_, ref) {
         }
         return
       }
+
+      // Handle location pick mode for contacts
+      const pickState = useStore.getState().pickingLocationFor
+      if (pickState) {
+        const { lng, lat } = e.lngLat
+        map.getCanvas().style.cursor = ''
+        // Reverse geocode for address
+        fetchReverse(lat, lng).then((place) => {
+          const addr = place?.address || place?.name || ''
+          // Rebuild form data with new location
+          useStore.getState().setEditingContact({
+            ...pickState,
+            lat,
+            lon: lng,
+            address: addr || pickState.address || '',
+          })
+          useStore.getState().clearPickingLocationFor()
+        }).catch(() => {
+          // Even if reverse geocode fails, set the location
+          useStore.getState().setEditingContact({
+            ...pickState,
+            lat,
+            lon: lng,
+          })
+          useStore.getState().clearPickingLocationFor()
+        })
+        return
+      }
+
 
 
       const store = useStore.getState()
@@ -1645,6 +1677,36 @@ const MapView = forwardRef(function MapView(_, ref) {
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [measuring.active])
+
+  // Handle location pick mode for contacts
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map) return
+    if (pickingLocationFor) {
+      map.getCanvas().style.cursor = 'crosshair'
+    }
+    return () => {
+      if (map && !measuring.active) {
+        map.getCanvas().style.cursor = ''
+      }
+    }
+  }, [pickingLocationFor, measuring.active])
+
+  // ESC key handler for location pick mode
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && pickingLocationFor) {
+        // Cancel pick mode, reopen modal with original form data
+        const map = mapInstance.current
+        if (map) map.getCanvas().style.cursor = ''
+        setEditingContact(pickingLocationFor)
+        clearPickingLocationFor()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [pickingLocationFor, setEditingContact, clearPickingLocationFor])
+
 
   // Track zoom level for indicator
   useEffect(() => {

@@ -1,22 +1,31 @@
-import { useState, useEffect, useCallback } from 'react'
-import { X, Trash2, MapPin } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { X, Trash2, MapPin, Crosshair } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useStore } from '../store'
-import { createContact, updateContact, deleteContact, fetchContacts, fetchReverse } from '../api'
+import { createContact, updateContact, deleteContact, fetchContacts, fetchReverse, searchGeocode } from '../api'
 
 const CATEGORIES = ['family', 'friend', 'business', 'emergency', 'ham', 'bug-out', 'favorite']
 
 export default function ContactModal() {
   const editingContact = useStore((s) => s.editingContact)
   const clearEditingContact = useStore((s) => s.clearEditingContact)
+  const setPickingLocationFor = useStore((s) => s.setPickingLocationFor)
   const setContacts = useStore((s) => s.setContacts)
 
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
 
+  // Geocode search state
+  const [searchResults, setSearchResults] = useState([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [showDropdown, setShowDropdown] = useState(false)
+  const debounceRef = useRef(null)
+  const inputRef = useRef(null)
+
   useEffect(() => {
     if (editingContact) {
       setForm({
+        id: editingContact.id,
         label: editingContact.label || '',
         name: editingContact.name || '',
         call_sign: editingContact.call_sign || '',
@@ -31,6 +40,8 @@ export default function ContactModal() {
         osm_id: editingContact.osm_id || null,
         address: editingContact.address || '',
       })
+      setSearchResults([])
+      setShowDropdown(false)
     }
   }, [editingContact])
 
@@ -53,14 +64,29 @@ export default function ContactModal() {
     }
   }, [editingContact, form.lat, form.lon])
 
+  // Cleanup debounce on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [])
+
   const close = useCallback(() => clearEditingContact(), [clearEditingContact])
 
   useEffect(() => {
     if (!editingContact) return
-    const onKey = (e) => { if (e.key === 'Escape') close() }
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        if (showDropdown) {
+          setShowDropdown(false)
+        } else {
+          close()
+        }
+      }
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [editingContact, close])
+  }, [editingContact, close, showDropdown])
 
   if (!editingContact) return null
 
@@ -68,6 +94,57 @@ export default function ContactModal() {
   const hasGeo = form.lat != null && form.lon != null
 
   const setField = (key, val) => setForm((f) => ({ ...f, [key]: val }))
+
+  // Handle address input change with debounced geocode search
+  const handleAddressChange = (e) => {
+    const query = e.target.value
+    setField('address', query)
+
+    // Clear previous debounce
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+
+    if (!query || query.length < 3) {
+      setSearchResults([])
+      setShowDropdown(false)
+      return
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      setSearchLoading(true)
+      try {
+        const results = await searchGeocode(query, 5)
+        setSearchResults(results || [])
+        setShowDropdown(true)
+      } catch (err) {
+        console.error('Geocode search error:', err)
+        setSearchResults([])
+      } finally {
+        setSearchLoading(false)
+      }
+    }, 300)
+  }
+
+  // Handle selecting a geocode result
+  const handleSelectResult = (result) => {
+    setForm((f) => ({
+      ...f,
+      address: result.display_name || result.name || '',
+      lat: result.lat,
+      lon: result.lon,
+      osm_type: result.osm_type || null,
+      osm_id: result.osm_id || null,
+    }))
+    setShowDropdown(false)
+    setSearchResults([])
+  }
+
+  // Handle "Set on map" button
+  const handleSetOnMap = () => {
+    // Save current form state to store for map pick mode
+    setPickingLocationFor({ ...form })
+    clearEditingContact()
+    toast('Click the map to set location', { icon: '📍', duration: 3000 })
+  }
 
   const refreshContacts = async () => {
     const data = await fetchContacts()
@@ -83,6 +160,7 @@ export default function ContactModal() {
     setSaving(true)
     try {
       const payload = { ...form, label: form.label.trim() }
+      delete payload.id // Don't send id in payload
       if (payload.show_proximity === false) payload.show_proximity = false
       const result = isEdit
         ? await updateContact(editingContact.id, payload)
@@ -120,6 +198,15 @@ export default function ContactModal() {
     } finally {
       setSaving(false)
     }
+  }
+
+  // Format result for display
+  const formatResult = (r) => {
+    const parts = []
+    if (r.name) parts.push(r.name)
+    if (r.address?.city) parts.push(r.address.city)
+    if (r.address?.state) parts.push(r.address.state)
+    return parts.length > 0 ? parts.join(', ') : r.display_name || 'Unknown location'
   }
 
   return (
@@ -163,30 +250,85 @@ export default function ContactModal() {
           />
         </div>
 
-        {/* Address */}
-        <div className="mb-3">
+        {/* Address with geocode search */}
+        <div className="mb-3 relative">
           <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>Address</label>
           <input
+            ref={inputRef}
             className="navi-input w-full"
             value={form.address}
-            onChange={(e) => setField('address', e.target.value)}
-            placeholder="Street address, city, state..."
+            onChange={handleAddressChange}
+            onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
+            onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+            placeholder="Type to search or enter address..."
           />
-        </div>
-
-        {/* Location */}
-        <div className="mb-3">
-          <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>Location</label>
-          {hasGeo ? (
-            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-primary)' }}>
-              <MapPin size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-              <span>{form.lat.toFixed(6)}, {form.lon.toFixed(6)}</span>
-            </div>
-          ) : (
-            <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              No location — save from a place card to attach coordinates
+          {searchLoading && (
+            <div className="absolute right-2 top-7 text-xs" style={{ color: 'var(--text-tertiary)' }}>...</div>
+          )}
+          {/* Dropdown results */}
+          {showDropdown && searchResults.length > 0 && (
+            <div
+              className="absolute left-0 right-0 mt-1 rounded-lg overflow-hidden z-50"
+              style={{
+                background: 'var(--bg-raised)',
+                border: '1px solid var(--border)',
+                boxShadow: 'var(--shadow-lg)',
+                maxHeight: '200px',
+                overflowY: 'auto',
+              }}
+            >
+              {searchResults.map((r, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-xs hover:opacity-80"
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--text-primary)',
+                    borderBottom: i < searchResults.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                  }}
+                  onMouseDown={() => handleSelectResult(r)}
+                >
+                  <div className="truncate">{formatResult(r)}</div>
+                  {r.display_name && r.display_name !== formatResult(r) && (
+                    <div className="truncate text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                      {r.display_name}
+                    </div>
+                  )}
+                </button>
+              ))}
             </div>
           )}
+        </div>
+
+        {/* Location display + Set on map button */}
+        <div className="mb-3">
+          <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>Location</label>
+          <div className="flex items-center gap-2">
+            {hasGeo ? (
+              <div className="flex items-center gap-2 text-xs flex-1" style={{ color: 'var(--text-primary)' }}>
+                <MapPin size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                <span>{form.lat.toFixed(6)}, {form.lon.toFixed(6)}</span>
+              </div>
+            ) : (
+              <div className="text-xs flex-1" style={{ color: 'var(--text-tertiary)' }}>
+                No location set
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleSetOnMap}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs"
+              style={{
+                background: 'var(--bg-overlay)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <Crosshair size={12} />
+              Set on map
+            </button>
+          </div>
         </div>
 
         {/* Category */}

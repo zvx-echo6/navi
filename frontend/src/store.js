@@ -118,11 +118,14 @@ export const useStore = create((set, get) => ({
   contactsLoaded: false,
   activeTab: 'routes', // 'routes' | 'contacts'
   editingContact: null, // null=closed, {}=new, {id:N}=edit
+  pickingLocationFor: null, // form data while user picks location on map
 
   setContacts: (c) => set({ contacts: c, contactsLoaded: true }),
   setActiveTab: (tab) => set({ activeTab: tab }),
   setEditingContact: (c) => set({ editingContact: c }),
   clearEditingContact: () => set({ editingContact: null }),
+  setPickingLocationFor: (formData) => set({ pickingLocationFor: formData }),
+  clearPickingLocationFor: () => set({ pickingLocationFor: null }),
 }))
 
 // ── Panel state selector ──
