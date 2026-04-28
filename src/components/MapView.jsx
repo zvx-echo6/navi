@@ -7,7 +7,7 @@ import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse } from '../api'
 import { getConfig, hasFeature } from '../config'
-import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star } from 'lucide-react'
+import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star, Ruler } from 'lucide-react'
 import RadialMenu from './RadialMenu'
 import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
@@ -39,6 +39,9 @@ const CONTOUR_TEST_10FT_MINOR = 'contour-test-10ft-minor'
 const CONTOUR_TEST_10FT_INTERMEDIATE = 'contour-test-10ft-intermediate'
 const CONTOUR_TEST_10FT_INDEX = 'contour-test-10ft-index'
 const CONTOUR_TEST_10FT_LABEL = 'contour-test-10ft-label'
+const MEASURE_SOURCE = 'measure-source'
+const MEASURE_LINE_LAYER = 'measure-line-layer'
+const MEASURE_POINT_LAYER = 'measure-point-layer'
 
 /** Build a full MapLibre style object for the given theme */
 function buildStyle(themeName) {
@@ -62,6 +65,26 @@ function buildStyle(themeName) {
 }
 
 /** SVG for ATAK-style chevron pointing up (will be rotated via CSS) */
+/** Calculate haversine distance between two points in meters */
+function haversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371000 // Earth radius in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+/** Format distance for display (feet/miles, imperial) */
+function formatDistance(meters) {
+  const feet = meters * 3.28084
+  if (feet < 1000) return Math.round(feet) + " ft"
+  const miles = feet / 5280
+  return miles < 10 ? miles.toFixed(2) + " mi" : miles.toFixed(1) + " mi"
+}
+
 const CHEVRON_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
   <path d="M8 1 L14 13 L8 10 L2 13 Z" fill="var(--accent)" stroke="var(--bg-raised)" stroke-width="1.5" stroke-linejoin="round"/>
 </svg>`
@@ -655,43 +678,176 @@ const MapView = forwardRef(function MapView(_, ref) {
     lon: 0,
     centerLabel: null,
   })
+  // Measurement mode state
+  const [measuring, setMeasuring] = useState({ active: false, points: [] })
 
-  // Expose map methods to parent
-  // Radial menu wedges configuration
+
+  // Update measurement layer with current points
+  const updateMeasureLayer = (points) => {
+    const map = mapInstance.current
+    if (!map || !map.getSource(MEASURE_SOURCE)) return
+    
+    const features = []
+    // Add points
+    points.forEach((p, i) => {
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+        properties: { index: i },
+      })
+    })
+    // Add line if more than one point
+    if (points.length > 1) {
+      features.push({
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: points.map((p) => [p.lon, p.lat]),
+        },
+        properties: {},
+      })
+    }
+    map.getSource(MEASURE_SOURCE).setData({
+      type: "FeatureCollection",
+      features,
+    })
+  }
+
+  // Clear measurement mode
+  const clearMeasuring = () => {
+    const map = mapInstance.current
+    setMeasuring({ active: false, points: [] })
+    if (map) {
+      map.getCanvas().style.cursor = ""
+      if (map.getLayer(MEASURE_LINE_LAYER)) map.removeLayer(MEASURE_LINE_LAYER)
+      if (map.getLayer(MEASURE_POINT_LAYER)) map.removeLayer(MEASURE_POINT_LAYER)
+      if (map.getSource(MEASURE_SOURCE)) map.removeSource(MEASURE_SOURCE)
+    }
+  }
+
   const radialWedges = [
     {
-      id: 'drop-pin',
-      label: 'Drop pin',
-      icon: MapPin,
-      onSelect: () => toast('Drop pin coming soon', { icon: '📍' }),
-    },
-    {
-      id: 'directions-to',
-      label: 'To here',
+      id: "directions-to",
+      label: "To here",
       icon: ArrowDownLeft,
-      onSelect: () => toast('Directions to here coming soon', { icon: '🧭' }),
+      onSelect: () => {
+        setRadialMenu((m) => ({ ...m, open: false }))
+        const place = {
+          lat: radialMenu.lat,
+          lon: radialMenu.lon,
+          name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
+          source: "radial_menu",
+          matchCode: null,
+        }
+        useStore.getState().startDirections(place)
+      },
     },
     {
-      id: 'save-place',
-      label: 'Save',
+      id: "directions-from",
+      label: "From here",
+      icon: ArrowUpRight,
+      onSelect: () => {
+        setRadialMenu((m) => ({ ...m, open: false }))
+        const { clearStops, addStop } = useStore.getState()
+        clearStops()
+        const place = {
+          lat: radialMenu.lat,
+          lon: radialMenu.lon,
+          name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
+          source: "radial_menu",
+          matchCode: null,
+        }
+        addStop(place)
+        useStore.setState({ gpsOrigin: false })
+      },
+    },
+    {
+      id: "add-stop",
+      label: "Add stop",
+      icon: Plus,
+      onSelect: () => {
+        setRadialMenu((m) => ({ ...m, open: false }))
+        const { stops, addStop, clearStops } = useStore.getState()
+        const place = {
+          lat: radialMenu.lat,
+          lon: radialMenu.lon,
+          name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
+          source: "radial_menu",
+          matchCode: null,
+        }
+        if (stops.length === 0) {
+          addStop(place)
+          useStore.setState({ gpsOrigin: false })
+        } else {
+          const success = addStop(place)
+          if (!success) {
+            toast("Maximum 10 stops reached")
+          }
+        }
+      },
+    },
+    {
+      id: "save-place",
+      label: "Save",
       icon: Star,
       requiresAuth: true,
-      onSelect: () => toast('Save place coming soon', { icon: '⭐' }),
+      onSelect: () => {
+        setRadialMenu((m) => ({ ...m, open: false }))
+        const { auth, setEditingContact } = useStore.getState()
+        if (auth.authenticated) {
+          setEditingContact({
+            label: "",
+            lat: radialMenu.lat,
+            lon: radialMenu.lon,
+          })
+        } else {
+          toast("Log in to save places")
+        }
+      },
     },
     {
-      id: 'add-stop',
-      label: 'Add stop',
-      icon: Plus,
-      onSelect: () => toast('Add stop coming soon', { icon: '➕' }),
-    },
-    {
-      id: 'directions-from',
-      label: 'From here',
-      icon: ArrowUpRight,
-      onSelect: () => toast('Directions from here coming soon', { icon: '🧭' }),
+      id: "measure",
+      label: "Measure",
+      icon: Ruler,
+      onSelect: () => {
+        setRadialMenu((m) => ({ ...m, open: false }))
+        const map = mapInstance.current
+        if (!map) return
+        setMeasuring({ active: true, points: [{ lat: radialMenu.lat, lon: radialMenu.lon }] })
+        map.getCanvas().style.cursor = "crosshair"
+        if (!map.getSource(MEASURE_SOURCE)) {
+          map.addSource(MEASURE_SOURCE, {
+            type: "geojson",
+            data: { type: "FeatureCollection", features: [] },
+          })
+          const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#7a9a6b"
+          map.addLayer({
+            id: MEASURE_LINE_LAYER,
+            type: "line",
+            source: MEASURE_SOURCE,
+            paint: {
+              "line-color": accentColor,
+              "line-width": 2,
+              "line-dasharray": [8, 4],
+            },
+          })
+          map.addLayer({
+            id: MEASURE_POINT_LAYER,
+            type: "circle",
+            source: MEASURE_SOURCE,
+            filter: ["==", "$type", "Point"],
+            paint: {
+              "circle-radius": 4,
+              "circle-color": accentColor,
+              "circle-stroke-width": 1,
+              "circle-stroke-color": "#fff",
+            },
+          })
+        }
+        updateMeasureLayer([{ lat: radialMenu.lat, lon: radialMenu.lon }])
+      },
     },
   ]
-
   // Context menu trigger handler
   const handleContextMenuTrigger = ({ x, y }) => {
     const map = mapInstance.current
@@ -844,6 +1000,28 @@ const MapView = forwardRef(function MapView(_, ref) {
         return
       }
 
+      // Handle measuring mode
+      const measureState = measuring
+      if (measureState.active) {
+        const { lng, lat } = e.lngLat
+        const newPoints = [...measureState.points, { lat, lon: lng }]
+        setMeasuring({ ...measureState, points: newPoints })
+        updateMeasureLayer(newPoints)
+        // Calculate and show total distance
+        if (newPoints.length > 1) {
+          let totalMeters = 0
+          for (let i = 1; i < newPoints.length; i++) {
+            totalMeters += haversineDistance(
+              newPoints[i - 1].lat, newPoints[i - 1].lon,
+              newPoints[i].lat, newPoints[i].lon
+            )
+          }
+          toast(formatDistance(totalMeters), { icon: "📏", duration: 2000 })
+        }
+        return
+      }
+
+
       const store = useStore.getState()
       const marker = store.clickMarker
 
@@ -992,6 +1170,17 @@ const MapView = forwardRef(function MapView(_, ref) {
         }
       }
     })
+
+    // Double-click ends measurement mode
+    map.on('dblclick', (e) => {
+      if (measuring.active) {
+        e.preventDefault()
+        // Keep the measurement visible but exit measuring mode
+        setMeasuring((m) => ({ ...m, active: false }))
+        map.getCanvas().style.cursor = ''
+      }
+    })
+
     // Initialize mapCenter immediately when map loads (Fix 1: search viewport)
     map.once('load', () => {
       const center = map.getCenter()
@@ -1444,6 +1633,18 @@ const MapView = forwardRef(function MapView(_, ref) {
       }
     }
   }, [stops, route, gpsOrigin, geoPermission])
+
+
+  // ESC key handler for measurement mode
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && measuring.active) {
+        clearMeasuring()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [measuring.active])
 
   // Track zoom level for indicator
   useEffect(() => {
