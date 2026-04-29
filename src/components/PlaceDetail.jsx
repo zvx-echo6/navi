@@ -6,7 +6,7 @@ import {
 import OpeningHours from 'opening_hours'
 import toast from 'react-hot-toast'
 import { useStore } from '../store'
-import { fetchElevation, fetchPlaceDetails, fetchPlaceByWikidata, fetchDriveTime, fetchNearbyContacts, fetchLandclass } from '../api'
+import { fetchElevation, fetchPlaceDetails, fetchPlaceByWikidata, fetchDriveTime, fetchNearbyContacts, fetchLandclass, fetchReverse } from '../api'
 import { hasFeature } from '../config'
 import { buildAddress } from '../utils/place'
 
@@ -513,6 +513,31 @@ export default function PlaceDetail() {
     })
     return () => { cancelled = true }
   }, [placeLat, placeLon])
+
+  // Reverse geocode to get OSM type/id if not present (e.g., basemap label clicks)
+  useEffect(() => {
+    if (!hasFeature('has_nominatim_details')) return
+    if (selectedPlace?.raw?.osm_type && selectedPlace?.raw?.osm_id) return
+    if (placeLat == null || placeLon == null) return
+    // Skip for dropped pins - they get reverse geocoded by MapView
+    if (selectedPlace?.source === 'map_click') return
+    
+    const controller = new AbortController()
+    fetchReverse(placeLat, placeLon).then((result) => {
+      if (controller.signal.aborted) return
+      if (result?.raw?.osm_type && result?.raw?.osm_id) {
+        const current = useStore.getState().selectedPlace
+        if (current && current.lat === placeLat && current.lon === placeLon) {
+          useStore.getState().setSelectedPlace({ 
+            ...current, 
+            raw: { ...current.raw, osm_type: result.raw.osm_type, osm_id: result.raw.osm_id }
+          })
+        }
+      }
+    })
+    return () => controller.abort()
+  }, [placeLat, placeLon, selectedPlace?.raw?.osm_type, selectedPlace?.raw?.osm_id, selectedPlace?.source])
+
 
   // Fetch place details when place changes (if feature enabled)
   const osmType = selectedPlace?.raw?.osm_type
