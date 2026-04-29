@@ -10,6 +10,30 @@ import { fetchElevation, fetchPlaceDetails, fetchPlaceByWikidata, fetchDriveTime
 import { hasFeature } from '../config'
 import { buildAddress } from '../utils/place'
 
+
+// Wiki service icons (simplified monochrome versions)
+const WikipediaIcon = ({ size = 13, style }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" fill="currentColor"/>
+  </svg>
+)
+
+const WikivoyageIcon = ({ size = 13, style }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
+    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
+  </svg>
+)
+
+const WikidataIcon = ({ size = 13, style }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={style}>
+    <rect x="3" y="4" width="2" height="16" rx="0.5" fill="currentColor"/>
+    <rect x="7" y="4" width="2" height="16" rx="0.5" fill="currentColor"/>
+    <rect x="11" y="4" width="2" height="16" rx="0.5" fill="currentColor"/>
+    <rect x="15" y="8" width="2" height="8" rx="0.5" fill="currentColor"/>
+    <rect x="19" y="4" width="2" height="16" rx="0.5" fill="currentColor"/>
+  </svg>
+)
+
 /** Meters to feet */
 const M_TO_FT = 3.28084
 
@@ -322,7 +346,7 @@ function EnrichmentSections({ details }) {
       {hasLinks && (
         <DetailSection label="Links" icon={BookOpen} first={idx++ === 0}>
           <div className="flex flex-col gap-1.5">
-            {et.wikipedia && (wiki_url ? (
+            {wiki_url ? (
               <a
                 href={wiki_url}
                 target="_blank"
@@ -330,11 +354,11 @@ function EnrichmentSections({ details }) {
                 className="flex items-center gap-2 text-xs"
                 style={{ color: 'var(--accent)' }}
               >
-                <BookOpen size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-                <span>{wikiLabel(et.wikipedia)}</span>
+                <WikipediaIcon size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                <span>Wikipedia</span>
                 <span style={{ color: 'var(--text-tertiary)', fontSize: '9px' }}>(local)</span>
               </a>
-            ) : wikiUrl(et.wikipedia) && (
+            ) : et.wikipedia && wikiUrl(et.wikipedia) && (
               <a
                 href={wikiUrl(et.wikipedia)}
                 target="_blank"
@@ -342,10 +366,10 @@ function EnrichmentSections({ details }) {
                 className="flex items-center gap-2 text-xs"
                 style={{ color: 'var(--accent)' }}
               >
-                <BookOpen size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-                {wikiLabel(et.wikipedia)}
+                <WikipediaIcon size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                <span>Wikipedia</span>
               </a>
-            ))}
+            )}
             {wikivoyage_url && (
               <a
                 href={wikivoyage_url}
@@ -354,8 +378,8 @@ function EnrichmentSections({ details }) {
                 className="flex items-center gap-2 text-xs"
                 style={{ color: 'var(--accent)' }}
               >
-                <Map size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-                <span>Travel guide</span>
+                <WikivoyageIcon size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                <span>Wikivoyage</span>
                 <span style={{ color: 'var(--text-tertiary)', fontSize: '9px' }}>(local)</span>
               </a>
             )}
@@ -364,10 +388,11 @@ function EnrichmentSections({ details }) {
                 href={`https://www.wikidata.org/wiki/${et.wikidata}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[11px]"
-                style={{ color: 'var(--text-tertiary)', textDecoration: 'underline' }}
+                className="flex items-center gap-2 text-xs"
+                style={{ color: 'var(--accent)' }}
               >
-                View on Wikidata
+                <WikidataIcon size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                <span>Wikidata</span>
               </a>
             )}
           </div>
@@ -439,36 +464,6 @@ function WikiSummarySection({ details }) {
           <span>Population: {details.wiki_population.toLocaleString ? details.wiki_population.toLocaleString() : details.wiki_population}</span>
         </div>
       )}
-
-      {/* Wiki links */}
-      <div className="flex flex-wrap gap-3 text-xs">
-        {details.wiki_url && (
-          <a
-            href={details.wiki_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5"
-            style={{ color: 'var(--accent)' }}
-          >
-            <BookOpen size={12} />
-            <span>Read more</span>
-            <span style={{ color: 'var(--text-tertiary)', fontSize: '10px' }}>(local)</span>
-          </a>
-        )}
-        {details.wikivoyage_url && (
-          <a
-            href={details.wikivoyage_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5"
-            style={{ color: 'var(--accent)' }}
-          >
-            <Map size={12} />
-            <span>Travel guide</span>
-            <span style={{ color: 'var(--text-tertiary)', fontSize: '10px' }}>(local)</span>
-          </a>
-        )}
-      </div>
     </div>
   )
 }
