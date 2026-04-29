@@ -1724,7 +1724,7 @@ const MapView = forwardRef(function MapView(_, ref) {
       map.once('load', updateBoundary)
       return () => map.off('load', updateBoundary)
     }
-  }, [selectedPlace])
+  }, [selectedPlace, selectedPlace?.boundary])
 
   // Update route polyline when route changes
   useEffect(() => {
