@@ -1252,6 +1252,12 @@ const MapView = forwardRef(function MapView(_, ref) {
           // Outside circle → deselect, no new selection
           store.clearClickMarker()
           store.clearSelectedPlace()
+          // Clear boundary when deselecting
+          const boundarySource = map.getSource(BOUNDARY_SOURCE)
+          if (boundarySource) {
+            boundarySource.setData({ type: 'FeatureCollection', features: [] })
+          }
+          setSelectedHighlight(map, null)
         }
       } else {
         // State A: nothing selected → select
@@ -1267,7 +1273,7 @@ const MapView = forwardRef(function MapView(_, ref) {
         // Find first feature with a name (respects layer order = priority)
         const labelFeature = features.find(f => f.properties?.name)
 
-        // Clear previous feature highlight
+        // Clear previous feature highlight and boundary
           if (highlightedFeatureRef.current) {
             const { source, sourceLayer, id } = highlightedFeatureRef.current
             try {
@@ -1276,6 +1282,11 @@ const MapView = forwardRef(function MapView(_, ref) {
             highlightedFeatureRef.current = null
           }
           setSelectedHighlight(map, null)
+          // Clear old boundary before setting new place
+          const boundarySource = map.getSource(BOUNDARY_SOURCE)
+          if (boundarySource) {
+            boundarySource.setData({ type: 'FeatureCollection', features: [] })
+          }
 
           if (labelFeature) {
           // Clicked a labeled feature — snap to geometry and highlight
@@ -1330,6 +1341,11 @@ const MapView = forwardRef(function MapView(_, ref) {
           })
         } else {
           // No labeled feature — show reticle at click point
+          // Clear any existing boundary when clicking empty map
+          const boundarySource = map.getSource(BOUNDARY_SOURCE)
+          if (boundarySource) {
+            boundarySource.setData({ type: 'FeatureCollection', features: [] })
+          }
           store.setClickMarker({
             lat,
             lon: lng,
