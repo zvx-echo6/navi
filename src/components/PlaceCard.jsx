@@ -224,13 +224,13 @@ function EnrichmentSkeleton() {
 
 function EnrichmentSections({ details }) {
   if (!details) return null
-  const { category, extratags } = details
+  const { category, extratags, wiki_url, wikivoyage_url } = details
   const et = extratags || {}
   const hasAbout = category
   const hasHours = et.opening_hours
   const hasContact = et.phone || et.website || et.email
   const hasDetails = et.cuisine || et.operator || et.fee || et.wheelchair || et.takeaway
-  const hasLinks = et.wikipedia || et.wikidata
+  const hasLinks = et.wikipedia || et.wikidata || wiki_url || wikivoyage_url
   if (!hasAbout && !hasHours && !hasContact && !hasDetails && !hasLinks) return null
   let idx = 0
   return (
@@ -264,7 +264,25 @@ function EnrichmentSections({ details }) {
       {hasLinks && (
         <DetailSection label="Links" icon={BookOpen} first={idx++ === 0}>
           <div className="flex flex-col gap-1.5">
-            {et.wikipedia && wikiUrl(et.wikipedia) && <a href={wikiUrl(et.wikipedia)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs" style={{ color: "var(--accent)" }}><BookOpen size={13} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />{wikiLabel(et.wikipedia)}</a>}
+            {et.wikipedia && (wiki_url ? (
+              <a href={wiki_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs" style={{ color: "var(--accent)" }}>
+                <BookOpen size={13} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
+                <span>{wikiLabel(et.wikipedia)}</span>
+                <span style={{ color: "var(--text-tertiary)", fontSize: "9px" }}>(local)</span>
+              </a>
+            ) : wikiUrl(et.wikipedia) && (
+              <a href={wikiUrl(et.wikipedia)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs" style={{ color: "var(--accent)" }}>
+                <BookOpen size={13} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
+                {wikiLabel(et.wikipedia)}
+              </a>
+            ))}
+            {wikivoyage_url && (
+              <a href={wikivoyage_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs" style={{ color: "var(--accent)" }}>
+                <Map size={13} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
+                <span>Travel guide</span>
+                <span style={{ color: "var(--text-tertiary)", fontSize: "9px" }}>(local)</span>
+              </a>
+            )}
             {et.wikidata && <a href={"https://www.wikidata.org/wiki/" + et.wikidata} target="_blank" rel="noopener noreferrer" className="text-[11px]" style={{ color: "var(--text-tertiary)", textDecoration: "underline" }}>View on Wikidata</a>}
           </div>
         </DetailSection>
