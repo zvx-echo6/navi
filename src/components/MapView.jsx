@@ -57,13 +57,13 @@ function setupHighlightLayers(map, isDark) {
     map.addLayer({
       id: 'hover-hl-' + sourceLayer, type: 'symbol', source: 'protomaps', 'source-layer': sourceLayer,
       filter: EMPTY_FILTER,
-      layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': ['Noto Sans Medium'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 10, 14, 16, 18], 'text-allow-overlap': true, 'text-ignore-placement': true },
+      layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': ['Noto Sans Regular'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 10, 14, 16, 18], 'text-allow-overlap': true, 'text-ignore-placement': true },
       paint: { 'text-color': isDark ? '#ffffff' : '#000000', 'text-halo-color': isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)', 'text-halo-width': 2.5 },
     })
     map.addLayer({
       id: 'selected-hl-' + sourceLayer, type: 'symbol', source: 'protomaps', 'source-layer': sourceLayer,
       filter: EMPTY_FILTER,
-      layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 10, 14, 16, 18], 'text-allow-overlap': true, 'text-ignore-placement': true },
+      layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': ['Noto Sans Regular'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 10, 14, 16, 18], 'text-allow-overlap': true, 'text-ignore-placement': true },
       paint: { 'text-color': accentColor, 'text-halo-color': isDark ? 'rgba(122,154,107,0.5)' : 'rgba(122,154,107,0.3)', 'text-halo-width': 3 },
     })
   })
@@ -1386,13 +1386,18 @@ const MapView = forwardRef(function MapView(_, ref) {
     })
 
     map.on('load', () => {
-      map.addSource(ROUTE_SOURCE, {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      })
+      // Guard against double-mount in React strict mode
+      if (!map.getSource(ROUTE_SOURCE)) {
+        map.addSource(ROUTE_SOURCE, {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+      }
 
       // Boundary polygon layer for selected places
-      addBoundaryLayer(map)
+      if (!map.getLayer(BOUNDARY_LAYER)) {
+        addBoundaryLayer(map)
+      }
 
       // Restore overlay layers from localStorage prefs
       try {
@@ -1544,13 +1549,18 @@ const MapView = forwardRef(function MapView(_, ref) {
 
     // Re-add sources/layers after style swap
     map.once('style.load', () => {
-      map.addSource(ROUTE_SOURCE, {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      })
+      // Guard against source already existing
+      if (!map.getSource(ROUTE_SOURCE)) {
+        map.addSource(ROUTE_SOURCE, {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        })
+      }
 
       // Boundary polygon layer
-      addBoundaryLayer(map)
+      if (!map.getLayer(BOUNDARY_LAYER)) {
+        addBoundaryLayer(map)
+      }
 
       // Re-add active overlay layers
       if (activeLayersRef.current.hillshade) addHillshade(map)
@@ -1618,75 +1628,85 @@ const MapView = forwardRef(function MapView(_, ref) {
   // Boundary polygon and zoom-to-feature
   useEffect(() => {
     const map = mapInstance.current
-    if (!map || !map.isStyleLoaded()) return
+    if (!map) return
 
-    const source = map.getSource(BOUNDARY_SOURCE)
-    if (!source) return
+    const updateBoundary = () => {
+      const source = map.getSource(BOUNDARY_SOURCE)
+      if (!source) return
 
-    // Clear boundary if no place selected
-    if (!selectedPlace) {
-      source.setData({ type: 'FeatureCollection', features: [] })
-      return
+      // Clear boundary if no place selected
+      if (!selectedPlace) {
+        source.setData({ type: 'FeatureCollection', features: [] })
+        return
+      }
+
+      // Get boundary from selectedPlace (may come from API response)
+      const boundary = selectedPlace.boundary || selectedPlace.raw?.boundary
+
+      // Update boundary layer
+      if (boundary && (boundary.type === 'Polygon' || boundary.type === 'MultiPolygon')) {
+        source.setData({
+          type: 'Feature',
+          geometry: boundary,
+          properties: {},
+        })
+
+        // Zoom to fit boundary
+        try {
+          const coords = boundary.type === 'Polygon'
+            ? boundary.coordinates[0]
+            : boundary.coordinates.flat(1)
+
+          if (coords.length > 0) {
+            let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity
+            for (const [lng, lat] of coords) {
+              if (lng < minLng) minLng = lng
+              if (lng > maxLng) maxLng = lng
+              if (lat < minLat) minLat = lat
+              if (lat > maxLat) maxLat = lat
+            }
+            map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+              padding: 50,
+              duration: 700,
+              maxZoom: 16,
+            })
+          }
+        } catch (e) {
+          console.warn('fitBounds error:', e)
+        }
+      } else {
+        // No boundary - clear the layer and zoom based on feature kind
+        source.setData({ type: 'FeatureCollection', features: [] })
+
+        // Only zoom for feature mode selections (not terrain clicks)
+        if (selectedPlace.mode === 'feature' && selectedPlace.source === 'basemap_label') {
+          const kind = selectedPlace.raw?.kind || selectedPlace.type || ''
+          let targetZoom = null
+
+          if (kind.includes('country')) targetZoom = 5
+          else if (kind.includes('region' ) || kind.includes('state')) targetZoom = 7
+          else if (kind.includes('locality' ) || kind.includes('city')) targetZoom = 11
+          else if (kind.includes('subplace' ) || kind.includes('neighbourhood') || kind.includes('neighborhood')) targetZoom = 13
+          else if (kind.includes('poi')) targetZoom = 16
+
+          // Only zoom in, never zoom out
+          if (targetZoom && map.getZoom() < targetZoom) {
+            map.flyTo({
+              center: [selectedPlace.lon, selectedPlace.lat],
+              zoom: targetZoom,
+              duration: 700,
+            })
+          }
+        }
+      }
     }
 
-    // Get boundary from selectedPlace (may come from API response)
-    const boundary = selectedPlace.boundary || selectedPlace.raw?.boundary
-
-    // Update boundary layer
-    if (boundary && (boundary.type === 'Polygon' || boundary.type === 'MultiPolygon')) {
-      source.setData({
-        type: 'Feature',
-        geometry: boundary,
-        properties: {},
-      })
-
-      // Zoom to fit boundary
-      try {
-        const coords = boundary.type === 'Polygon'
-          ? boundary.coordinates[0]
-          : boundary.coordinates.flat(1)
-
-        if (coords.length > 0) {
-          let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity
-          for (const [lng, lat] of coords) {
-            if (lng < minLng) minLng = lng
-            if (lng > maxLng) maxLng = lng
-            if (lat < minLat) minLat = lat
-            if (lat > maxLat) maxLat = lat
-          }
-          map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
-            padding: 50,
-            duration: 700,
-            maxZoom: 16,
-          })
-        }
-      } catch (e) {
-        console.warn('fitBounds error:', e)
-      }
+    // If style is loaded, update immediately; otherwise wait for load event
+    if (map.isStyleLoaded()) {
+      updateBoundary()
     } else {
-      // No boundary - clear the layer and zoom based on feature kind
-      source.setData({ type: 'FeatureCollection', features: [] })
-
-      // Only zoom for feature mode selections (not terrain clicks)
-      if (selectedPlace.mode === 'feature' && selectedPlace.source === 'basemap_label') {
-        const kind = selectedPlace.raw?.kind || selectedPlace.type || ''
-        let targetZoom = null
-
-        if (kind.includes('country')) targetZoom = 5
-        else if (kind.includes('region' ) || kind.includes('state')) targetZoom = 7
-        else if (kind.includes('locality' ) || kind.includes('city')) targetZoom = 11
-        else if (kind.includes('subplace' ) || kind.includes('neighbourhood') || kind.includes('neighborhood')) targetZoom = 13
-        else if (kind.includes('poi')) targetZoom = 16
-
-        // Only zoom in, never zoom out
-        if (targetZoom && map.getZoom() < targetZoom) {
-          map.flyTo({
-            center: [selectedPlace.lon, selectedPlace.lat],
-            zoom: targetZoom,
-            duration: 700,
-          })
-        }
-      }
+      map.once('load', updateBoundary)
+      return () => map.off('load', updateBoundary)
     }
   }, [selectedPlace])
 
