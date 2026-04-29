@@ -382,6 +382,9 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
           const current = useStore.getState().selectedPlace
           if (current && current.lat === placeLat && current.lon === placeLon) {
             useStore.getState().setSelectedPlace({ ...current, boundary: data.boundary })
+            // Call updateBoundary directly - bypass React render cycle
+            const updateBoundary = useStore.getState().updateBoundary
+            if (updateBoundary) updateBoundary(data.boundary)
           }
         }
       }
@@ -406,6 +409,9 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
           const current = useStore.getState().selectedPlace
           if (current && current.lat === placeLat && current.lon === placeLon) {
             useStore.getState().setSelectedPlace({ ...current, boundary: data.boundary })
+            // Call updateBoundary directly - bypass React render cycle
+            const updateBoundary = useStore.getState().updateBoundary
+            if (updateBoundary) updateBoundary(data.boundary)
           }
         }
       }

@@ -65,6 +65,10 @@ export const useStore = create((set, get) => ({
   pendingDestination: null, // place waiting for a starting point (GPS-denied Directions flow)
 
   setSelectedPlace: (place) => set({ selectedPlace: place }),
+
+  // Boundary rendering function - set by MapView, called by PlaceCard
+  updateBoundary: null,
+  setUpdateBoundary: (fn) => set({ updateBoundary: fn }),
   clearSelectedPlace: () => set({ selectedPlace: null, clickMarker: null }),
   setClickMarker: (marker) => set({ clickMarker: marker }),
   clearClickMarker: () => set({ clickMarker: null }),
