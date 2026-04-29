@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import {
   X, Navigation, Plus, Bookmark, ChevronDown, ChevronUp, Copy, LogIn,
-  Clock, Phone, Globe, Mail, BookOpen, Info, Trees, GripVertical,
+  Clock, Phone, Globe, Mail, BookOpen, Info, Trees, GripVertical, Map, Users,
 } from "lucide-react"
 import OpeningHours from "opening_hours"
 import toast from "react-hot-toast"
@@ -154,6 +154,60 @@ function PrivateLandIndicator({ data }) {
   return (
     <div className="mt-2 px-2 py-1.5 rounded text-xs" style={{ background: "var(--warning-muted)", color: "var(--warning)", border: "1px solid var(--warning)" }}>
       Private land — permission required
+    </div>
+  )
+}
+
+
+function WikiSummarySection({ details }) {
+  // Gate on has_kiwix_wiki feature flag
+  if (!hasFeature('has_kiwix_wiki')) return null
+  if (!details || !details.wiki_summary) return null
+
+  return (
+    <div className="mt-2 flex flex-col gap-1.5" style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+      {/* Summary text */}
+      <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+        {details.wiki_summary}
+      </p>
+
+      {/* Population */}
+      {details.wiki_population && (
+        <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+          <Users size={11} />
+          <span>Pop. {details.wiki_population.toLocaleString ? details.wiki_population.toLocaleString() : details.wiki_population}</span>
+        </div>
+      )}
+
+      {/* Wiki links */}
+      <div className="flex flex-wrap gap-2 text-[11px]">
+        {details.wiki_url && (
+          <a
+            href={details.wiki_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1"
+            style={{ color: 'var(--accent)' }}
+          >
+            <BookOpen size={11} />
+            <span>Read more</span>
+            <span style={{ color: 'var(--text-tertiary)', fontSize: '9px' }}>(local)</span>
+          </a>
+        )}
+        {details.wikivoyage_url && (
+          <a
+            href={details.wikivoyage_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1"
+            style={{ color: 'var(--accent)' }}
+          >
+            <Map size={11} />
+            <span>Travel guide</span>
+            <span style={{ color: 'var(--text-tertiary)', fontSize: '9px' }}>(local)</span>
+          </a>
+        )}
+      </div>
     </div>
   )
 }
@@ -417,6 +471,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
       <PrivateLandIndicator data={landclass} />
       {placeDetails === "loading" && <EnrichmentSkeleton />}
       {placeDetails && placeDetails !== "loading" && <EnrichmentSections details={placeDetails} />}
+      {placeDetails && placeDetails !== "loading" && <WikiSummarySection details={placeDetails} />}
       <div className="mt-3 pt-3 flex gap-2" style={{ borderTop: "1px solid var(--border)" }}>
         {variant === "preview" && (
           <>

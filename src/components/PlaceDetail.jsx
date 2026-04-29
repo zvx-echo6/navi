@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import {
   X, Navigation, Plus, Bookmark, ChevronDown, ChevronUp, Copy, LogIn,
-  Clock, Phone, Globe, Mail, BookOpen, Info, Trees,
+  Clock, Phone, Globe, Mail, BookOpen, Info, Trees, Map, Users,
 } from 'lucide-react'
 import OpeningHours from 'opening_hours'
 import toast from 'react-hot-toast'
@@ -394,6 +394,60 @@ function PrivateLandIndicator({ data }) {
   )
 }
 
+
+function WikiSummarySection({ details }) {
+  // Gate on has_kiwix_wiki feature flag
+  if (!hasFeature('has_kiwix_wiki')) return null
+  if (!details || !details.wiki_summary) return null
+
+  return (
+    <div className="mt-3 flex flex-col gap-2" style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
+      {/* Summary text */}
+      <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+        {details.wiki_summary}
+      </p>
+
+      {/* Population */}
+      {details.wiki_population && (
+        <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          <Users size={12} />
+          <span>Population: {details.wiki_population.toLocaleString ? details.wiki_population.toLocaleString() : details.wiki_population}</span>
+        </div>
+      )}
+
+      {/* Wiki links */}
+      <div className="flex flex-wrap gap-3 text-xs">
+        {details.wiki_url && (
+          <a
+            href={details.wiki_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5"
+            style={{ color: 'var(--accent)' }}
+          >
+            <BookOpen size={12} />
+            <span>Read more</span>
+            <span style={{ color: 'var(--text-tertiary)', fontSize: '10px' }}>(local)</span>
+          </a>
+        )}
+        {details.wikivoyage_url && (
+          <a
+            href={details.wikivoyage_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5"
+            style={{ color: 'var(--accent)' }}
+          >
+            <Map size={12} />
+            <span>Travel guide</span>
+            <span style={{ color: 'var(--text-tertiary)', fontSize: '10px' }}>(local)</span>
+          </a>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function EnrichmentSkeleton() {
   return (
     <div className="mt-3 flex flex-col gap-2.5 animate-pulse">
@@ -713,6 +767,9 @@ export default function PlaceDetail() {
       {/* OSM enrichment sections */}
       {placeDetails === 'loading' && <EnrichmentSkeleton />}
       {placeDetails && placeDetails !== 'loading' && <EnrichmentSections details={placeDetails} />}
+
+      {/* Wiki summary (Kiwix) */}
+      {placeDetails && placeDetails !== 'loading' && <WikiSummarySection details={placeDetails} />}
 
       {/* Action buttons */}
       <div className="mt-auto pt-4 flex gap-2">
