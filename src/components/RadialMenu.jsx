@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { useStore } from '../store'
 
 /**
  * RadialMenu - ATAK-style radial context menu
@@ -25,6 +26,8 @@ export default function RadialMenu({
 }) {
   const containerRef = useRef(null)
   const activeWedgeRef = useRef(null)
+  const auth = useStore((s) => s.auth)
+  const isAuthenticated = auth?.authenticated ?? false
 
   // Geometry constants
   const outerRadius = 80
@@ -174,7 +177,9 @@ export default function RadialMenu({
           {wedges.map((wedge, i) => {
             const iconPos = getIconPosition(i)
             const Icon = wedge.icon
-            const wedgeClasses = `radial-wedge${wedge.requiresAuth ? ' auth-required' : ''}`
+            // Only apply auth-required styling when requiresAuth AND user is NOT authenticated
+            const needsAuth = wedge.requiresAuth && !isAuthenticated
+            const wedgeClasses = `radial-wedge${needsAuth ? ' auth-required' : ''}`
             return (
               <g key={wedge.id} className={wedgeClasses} data-wedge-id={wedge.id}>
                 <path
@@ -295,7 +300,7 @@ export default function RadialMenu({
             fill: var(--text-primary);
           }
 
-          /* Auth-required wedges — grayed out */
+          /* Auth-required wedges — grayed out (only when NOT authenticated) */
           .radial-wedge.auth-required .wedge-icon {
             color: var(--text-tertiary);
           }
