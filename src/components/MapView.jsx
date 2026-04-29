@@ -43,51 +43,44 @@ const MEASURE_SOURCE = 'measure-source'
 const MEASURE_LINE_LAYER = 'measure-line-layer'
 const MEASURE_POINT_LAYER = 'measure-point-layer'
 
-// Interactive layers that respond to hover/click
-const INTERACTIVE_LAYERS = ['pois', 'places_subplace', 'places_locality', 'places_region', 'places_country']
+// Highlight layers (filter-based for PMTiles compatibility)
+const HIGHLIGHT_SOURCE_LAYERS = ['places', 'pois']
+const EMPTY_FILTER = ['==', ['get', 'name'], '___NOMATCH___']
 
-/** Set up interactive layer paint properties for hover and selected states */
-function setupInteractiveLayerStyles(map, isDark) {
+function setupHighlightLayers(map, isDark) {
   const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7a9a6b'
-
-  INTERACTIVE_LAYERS.forEach(layerId => {
-    if (!map.getLayer(layerId)) return
-
-    // Get current text color as base
-    const currentColor = map.getPaintProperty(layerId, 'text-color') || (isDark ? '#c0c0c0' : '#333333')
-    const currentHaloColor = map.getPaintProperty(layerId, 'text-halo-color') || (isDark ? '#1a1a1a' : '#ffffff')
-    const currentHaloWidth = map.getPaintProperty(layerId, 'text-halo-width') || 1.5
-
-    // Text color: brighten on hover, accent on selected
-    map.setPaintProperty(layerId, 'text-color', [
-      'case',
-      ['boolean', ['feature-state', 'selected'], false],
-      accentColor,
-      ['boolean', ['feature-state', 'hover'], false],
-      isDark ? '#ffffff' : '#000000',
-      currentColor
-    ])
-
-    // Halo width: increase on hover/selected for glow effect
-    map.setPaintProperty(layerId, 'text-halo-width', [
-      'case',
-      ['boolean', ['feature-state', 'selected'], false],
-      2.5,
-      ['boolean', ['feature-state', 'hover'], false],
-      2.0,
-      currentHaloWidth
-    ])
-
-    // Halo color: accent glow on selected, subtle glow on hover
-    map.setPaintProperty(layerId, 'text-halo-color', [
-      'case',
-      ['boolean', ['feature-state', 'selected'], false],
-      isDark ? 'rgba(122, 154, 107, 0.5)' : 'rgba(122, 154, 107, 0.3)',
-      ['boolean', ['feature-state', 'hover'], false],
-      isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.15)',
-      currentHaloColor
-    ])
+  HIGHLIGHT_SOURCE_LAYERS.forEach(sl => {
+    if (map.getLayer('hover-hl-' + sl)) map.removeLayer('hover-hl-' + sl)
+    if (map.getLayer('selected-hl-' + sl)) map.removeLayer('selected-hl-' + sl)
   })
+  HIGHLIGHT_SOURCE_LAYERS.forEach(sourceLayer => {
+    map.addLayer({
+      id: 'hover-hl-' + sourceLayer, type: 'symbol', source: 'protomaps', 'source-layer': sourceLayer,
+      filter: EMPTY_FILTER,
+      layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': ['Noto Sans Medium'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 10, 14, 16, 18], 'text-allow-overlap': true, 'text-ignore-placement': true },
+      paint: { 'text-color': isDark ? '#ffffff' : '#000000', 'text-halo-color': isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)', 'text-halo-width': 2.5 },
+    })
+    map.addLayer({
+      id: 'selected-hl-' + sourceLayer, type: 'symbol', source: 'protomaps', 'source-layer': sourceLayer,
+      filter: EMPTY_FILTER,
+      layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 10, 14, 16, 18], 'text-allow-overlap': true, 'text-ignore-placement': true },
+      paint: { 'text-color': accentColor, 'text-halo-color': isDark ? 'rgba(122,154,107,0.5)' : 'rgba(122,154,107,0.3)', 'text-halo-width': 3 },
+    })
+  })
+}
+
+function setHoverHighlight(map, feature) {
+  HIGHLIGHT_SOURCE_LAYERS.forEach(sl => { if (map.getLayer('hover-hl-' + sl)) map.setFilter('hover-hl-' + sl, EMPTY_FILTER) })
+  if (!feature) return
+  const name = feature.properties?.name, sourceLayer = feature.sourceLayer
+  if (name && sourceLayer && map.getLayer('hover-hl-' + sourceLayer)) map.setFilter('hover-hl-' + sourceLayer, ['==', ['get', 'name'], name])
+}
+
+function setSelectedHighlight(map, feature) {
+  HIGHLIGHT_SOURCE_LAYERS.forEach(sl => { if (map.getLayer('selected-hl-' + sl)) map.setFilter('selected-hl-' + sl, EMPTY_FILTER) })
+  if (!feature) return
+  const name = feature.properties?.name, sourceLayer = feature.sourceLayer
+  if (name && sourceLayer && map.getLayer('selected-hl-' + sourceLayer)) map.setFilter('selected-hl-' + sourceLayer, ['==', ['get', 'name'], name])
 }
 
 /** Build a full MapLibre style object for the given theme */
@@ -700,7 +693,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
   const highlightedFeatureRef = useRef(null) // { source, sourceLayer, id } for setFeatureState
-  const hoveredFeatureRef = useRef(null) // { source, sourceLayer, id } for hover state
+  const hoveredFeatureRef = useRef(null) // for hover highlight
   // Refs for measurement state (accessible in click handlers)
   const measuringRef = useRef({ active: false, points: [] })
   const measureLabelsRef = useRef([]) // HTML label elements
@@ -1268,7 +1261,8 @@ const MapView = forwardRef(function MapView(_, ref) {
         const MARKER_RADIUS_PX = 14 // half of 28px preview marker
 
         // Query rendered features at click point (label/POI priority)
-        const features = map.queryRenderedFeatures(e.point, { layers: INTERACTIVE_LAYERS })
+        const labelLayers = ['pois', 'places_subplace', 'places_locality', 'places_region', 'places_country']
+        const features = map.queryRenderedFeatures(e.point, { layers: labelLayers })
 
         // Find first feature with a name (respects layer order = priority)
         const labelFeature = features.find(f => f.properties?.name)
@@ -1281,6 +1275,7 @@ const MapView = forwardRef(function MapView(_, ref) {
             } catch (e) { /* ignore if layer removed */ }
             highlightedFeatureRef.current = null
           }
+          setSelectedHighlight(map, null)
 
           if (labelFeature) {
           // Clicked a labeled feature — snap to geometry and highlight
@@ -1305,6 +1300,10 @@ const MapView = forwardRef(function MapView(_, ref) {
               highlightedFeatureRef.current = { source, sourceLayer, id: featureId }
             } catch (e) { console.warn('setFeatureState error:', e) }
           }
+
+          // Filter-based highlight (works with PMTiles)
+          setSelectedHighlight(map, labelFeature)
+          setHoverHighlight(map, null)
 
           // For feature clicks, don't show pin marker
           store.clearClickMarker()
@@ -1423,57 +1422,28 @@ const MapView = forwardRef(function MapView(_, ref) {
         }
       } catch {}
 
-      // Set up interactive layer styles for hover/selected states
-      const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-      setupInteractiveLayerStyles(map, isDark)
+      // Set up highlight layers
+      setupHighlightLayers(map, document.documentElement.getAttribute('data-theme') === 'dark')
 
-      // POI/label hover affordance — cursor pointer + feature state highlight
-      INTERACTIVE_LAYERS.forEach(layerId => {
+      // POI/label hover affordance — cursor pointer + highlight
+      const interactiveLayers = ['pois', 'places_locality', 'places_region', 'places_country', 'places_subplace']
+
+      interactiveLayers.forEach(layerId => {
         map.on('mouseenter', layerId, (e) => {
-          if (measuringRef.current.active) return
-
-          map.getCanvas().style.cursor = 'pointer'
-
-          // Clear previous hover state
-          if (hoveredFeatureRef.current) {
-            const { source, sourceLayer, id } = hoveredFeatureRef.current
-            try {
-              map.setFeatureState({ source, sourceLayer, id }, { hover: false })
-            } catch (err) { /* layer may have been removed */ }
-            hoveredFeatureRef.current = null
-          }
-
-          // Set new hover state
-          const feature = e.features?.[0]
-          if (feature) {
-            const featureId = feature.id ?? feature.properties?.mvt_id
-            if (featureId != null) {
-              try {
-                map.setFeatureState(
-                  { source: feature.source, sourceLayer: feature.sourceLayer, id: featureId },
-                  { hover: true }
-                )
-                hoveredFeatureRef.current = {
-                  source: feature.source,
-                  sourceLayer: feature.sourceLayer,
-                  id: featureId
-                }
-              } catch (err) { /* ignore */ }
+          if (!measuringRef.current.active) {
+            map.getCanvas().style.cursor = 'pointer'
+            const feature = e.features?.[0]
+            if (feature?.properties?.name) {
+              setHoverHighlight(map, feature)
+              hoveredFeatureRef.current = feature
             }
           }
         })
 
         map.on('mouseleave', layerId, () => {
-          if (measuringRef.current.active) return
-
-          map.getCanvas().style.cursor = ''
-
-          // Clear hover state
-          if (hoveredFeatureRef.current) {
-            const { source, sourceLayer, id } = hoveredFeatureRef.current
-            try {
-              map.setFeatureState({ source, sourceLayer, id }, { hover: false })
-            } catch (err) { /* layer may have been removed */ }
+          if (!measuringRef.current.active) {
+            map.getCanvas().style.cursor = ''
+            setHoverHighlight(map, null)
             hoveredFeatureRef.current = null
           }
         })
@@ -1588,9 +1558,8 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (activeLayersRef.current.publicLands) addPublicLands(map)
       if (activeLayersRef.current.contours) addContours(map)
 
-      // Re-setup interactive layer styles for new theme
-      const isDark = theme === 'dark'
-      setupInteractiveLayerStyles(map, isDark)
+      // Re-setup highlight layers
+      setupHighlightLayers(map, theme === 'dark')
 
       // Restore view
       map.jumpTo({ center, zoom, bearing, pitch })
@@ -1621,19 +1590,22 @@ const MapView = forwardRef(function MapView(_, ref) {
     // Different visual feedback based on mode
     const isFeatureMode = selectedPlace.mode === 'feature'
 
-    // Feature mode uses paint property highlight (no DOM marker needed)
-    // Reticle mode shows pin with center dot
-    if (!isFeatureMode) {
-      const el = document.createElement('div')
+    // Create marker element
+    const el = document.createElement('div')
+    if (isFeatureMode) {
+      // Feature mode: subtle ring indicator
+      el.className = 'navi-feature-highlight'
+    } else {
+      // Reticle mode: pin with center dot
       el.className = 'navi-pin-preview'
       const dot = document.createElement('div')
       dot.className = 'navi-pin-center-dot'
       el.appendChild(dot)
-
-      previewMarkerRef.current = new maplibregl.Marker({ element: el })
-        .setLngLat([selectedPlace.lon, selectedPlace.lat])
-        .addTo(map)
     }
+
+    previewMarkerRef.current = new maplibregl.Marker({ element: el })
+      .setLngLat([selectedPlace.lon, selectedPlace.lat])
+      .addTo(map)
 
     return () => {
       if (previewMarkerRef.current) {
