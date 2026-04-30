@@ -1038,10 +1038,20 @@ function addBlmTrails(map) {
   const lineWidth = ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5]
 
   // Filter out solid surface (paved)
-  const excludePaved = [
+  // Filter out paved surfaces, arterial/collector roads, and highways
+  const excludeUrban = [
     "all",
+    // Exclude paved
     ["!=", ["get", "OBSRVE_SRFCE_TYPE"], "SOLID SURFACE"],
-    ["!=", ["get", "OBSRVE_SRFCE_TYPE"], "Solid Surface"]
+    ["!=", ["get", "OBSRVE_SRFCE_TYPE"], "Solid Surface"],
+    // Exclude arterial roads
+    ["!=", ["get", "OBSRVE_FUNC_CLASS"], "ARTERIAL"],
+    ["!=", ["get", "OBSRVE_FUNC_CLASS"], "Arterial"],
+    // Exclude collector roads
+    ["!=", ["get", "OBSRVE_FUNC_CLASS"], "COLLECTOR"],
+    ["!=", ["get", "OBSRVE_FUNC_CLASS"], "Collector"],
+    // Exclude designated highways
+    ["!", ["has", "HWY_CLASS"]]
   ]
 
   // Invisible hit-area layer for clicking
@@ -1051,7 +1061,7 @@ function addBlmTrails(map) {
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 10,
-    filter: excludePaved,
+    filter: excludeUrban,
     paint: {
       "line-color": "#000000",
       "line-opacity": 0,
@@ -1066,7 +1076,7 @@ function addBlmTrails(map) {
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 10,
-    filter: ["all", excludePaved,
+    filter: ["all", excludeUrban,
       ["any",
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "NATURAL"],
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Natural"]
@@ -1086,7 +1096,7 @@ function addBlmTrails(map) {
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 10,
-    filter: ["all", excludePaved,
+    filter: ["all", excludeUrban,
       ["any",
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "NATURAL IMPROVED"],
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Natural Improved"]
@@ -1107,7 +1117,7 @@ function addBlmTrails(map) {
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 10,
-    filter: ["all", excludePaved,
+    filter: ["all", excludeUrban,
       ["any",
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "AGGREGATE"],
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Aggregate"]
@@ -1128,7 +1138,7 @@ function addBlmTrails(map) {
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 10,
-    filter: ["all", excludePaved,
+    filter: ["all", excludeUrban,
       ["any",
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "SNOW"],
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Snow"]
@@ -1149,7 +1159,7 @@ function addBlmTrails(map) {
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 10,
-    filter: ["all", excludePaved,
+    filter: ["all", excludeUrban,
       ["!", ["any",
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "NATURAL"],
         ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Natural"],
@@ -1176,7 +1186,7 @@ function addBlmTrails(map) {
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 12,
-    filter: ["all", excludePaved, ["has", "ROUTE_PRMRY_NM"]],
+    filter: ["all", excludeUrban, ["has", "ROUTE_PRMRY_NM"]],
     layout: {
       "text-field": ["get", "ROUTE_PRMRY_NM"],
       "text-size": 10,
