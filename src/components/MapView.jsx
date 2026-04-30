@@ -1864,6 +1864,31 @@ const MapView = forwardRef(function MapView(_, ref) {
     }
   }, [selectedPlace])
 
+  // Escape key to close/deselect place card
+  useEffect(() => {
+    if (!selectedPlace) return
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        const map = mapInstance.current
+        const store = useStore.getState()
+
+        // Clear selected place and click marker
+        store.clearSelectedPlace()
+        store.clearClickMarker()
+
+        // Clear boundary
+        if (updateBoundaryRef.current) updateBoundaryRef.current(null)
+
+        // Clear highlight
+        if (map) setSelectedHighlight(map, null)
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [selectedPlace])
+
   // Update route polyline when route changes
   useEffect(() => {
     const map = mapInstance.current
