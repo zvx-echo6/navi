@@ -42,6 +42,12 @@ const CONTOUR_TEST_10FT_LABEL = 'contour-test-10ft-label'
 const MEASURE_SOURCE = 'measure-source'
 const MEASURE_LINE_LAYER = 'measure-line-layer'
 const MEASURE_POINT_LAYER = 'measure-point-layer'
+const USFS_SOURCE = 'usfs-trails-source'
+const USFS_ROADS_LAYER = 'usfs-roads-layer'
+const USFS_TRAILS_LAYER = 'usfs-trails-layer'
+const USFS_ROADS_LABEL = 'usfs-roads-label'
+const USFS_TRAILS_LABEL = 'usfs-trails-label'
+
 
 // Highlight state - use data-driven expressions to target specific features
 const INTERACTIVE_LABEL_LAYERS = ['pois', 'places_subplace', 'places_locality', 'places_region', 'places_country']
@@ -813,6 +819,119 @@ function removeContoursTest10ft(map) {
   if (map.getLayer(CONTOUR_TEST_10FT_MINOR)) map.removeLayer(CONTOUR_TEST_10FT_MINOR)
   if (map.getSource(CONTOUR_TEST_10FT_SOURCE)) map.removeSource(CONTOUR_TEST_10FT_SOURCE)
 }
+/** Add USFS trails and roads vector tile overlay */
+function addUsfsTrails(map) {
+  if (!map || map.getSource(USFS_SOURCE)) return
+
+  map.addSource(USFS_SOURCE, {
+    type: "vector",
+    url: "pmtiles:///tiles/usfs-trails-roads.pmtiles",
+  })
+
+  // Insert below first symbol layer (above other overlays, below labels)
+  let beforeId = undefined
+  for (const layer of map.getStyle().layers) {
+    if (layer.type === "symbol") {
+      beforeId = layer.id
+      break
+    }
+  }
+
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark"
+  const opMod = isDark ? 0.8 : 1.0
+
+  // Roads layer - solid khaki/tan line
+  map.addLayer({
+    id: USFS_ROADS_LAYER,
+    type: "line",
+    source: USFS_SOURCE,
+    "source-layer": "roads",
+    minzoom: 10,
+    paint: {
+      "line-color": isDark ? "#9a8b70" : "#b8a87a",
+      "line-opacity": 0.65 * opMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.0, 14, 2.0, 16, 3.0],
+    },
+  }, beforeId)
+
+  // Trails layer - dashed earth-tone brown
+  map.addLayer({
+    id: USFS_TRAILS_LAYER,
+    type: "line",
+    source: USFS_SOURCE,
+    "source-layer": "trails",
+    minzoom: 10,
+    paint: {
+      "line-color": isDark ? "#a88960" : "#8b7355",
+      "line-opacity": 0.7 * opMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5],
+      "line-dasharray": [2, 1.5],
+    },
+  }, beforeId)
+
+  // Road labels (zoom 12+)
+  map.addLayer({
+    id: USFS_ROADS_LABEL,
+    type: "symbol",
+    source: USFS_SOURCE,
+    "source-layer": "roads",
+    minzoom: 12,
+    filter: ["has", "NAME"],
+    layout: {
+      "text-field": ["get", "NAME"],
+      "text-size": 10,
+      "text-font": ["Noto Sans Regular"],
+      "symbol-placement": "line",
+      "text-anchor": "center",
+      "symbol-spacing": 300,
+      "text-max-angle": 25,
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": isDark ? "#c0b090" : "#6a5a40",
+      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
+      "text-halo-width": 1.5,
+      "text-opacity": 0.85,
+    },
+  })
+
+  // Trail labels (zoom 12+)
+  map.addLayer({
+    id: USFS_TRAILS_LABEL,
+    type: "symbol",
+    source: USFS_SOURCE,
+    "source-layer": "trails",
+    minzoom: 12,
+    filter: ["has", "TRAIL_NAME"],
+    layout: {
+      "text-field": ["get", "TRAIL_NAME"],
+      "text-size": 10,
+      "text-font": ["Noto Sans Regular"],
+      "symbol-placement": "line",
+      "text-anchor": "center",
+      "symbol-spacing": 300,
+      "text-max-angle": 25,
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": isDark ? "#c8a878" : "#5a4530",
+      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
+      "text-halo-width": 1.5,
+      "text-opacity": 0.85,
+    },
+  })
+}
+
+/** Remove USFS trails/roads layers and source */
+function removeUsfsTrails(map) {
+  if (!map) return
+  if (map.getLayer(USFS_TRAILS_LABEL)) map.removeLayer(USFS_TRAILS_LABEL)
+  if (map.getLayer(USFS_ROADS_LABEL)) map.removeLayer(USFS_ROADS_LABEL)
+  if (map.getLayer(USFS_TRAILS_LAYER)) map.removeLayer(USFS_TRAILS_LAYER)
+  if (map.getLayer(USFS_ROADS_LAYER)) map.removeLayer(USFS_ROADS_LAYER)
+  if (map.getSource(USFS_SOURCE)) map.removeSource(USFS_SOURCE)
+}
+
 /** Add boundary polygon layers with computed accent color (MapLibre rejects CSS vars in paint) */
 const BOUNDARY_FILL_LAYER = 'boundary-fill-layer'
 
@@ -871,7 +990,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const watchIdRef = useRef(null)
   const currentThemeRef = useRef('dark')
   // Track which overlay layers are currently active (for theme swap re-add)
-  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, contoursTest: false, contoursTest10ft: false })
+  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, contoursTest: false, contoursTest10ft: false, usfsTrails: false })
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
   const highlightedFeatureRef = useRef(null) // { source, sourceLayer, id } for setFeatureState
@@ -1317,6 +1436,19 @@ const MapView = forwardRef(function MapView(_, ref) {
       removeContoursTest10ft(map)
       activeLayersRef.current.contoursTest10ft = false
     },
+    addUsfsTrailsLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      addUsfsTrails(map)
+      activeLayersRef.current.usfsTrails = true
+    },
+    removeUsfsTrailsLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      removeUsfsTrails(map)
+      activeLayersRef.current.usfsTrails = false
+    },
+
   }))
 
   // Initialize map
@@ -1445,6 +1577,55 @@ const MapView = forwardRef(function MapView(_, ref) {
 
         const { lng, lat } = e.lngLat
         const MARKER_RADIUS_PX = 14 // half of 28px preview marker
+
+        // Check for USFS trails/roads click (show info popup)
+        const usfsLayers = [USFS_TRAILS_LAYER, USFS_ROADS_LAYER]
+        const usfsFeatures = map.queryRenderedFeatures(e.point, { layers: usfsLayers })
+        const usfsFeature = usfsFeatures.find(f => f.properties)
+        if (usfsFeature && hasFeature('has_usfs_trails')) {
+          const props = usfsFeature.properties
+          const isTrail = usfsFeature.layer?.id === USFS_TRAILS_LAYER
+          const name = isTrail ? (props.TRAIL_NAME || 'Unnamed Trail') : (props.NAME || 'Unnamed Road')
+          const typeLabel = isTrail ? 'USFS Trail' : 'USFS Road'
+
+          // Build popup content
+          let html = '<div style="font-size:12px;max-width:240px;line-height:1.4">'
+          html += '<strong style="font-size:13px">' + name + '</strong>'
+          html += '<div style="color:var(--text-secondary);font-size:11px;margin-bottom:4px">' + typeLabel + '</div>'
+
+          if (isTrail) {
+            // Trail-specific info
+            if (props.TRAIL_TYPE) html += '<div><b>Type:</b> ' + props.TRAIL_TYPE + '</div>'
+            if (props.TRAIL_SURF) html += '<div><b>Surface:</b> ' + props.TRAIL_SURF + '</div>'
+            if (props.GIS_MILES) html += '<div><b>Length:</b> ' + parseFloat(props.GIS_MILES).toFixed(1) + ' mi</div>'
+            // Allowed uses
+            const uses = []
+            if (props.HIKER_PEDE === 'Y') uses.push('Hiking')
+            if (props.BICYCLE_MA === 'Y') uses.push('Biking')
+            if (props.MOTORCYCLE === 'Y') uses.push('Motorcycle')
+            if (props.ATV_MANAGE === 'Y') uses.push('ATV')
+            if (props.HORSE_MANA === 'Y') uses.push('Horse')
+            if (uses.length > 0) html += '<div><b>Allowed:</b> ' + uses.join(', ') + '</div>'
+          } else {
+            // Road-specific info
+            if (props.OPER_MAINT) html += '<div><b>Maintenance:</b> ' + props.OPER_MAINT + '</div>'
+            if (props.SURFACE_TY) html += '<div><b>Surface:</b> ' + props.SURFACE_TY + '</div>'
+            if (props.ROUTE_STAT) html += '<div><b>Status:</b> ' + props.ROUTE_STAT + '</div>'
+          }
+          html += '</div>'
+
+          // Remove existing popup
+          if (popupRef.current) popupRef.current.remove()
+
+          const popup = new maplibregl.Popup({ offset: 10, closeButton: true })
+            .setLngLat([lng, lat])
+            .setHTML(html)
+            .addTo(map)
+          popupRef.current = popup
+          return
+        }
+
+
 
         // Query rendered features at click point (label/POI priority)
         const labelLayers = ['pois', 'places_subplace', 'places_locality', 'places_region', 'places_country']
