@@ -43,44 +43,78 @@ const MEASURE_SOURCE = 'measure-source'
 const MEASURE_LINE_LAYER = 'measure-line-layer'
 const MEASURE_POINT_LAYER = 'measure-point-layer'
 
-// Highlight layers (filter-based for PMTiles compatibility)
-const HIGHLIGHT_SOURCE_LAYERS = ['places', 'pois']
-const EMPTY_FILTER = ['==', ['get', 'name'], '___NOMATCH___']
+// Highlight state - modify original layer paint properties (no duplicate layers)
+const INTERACTIVE_LABEL_LAYERS = ['pois', 'places_subplace', 'places_locality', 'places_region', 'places_country']
+let originalPaintValues = {} // Store original paint values for restoration
+let currentHighlightedLayer = null
+let currentHoveredLayer = null
 
-function setupHighlightLayers(map, isDark) {
-  const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7a9a6b'
-  HIGHLIGHT_SOURCE_LAYERS.forEach(sl => {
-    if (map.getLayer('hover-hl-' + sl)) map.removeLayer('hover-hl-' + sl)
-    if (map.getLayer('selected-hl-' + sl)) map.removeLayer('selected-hl-' + sl)
-  })
-  HIGHLIGHT_SOURCE_LAYERS.forEach(sourceLayer => {
-    map.addLayer({
-      id: 'hover-hl-' + sourceLayer, type: 'symbol', source: 'protomaps', 'source-layer': sourceLayer,
-      filter: EMPTY_FILTER,
-      layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': ['Noto Sans Regular'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 10, 14, 16, 18], 'text-allow-overlap': true, 'text-ignore-placement': true },
-      paint: { 'text-color': isDark ? '#ffffff' : '#000000', 'text-halo-color': isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)', 'text-halo-width': 2.5 },
-    })
-    map.addLayer({
-      id: 'selected-hl-' + sourceLayer, type: 'symbol', source: 'protomaps', 'source-layer': sourceLayer,
-      filter: EMPTY_FILTER,
-      layout: { 'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']], 'text-font': ['Noto Sans Regular'], 'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 10, 14, 16, 18], 'text-allow-overlap': true, 'text-ignore-placement': true },
-      paint: { 'text-color': accentColor, 'text-halo-color': isDark ? 'rgba(122,154,107,0.5)' : 'rgba(122,154,107,0.3)', 'text-halo-width': 3 },
-    })
-  })
+function storeOriginalPaint(map, layerId) {
+  if (originalPaintValues[layerId]) return // Already stored
+  if (!map.getLayer(layerId)) return
+  originalPaintValues[layerId] = {
+    'text-color': map.getPaintProperty(layerId, 'text-color'),
+    'text-halo-color': map.getPaintProperty(layerId, 'text-halo-color'),
+    'text-halo-width': map.getPaintProperty(layerId, 'text-halo-width'),
+  }
+}
+
+function restoreOriginalPaint(map, layerId) {
+  if (!originalPaintValues[layerId] || !map.getLayer(layerId)) return
+  const orig = originalPaintValues[layerId]
+  if (orig['text-color'] !== undefined) map.setPaintProperty(layerId, 'text-color', orig['text-color'])
+  if (orig['text-halo-color'] !== undefined) map.setPaintProperty(layerId, 'text-halo-color', orig['text-halo-color'])
+  if (orig['text-halo-width'] !== undefined) map.setPaintProperty(layerId, 'text-halo-width', orig['text-halo-width'])
 }
 
 function setHoverHighlight(map, feature) {
-  HIGHLIGHT_SOURCE_LAYERS.forEach(sl => { if (map.getLayer('hover-hl-' + sl)) map.setFilter('hover-hl-' + sl, EMPTY_FILTER) })
+  // Restore previous hovered layer
+  if (currentHoveredLayer && currentHoveredLayer !== currentHighlightedLayer) {
+    restoreOriginalPaint(map, currentHoveredLayer)
+  }
+  currentHoveredLayer = null
+
   if (!feature) return
-  const name = feature.properties?.name, sourceLayer = feature.sourceLayer
-  if (name && sourceLayer && map.getLayer('hover-hl-' + sourceLayer)) map.setFilter('hover-hl-' + sourceLayer, ['==', ['get', 'name'], name])
+  const layerId = feature.layer?.id
+  if (!layerId || !map.getLayer(layerId)) return
+  if (layerId === currentHighlightedLayer) return // Don't hover over selected
+
+  storeOriginalPaint(map, layerId)
+  currentHoveredLayer = layerId
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  map.setPaintProperty(layerId, 'text-color', isDark ? '#ffffff' : '#000000')
+  map.setPaintProperty(layerId, 'text-halo-color', isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.25)')
+  map.setPaintProperty(layerId, 'text-halo-width', 2.5)
 }
 
 function setSelectedHighlight(map, feature) {
-  HIGHLIGHT_SOURCE_LAYERS.forEach(sl => { if (map.getLayer('selected-hl-' + sl)) map.setFilter('selected-hl-' + sl, EMPTY_FILTER) })
+  // Restore previous highlighted layer
+  if (currentHighlightedLayer) {
+    restoreOriginalPaint(map, currentHighlightedLayer)
+  }
+  currentHighlightedLayer = null
+  currentHoveredLayer = null // Also clear hover
+
   if (!feature) return
-  const name = feature.properties?.name, sourceLayer = feature.sourceLayer
-  if (name && sourceLayer && map.getLayer('selected-hl-' + sourceLayer)) map.setFilter('selected-hl-' + sourceLayer, ['==', ['get', 'name'], name])
+  const layerId = feature.layer?.id
+  if (!layerId || !map.getLayer(layerId)) return
+
+  storeOriginalPaint(map, layerId)
+  currentHighlightedLayer = layerId
+
+  const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7a9a6b'
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  map.setPaintProperty(layerId, 'text-color', accentColor)
+  map.setPaintProperty(layerId, 'text-halo-color', isDark ? 'rgba(122,154,107,0.6)' : 'rgba(122,154,107,0.4)')
+  map.setPaintProperty(layerId, 'text-halo-width', 3)
+}
+
+function clearAllHighlights(map) {
+  if (currentHoveredLayer) restoreOriginalPaint(map, currentHoveredLayer)
+  if (currentHighlightedLayer) restoreOriginalPaint(map, currentHighlightedLayer)
+  currentHoveredLayer = null
+  currentHighlightedLayer = null
 }
 
 /** Build a full MapLibre style object for the given theme */
@@ -656,7 +690,9 @@ function removeContoursTest10ft(map) {
   if (map.getLayer(CONTOUR_TEST_10FT_MINOR)) map.removeLayer(CONTOUR_TEST_10FT_MINOR)
   if (map.getSource(CONTOUR_TEST_10FT_SOURCE)) map.removeSource(CONTOUR_TEST_10FT_SOURCE)
 }
-/** Add boundary polygon layer with computed accent color (MapLibre rejects CSS vars in paint) */
+/** Add boundary polygon layers with computed accent color (MapLibre rejects CSS vars in paint) */
+const BOUNDARY_FILL_LAYER = 'boundary-fill-layer'
+
 function addBoundaryLayer(map) {
   if (!map || map.getLayer(BOUNDARY_LAYER)) return
   if (!map.getSource(BOUNDARY_SOURCE)) {
@@ -666,6 +702,29 @@ function addBoundaryLayer(map) {
     })
   }
   const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#7a9a6b"
+
+  // Find first symbol layer to insert boundary layers below labels
+  const layers = map.getStyle().layers
+  let firstSymbolId = null
+  for (const layer of layers) {
+    if (layer.type === 'symbol') {
+      firstSymbolId = layer.id
+      break
+    }
+  }
+
+  // Add subtle fill layer (barely visible tint)
+  map.addLayer({
+    id: BOUNDARY_FILL_LAYER,
+    type: "fill",
+    source: BOUNDARY_SOURCE,
+    paint: {
+      "fill-color": accentColor,
+      "fill-opacity": 0.05,
+    },
+  }, firstSymbolId)
+
+  // Add dashed outline layer
   map.addLayer({
     id: BOUNDARY_LAYER,
     type: "line",
@@ -676,7 +735,7 @@ function addBoundaryLayer(map) {
       "line-opacity": 0.7,
       "line-dasharray": [3, 2],
     },
-  })
+  }, firstSymbolId)
 }
 
 const MapView = forwardRef(function MapView(_, ref) {
@@ -1434,8 +1493,6 @@ const MapView = forwardRef(function MapView(_, ref) {
         }
       } catch {}
 
-      // Set up highlight layers
-      setupHighlightLayers(map, document.documentElement.getAttribute('data-theme') === 'dark')
 
       // Register updateBoundary function - called directly when boundary data arrives
       const updateBoundaryFn = (boundaryGeometry) => {
@@ -1620,8 +1677,9 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (activeLayersRef.current.publicLands) addPublicLands(map)
       if (activeLayersRef.current.contours) addContours(map)
 
-      // Re-setup highlight layers
-      setupHighlightLayers(map, theme === 'dark')
+      // Clear highlights on theme change (paint values will be re-stored on next interaction)
+      clearAllHighlights(map)
+      originalPaintValues = {}
 
       // Restore view
       map.jumpTo({ center, zoom, bearing, pitch })
