@@ -1280,8 +1280,7 @@ const MapView = forwardRef(function MapView(_, ref) {
             highlightedFeatureRef.current = null
           }
           setSelectedHighlight(map, null)
-          // Clear old boundary before setting new place
-          if (updateBoundaryRef.current) updateBoundaryRef.current(null)
+          // Note: do not clear boundary here - new data replaces old when API returns
 
           if (labelFeature) {
           // Clicked a labeled feature — snap to geometry and highlight
