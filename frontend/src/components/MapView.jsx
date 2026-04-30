@@ -43,14 +43,18 @@ const MEASURE_SOURCE = 'measure-source'
 const MEASURE_LINE_LAYER = 'measure-line-layer'
 const MEASURE_POINT_LAYER = 'measure-point-layer'
 
-// Highlight state - modify original layer paint properties (no duplicate layers)
+// Highlight state - use data-driven expressions to target specific features
 const INTERACTIVE_LABEL_LAYERS = ['pois', 'places_subplace', 'places_locality', 'places_region', 'places_country']
 let originalPaintValues = {} // Store original paint values for restoration
-let currentHighlightedLayer = null
-let currentHoveredLayer = null
+let highlightState = {
+  hoveredLayer: null,
+  hoveredName: null,
+  selectedLayer: null,
+  selectedName: null,
+}
 
 function storeOriginalPaint(map, layerId) {
-  if (originalPaintValues[layerId]) return // Already stored
+  if (originalPaintValues[layerId]) return
   if (!map.getLayer(layerId)) return
   originalPaintValues[layerId] = {
     'text-color': map.getPaintProperty(layerId, 'text-color'),
@@ -67,54 +71,149 @@ function restoreOriginalPaint(map, layerId) {
   if (orig['text-halo-width'] !== undefined) map.setPaintProperty(layerId, 'text-halo-width', orig['text-halo-width'])
 }
 
-function setHoverHighlight(map, feature) {
-  // Restore previous hovered layer
-  if (currentHoveredLayer && currentHoveredLayer !== currentHighlightedLayer) {
-    restoreOriginalPaint(map, currentHoveredLayer)
-  }
-  currentHoveredLayer = null
-
-  if (!feature) return
-  const layerId = feature.layer?.id
-  if (!layerId || !map.getLayer(layerId)) return
-  if (layerId === currentHighlightedLayer) return // Don't hover over selected
-
+function applyHighlightExpression(map, layerId) {
+  if (!map.getLayer(layerId)) return
   storeOriginalPaint(map, layerId)
-  currentHoveredLayer = layerId
 
+  const orig = originalPaintValues[layerId]
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-  map.setPaintProperty(layerId, 'text-color', isDark ? '#ffffff' : '#000000')
-  map.setPaintProperty(layerId, 'text-halo-color', isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.25)')
-  map.setPaintProperty(layerId, 'text-halo-width', 2.5)
+  const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7a9a6b'
+
+  const hoverColor = isDark ? '#ffffff' : '#000000'
+  const hoverHaloColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.25)'
+  const selectedHaloColor = isDark ? 'rgba(122,154,107,0.6)' : 'rgba(122,154,107,0.4)'
+
+  const isHovered = highlightState.hoveredLayer === layerId && highlightState.hoveredName
+  const isSelected = highlightState.selectedLayer === layerId && highlightState.selectedName
+
+  // Build case expressions for each paint property
+  // Priority: selected > hover > original
+
+  if (isSelected && isHovered && highlightState.selectedName !== highlightState.hoveredName) {
+    // Both selected and hover active on different features
+    map.setPaintProperty(layerId, 'text-color', [
+      'case',
+      ['==', ['get', 'name'], highlightState.selectedName], accentColor,
+      ['==', ['get', 'name'], highlightState.hoveredName], hoverColor,
+      orig['text-color'] || (isDark ? '#c0c0c0' : '#333333')
+    ])
+    map.setPaintProperty(layerId, 'text-halo-color', [
+      'case',
+      ['==', ['get', 'name'], highlightState.selectedName], selectedHaloColor,
+      ['==', ['get', 'name'], highlightState.hoveredName], hoverHaloColor,
+      orig['text-halo-color'] || (isDark ? '#1a1a1a' : '#ffffff')
+    ])
+    map.setPaintProperty(layerId, 'text-halo-width', [
+      'case',
+      ['==', ['get', 'name'], highlightState.selectedName], 3,
+      ['==', ['get', 'name'], highlightState.hoveredName], 2.5,
+      orig['text-halo-width'] || 1.5
+    ])
+  } else if (isSelected) {
+    // Only selected
+    map.setPaintProperty(layerId, 'text-color', [
+      'case',
+      ['==', ['get', 'name'], highlightState.selectedName], accentColor,
+      orig['text-color'] || (isDark ? '#c0c0c0' : '#333333')
+    ])
+    map.setPaintProperty(layerId, 'text-halo-color', [
+      'case',
+      ['==', ['get', 'name'], highlightState.selectedName], selectedHaloColor,
+      orig['text-halo-color'] || (isDark ? '#1a1a1a' : '#ffffff')
+    ])
+    map.setPaintProperty(layerId, 'text-halo-width', [
+      'case',
+      ['==', ['get', 'name'], highlightState.selectedName], 3,
+      orig['text-halo-width'] || 1.5
+    ])
+  } else if (isHovered) {
+    // Only hovered
+    map.setPaintProperty(layerId, 'text-color', [
+      'case',
+      ['==', ['get', 'name'], highlightState.hoveredName], hoverColor,
+      orig['text-color'] || (isDark ? '#c0c0c0' : '#333333')
+    ])
+    map.setPaintProperty(layerId, 'text-halo-color', [
+      'case',
+      ['==', ['get', 'name'], highlightState.hoveredName], hoverHaloColor,
+      orig['text-halo-color'] || (isDark ? '#1a1a1a' : '#ffffff')
+    ])
+    map.setPaintProperty(layerId, 'text-halo-width', [
+      'case',
+      ['==', ['get', 'name'], highlightState.hoveredName], 2.5,
+      orig['text-halo-width'] || 1.5
+    ])
+  } else {
+    // No highlight on this layer - restore original
+    restoreOriginalPaint(map, layerId)
+  }
+}
+
+function setHoverHighlight(map, feature) {
+  const prevLayer = highlightState.hoveredLayer
+
+  if (!feature) {
+    highlightState.hoveredLayer = null
+    highlightState.hoveredName = null
+    if (prevLayer) applyHighlightExpression(map, prevLayer)
+    return
+  }
+
+  const layerId = feature.layer?.id
+  const name = feature.properties?.name
+  if (!layerId || !name || !map.getLayer(layerId)) return
+
+  // Don't hover the selected feature
+  if (layerId === highlightState.selectedLayer && name === highlightState.selectedName) return
+
+  highlightState.hoveredLayer = layerId
+  highlightState.hoveredName = name
+
+  // Update previous layer if different
+  if (prevLayer && prevLayer !== layerId) {
+    applyHighlightExpression(map, prevLayer)
+  }
+  // Update current layer
+  applyHighlightExpression(map, layerId)
 }
 
 function setSelectedHighlight(map, feature) {
-  // Restore previous highlighted layer
-  if (currentHighlightedLayer) {
-    restoreOriginalPaint(map, currentHighlightedLayer)
+  const prevLayer = highlightState.selectedLayer
+
+  if (!feature) {
+    highlightState.selectedLayer = null
+    highlightState.selectedName = null
+    highlightState.hoveredLayer = null
+    highlightState.hoveredName = null
+    if (prevLayer) applyHighlightExpression(map, prevLayer)
+    return
   }
-  currentHighlightedLayer = null
-  currentHoveredLayer = null // Also clear hover
 
-  if (!feature) return
   const layerId = feature.layer?.id
-  if (!layerId || !map.getLayer(layerId)) return
+  const name = feature.properties?.name
+  if (!layerId || !name || !map.getLayer(layerId)) return
 
-  storeOriginalPaint(map, layerId)
-  currentHighlightedLayer = layerId
+  highlightState.selectedLayer = layerId
+  highlightState.selectedName = name
+  // Clear hover when selecting
+  highlightState.hoveredLayer = null
+  highlightState.hoveredName = null
 
-  const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7a9a6b'
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
-  map.setPaintProperty(layerId, 'text-color', accentColor)
-  map.setPaintProperty(layerId, 'text-halo-color', isDark ? 'rgba(122,154,107,0.6)' : 'rgba(122,154,107,0.4)')
-  map.setPaintProperty(layerId, 'text-halo-width', 3)
+  // Update previous layer if different
+  if (prevLayer && prevLayer !== layerId) {
+    applyHighlightExpression(map, prevLayer)
+  }
+  // Update current layer
+  applyHighlightExpression(map, layerId)
 }
 
 function clearAllHighlights(map) {
-  if (currentHoveredLayer) restoreOriginalPaint(map, currentHoveredLayer)
-  if (currentHighlightedLayer) restoreOriginalPaint(map, currentHighlightedLayer)
-  currentHoveredLayer = null
-  currentHighlightedLayer = null
+  const layers = [highlightState.hoveredLayer, highlightState.selectedLayer].filter(Boolean)
+  highlightState.hoveredLayer = null
+  highlightState.hoveredName = null
+  highlightState.selectedLayer = null
+  highlightState.selectedName = null
+  layers.forEach(layerId => restoreOriginalPaint(map, layerId))
 }
 
 /** Build a full MapLibre style object for the given theme */
