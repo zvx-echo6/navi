@@ -905,15 +905,15 @@ function addUsfsTrails(map) {
         ["any",
           ["==", ["slice", ["get", "MOTORCYCLE"], 0, 1], "0"],
           ["==", ["slice", ["get", "ATV_MANAGE"], 0, 1], "0"]
-        ], isDark ? "#e08050" : "#d07040",
+        ], isDark ? "#f08040" : "#e07030",
         // Bike trails - amber
         ["==", ["slice", ["get", "BICYCLE_MA"], 0, 1], "0"],
-        isDark ? "#d09050" : "#c08040",
+        isDark ? "#e0b040" : "#d0a030",
         // Hiker/Horse only - green
         ["any",
           ["==", ["slice", ["get", "HIKER_PEDE"], 0, 1], "0"],
           ["==", ["slice", ["get", "HORSE_MANA"], 0, 1], "0"]
-        ], isDark ? "#80b060" : "#70a050",
+        ], isDark ? "#60c050" : "#50b040",
         // Default - tan
         isDark ? "#c0a060" : "#b09050"
       ],
@@ -1024,27 +1024,27 @@ function addBlmTrails(map) {
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD HIGH CLEARANCE / SPECIALIZED"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD High Clearance/Specialized"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4wd High Clearance / Specialized"]
-    ], isDark ? "#e08050" : "#d07040",
+    ], isDark ? "#f08040" : "#e07030",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD LOW"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD Low"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4wd Low"]
-    ], isDark ? "#d09060" : "#c08050",
+    ], isDark ? "#e0b040" : "#d0a030",
     ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "ATV"],
-    isDark ? "#d06050" : "#c05040",
+    isDark ? "#e04040" : "#d03030",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "MOTORIZED SINGLE TRACK"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "Motorized Single Track"]
-    ], isDark ? "#c06060" : "#b05050",
+    ], isDark ? "#b070c0" : "#a060b0",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2WD LOW"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2WD Low"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2wd Low"]
-    ], isDark ? "#e0b080" : "#d0a070",
+    ], isDark ? "#f0d070" : "#e0c060",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "NON-MECHANIZED"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "Non-Mechanized"]
-    ], isDark ? "#80b060" : "#70a050",
+    ], isDark ? "#60c050" : "#50b040",
     isDark ? "#c0a060" : "#b09050"
   ]
 
