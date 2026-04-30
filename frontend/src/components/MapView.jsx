@@ -79,9 +79,11 @@ function applyHighlightExpression(map, layerId) {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
   const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7a9a6b'
 
+  // Hover: darken text slightly, bump halo to full opacity for focus effect
   const hoverColor = isDark ? '#ffffff' : '#000000'
-  const hoverHaloColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.25)'
-  const selectedHaloColor = isDark ? 'rgba(122,154,107,0.6)' : 'rgba(122,154,107,0.4)'
+  const hoverHaloColor = isDark ? 'rgba(30,30,30,1)' : 'rgba(255,255,255,1)'
+  // Selected: accent color text with solid white halo at full opacity
+  const selectedHaloColor = isDark ? 'rgba(30,30,30,1)' : 'rgba(255,255,255,1)'
 
   const isHovered = highlightState.hoveredLayer === layerId && highlightState.hoveredName
   const isSelected = highlightState.selectedLayer === layerId && highlightState.selectedName
@@ -95,18 +97,18 @@ function applyHighlightExpression(map, layerId) {
       'case',
       ['==', ['get', 'name'], highlightState.selectedName], accentColor,
       ['==', ['get', 'name'], highlightState.hoveredName], hoverColor,
-      orig['text-color'] || (isDark ? '#c0c0c0' : '#333333')
+      orig['text-color'] || (isDark ? '#e0e0e0' : '#2a2a2a')
     ])
     map.setPaintProperty(layerId, 'text-halo-color', [
       'case',
       ['==', ['get', 'name'], highlightState.selectedName], selectedHaloColor,
       ['==', ['get', 'name'], highlightState.hoveredName], hoverHaloColor,
-      orig['text-halo-color'] || (isDark ? '#1a1a1a' : '#ffffff')
+      orig['text-halo-color'] || (isDark ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)')
     ])
     map.setPaintProperty(layerId, 'text-halo-width', [
       'case',
-      ['==', ['get', 'name'], highlightState.selectedName], 3,
-      ['==', ['get', 'name'], highlightState.hoveredName], 2.5,
+      ['==', ['get', 'name'], highlightState.selectedName], 2.2,
+      ['==', ['get', 'name'], highlightState.hoveredName], 2,
       orig['text-halo-width'] || 1.5
     ])
   } else if (isSelected) {
@@ -114,34 +116,34 @@ function applyHighlightExpression(map, layerId) {
     map.setPaintProperty(layerId, 'text-color', [
       'case',
       ['==', ['get', 'name'], highlightState.selectedName], accentColor,
-      orig['text-color'] || (isDark ? '#c0c0c0' : '#333333')
+      orig['text-color'] || (isDark ? '#e0e0e0' : '#2a2a2a')
     ])
     map.setPaintProperty(layerId, 'text-halo-color', [
       'case',
       ['==', ['get', 'name'], highlightState.selectedName], selectedHaloColor,
-      orig['text-halo-color'] || (isDark ? '#1a1a1a' : '#ffffff')
+      orig['text-halo-color'] || (isDark ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)')
     ])
     map.setPaintProperty(layerId, 'text-halo-width', [
       'case',
-      ['==', ['get', 'name'], highlightState.selectedName], 3,
-      orig['text-halo-width'] || 1.5
+      ['==', ['get', 'name'], highlightState.selectedName], 2.2,
+      orig['text-halo-width'] || 1.8
     ])
   } else if (isHovered) {
     // Only hovered
     map.setPaintProperty(layerId, 'text-color', [
       'case',
       ['==', ['get', 'name'], highlightState.hoveredName], hoverColor,
-      orig['text-color'] || (isDark ? '#c0c0c0' : '#333333')
+      orig['text-color'] || (isDark ? '#e0e0e0' : '#2a2a2a')
     ])
     map.setPaintProperty(layerId, 'text-halo-color', [
       'case',
       ['==', ['get', 'name'], highlightState.hoveredName], hoverHaloColor,
-      orig['text-halo-color'] || (isDark ? '#1a1a1a' : '#ffffff')
+      orig['text-halo-color'] || (isDark ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)')
     ])
     map.setPaintProperty(layerId, 'text-halo-width', [
       'case',
-      ['==', ['get', 'name'], highlightState.hoveredName], 2.5,
-      orig['text-halo-width'] || 1.5
+      ['==', ['get', 'name'], highlightState.hoveredName], 2,
+      orig['text-halo-width'] || 1.8
     ])
   } else {
     // No highlight on this layer - restore original
@@ -214,6 +216,28 @@ function clearAllHighlights(map) {
   highlightState.selectedLayer = null
   highlightState.selectedName = null
   layers.forEach(layerId => restoreOriginalPaint(map, layerId))
+}
+
+/** Apply improved base label styling for readability (Google Maps style) */
+function applyBaseLabelStyling(map) {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+
+  INTERACTIVE_LABEL_LAYERS.forEach(layerId => {
+    if (!map.getLayer(layerId)) return
+
+    // Base styling: dark text with solid opaque white halo for knockout effect
+    // This ensures labels read cleanly over any background (parks, water, terrain)
+    map.setPaintProperty(layerId, 'text-color', isDark ? '#e0e0e0' : '#2a2a2a')
+    map.setPaintProperty(layerId, 'text-halo-color', isDark ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)')
+    map.setPaintProperty(layerId, 'text-halo-width', 1.8)
+
+    // Store these as the original values for highlight restoration
+    originalPaintValues[layerId] = {
+      'text-color': isDark ? '#e0e0e0' : '#2a2a2a',
+      'text-halo-color': isDark ? 'rgba(20,20,20,0.9)' : 'rgba(255,255,255,0.9)',
+      'text-halo-width': 1.8,
+    }
+  })
 }
 
 /** Build a full MapLibre style object for the given theme */
@@ -1564,6 +1588,9 @@ const MapView = forwardRef(function MapView(_, ref) {
         addBoundaryLayer(map)
       }
 
+      // Apply improved base label styling for readability
+      applyBaseLabelStyling(map)
+
       // Restore overlay layers from localStorage prefs
       try {
         const raw = localStorage.getItem('navi-layer-prefs')
@@ -1769,6 +1796,9 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (!map.getLayer(BOUNDARY_LAYER)) {
         addBoundaryLayer(map)
       }
+
+      // Apply improved base label styling for readability
+      applyBaseLabelStyling(map)
 
       // Re-add active overlay layers
       if (activeLayersRef.current.hillshade) addHillshade(map)
