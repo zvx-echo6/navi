@@ -50,7 +50,11 @@ const USFS_TRAILS_LABEL = 'usfs-trails-label'
 const USFS_ROADS_HIT = 'usfs-roads-hit'
 const USFS_TRAILS_HIT = 'usfs-trails-hit'
 const BLM_SOURCE = 'blm-trails-source'
-const BLM_ROUTES_LAYER = 'blm-routes-layer'
+const BLM_ROUTES_NATURAL = 'blm-routes-natural'
+const BLM_ROUTES_IMPROVED = 'blm-routes-improved'
+const BLM_ROUTES_AGGREGATE = 'blm-routes-aggregate'
+const BLM_ROUTES_SNOW = 'blm-routes-snow'
+const BLM_ROUTES_OTHER = 'blm-routes-other'
 const BLM_ROUTES_LABEL = 'blm-routes-label'
 const BLM_ROUTES_HIT = 'blm-routes-hit'
 
@@ -979,6 +983,7 @@ function removeUsfsTrails(map) {
   if (map.getSource(USFS_SOURCE)) map.removeSource(USFS_SOURCE)
 }
 /** Add BLM trails/roads vector tile overlay */
+/** Add BLM trails/roads vector tile overlay with surface-type styling */
 function addBlmTrails(map) {
   if (!map || map.getSource(BLM_SOURCE)) return
 
@@ -987,7 +992,7 @@ function addBlmTrails(map) {
     url: "pmtiles:///tiles/blm-trails-roads.pmtiles",
   })
 
-  // Insert below first symbol layer (above other overlays, below labels)
+  // Insert below first symbol layer
   let beforeId = undefined
   for (const layer of map.getStyle().layers) {
     if (layer.type === "symbol") {
@@ -997,15 +1002,56 @@ function addBlmTrails(map) {
   }
 
   const isDark = document.documentElement.getAttribute("data-theme") === "dark"
-  const opMod = isDark ? 0.8 : 1.0
+  const opMod = isDark ? 0.85 : 1.0
 
-  // Invisible hit-area layer for easier clicking (wide transparent line)
+  // Color expression based on route use class
+  const colorExpr = [
+    "case",
+    ["any",
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD HIGH CLEARANCE / SPECIALIZED"],
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD High Clearance/Specialized"],
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4wd High Clearance / Specialized"]
+    ], isDark ? "#d08050" : "#c07040",
+    ["any",
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD LOW"],
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD Low"],
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4wd Low"]
+    ], isDark ? "#b89070" : "#a08060",
+    ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "ATV"],
+    isDark ? "#b07060" : "#a06050",
+    ["any",
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "MOTORIZED SINGLE TRACK"],
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "Motorized Single Track"]
+    ], isDark ? "#a06060" : "#905050",
+    ["any",
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2WD LOW"],
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2WD Low"],
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2wd Low"]
+    ], isDark ? "#d0b090" : "#c0a080",
+    ["any",
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "NON-MECHANIZED"],
+      ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "Non-Mechanized"]
+    ], isDark ? "#70a070" : "#608060",
+    isDark ? "#909070" : "#808060"
+  ]
+
+  const lineWidth = ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5]
+
+  // Filter out solid surface (paved)
+  const excludePaved = [
+    "all",
+    ["!=", ["get", "OBSRVE_SRFCE_TYPE"], "SOLID SURFACE"],
+    ["!=", ["get", "OBSRVE_SRFCE_TYPE"], "Solid Surface"]
+  ]
+
+  // Invisible hit-area layer for clicking
   map.addLayer({
     id: BLM_ROUTES_HIT,
     type: "line",
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 10,
+    filter: excludePaved,
     paint: {
       "line-color": "#000000",
       "line-opacity": 0,
@@ -1013,18 +1059,113 @@ function addBlmTrails(map) {
     },
   }, beforeId)
 
-  // Routes layer - dashed line, muted olive/sage color
+  // NATURAL surface - solid line
   map.addLayer({
-    id: BLM_ROUTES_LAYER,
+    id: BLM_ROUTES_NATURAL,
     type: "line",
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 10,
+    filter: ["all", excludePaved,
+      ["any",
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "NATURAL"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Natural"]
+      ]
+    ],
     paint: {
-      "line-color": isDark ? "#8a9a70" : "#6b7a55",
-      "line-opacity": 0.7 * opMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5],
-      "line-dasharray": [3, 2],
+      "line-color": colorExpr,
+      "line-opacity": 0.75 * opMod,
+      "line-width": lineWidth,
+    },
+  }, beforeId)
+
+  // NATURAL IMPROVED surface - dashed
+  map.addLayer({
+    id: BLM_ROUTES_IMPROVED,
+    type: "line",
+    source: BLM_SOURCE,
+    "source-layer": "blm_routes",
+    minzoom: 10,
+    filter: ["all", excludePaved,
+      ["any",
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "NATURAL IMPROVED"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Natural Improved"]
+      ]
+    ],
+    paint: {
+      "line-color": colorExpr,
+      "line-opacity": 0.75 * opMod,
+      "line-width": lineWidth,
+      "line-dasharray": [4, 2],
+    },
+  }, beforeId)
+
+  // AGGREGATE surface - dotted
+  map.addLayer({
+    id: BLM_ROUTES_AGGREGATE,
+    type: "line",
+    source: BLM_SOURCE,
+    "source-layer": "blm_routes",
+    minzoom: 10,
+    filter: ["all", excludePaved,
+      ["any",
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "AGGREGATE"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Aggregate"]
+      ]
+    ],
+    paint: {
+      "line-color": colorExpr,
+      "line-opacity": 0.75 * opMod,
+      "line-width": lineWidth,
+      "line-dasharray": [1, 2],
+    },
+  }, beforeId)
+
+  // SNOW surface - dash-dot
+  map.addLayer({
+    id: BLM_ROUTES_SNOW,
+    type: "line",
+    source: BLM_SOURCE,
+    "source-layer": "blm_routes",
+    minzoom: 10,
+    filter: ["all", excludePaved,
+      ["any",
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "SNOW"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Snow"]
+      ]
+    ],
+    paint: {
+      "line-color": isDark ? "#90b0d0" : "#80a0c0",
+      "line-opacity": 0.75 * opMod,
+      "line-width": lineWidth,
+      "line-dasharray": [4, 2, 1, 2],
+    },
+  }, beforeId)
+
+  // OTHER/UNKNOWN surface - dash-dot-dot
+  map.addLayer({
+    id: BLM_ROUTES_OTHER,
+    type: "line",
+    source: BLM_SOURCE,
+    "source-layer": "blm_routes",
+    minzoom: 10,
+    filter: ["all", excludePaved,
+      ["!", ["any",
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "NATURAL"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Natural"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "NATURAL IMPROVED"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Natural Improved"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "AGGREGATE"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Aggregate"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "SNOW"],
+        ["==", ["get", "OBSRVE_SRFCE_TYPE"], "Snow"]
+      ]]
+    ],
+    paint: {
+      "line-color": colorExpr,
+      "line-opacity": 0.65 * opMod,
+      "line-width": lineWidth,
+      "line-dasharray": [4, 2, 1, 2, 1, 2],
     },
   }, beforeId)
 
@@ -1035,7 +1176,7 @@ function addBlmTrails(map) {
     source: BLM_SOURCE,
     "source-layer": "blm_routes",
     minzoom: 12,
-    filter: ["has", "ROUTE_PRMRY_NM"],
+    filter: ["all", excludePaved, ["has", "ROUTE_PRMRY_NM"]],
     layout: {
       "text-field": ["get", "ROUTE_PRMRY_NM"],
       "text-size": 10,
@@ -1047,14 +1188,14 @@ function addBlmTrails(map) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": isDark ? "#a0b090" : "#4a5a40",
+      "text-color": isDark ? "#b0a090" : "#5a4a40",
       "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
       "text-halo-width": 1.5,
       "text-opacity": 0.85,
     },
   })
 
-  // Cursor pointer on hover for hit layer
+  // Cursor pointer on hover
   map.on("mouseenter", BLM_ROUTES_HIT, () => {
     map.getCanvas().style.cursor = "pointer"
   })
@@ -1067,7 +1208,11 @@ function addBlmTrails(map) {
 function removeBlmTrails(map) {
   if (!map) return
   if (map.getLayer(BLM_ROUTES_LABEL)) map.removeLayer(BLM_ROUTES_LABEL)
-  if (map.getLayer(BLM_ROUTES_LAYER)) map.removeLayer(BLM_ROUTES_LAYER)
+  if (map.getLayer(BLM_ROUTES_OTHER)) map.removeLayer(BLM_ROUTES_OTHER)
+  if (map.getLayer(BLM_ROUTES_SNOW)) map.removeLayer(BLM_ROUTES_SNOW)
+  if (map.getLayer(BLM_ROUTES_AGGREGATE)) map.removeLayer(BLM_ROUTES_AGGREGATE)
+  if (map.getLayer(BLM_ROUTES_IMPROVED)) map.removeLayer(BLM_ROUTES_IMPROVED)
+  if (map.getLayer(BLM_ROUTES_NATURAL)) map.removeLayer(BLM_ROUTES_NATURAL)
   if (map.getLayer(BLM_ROUTES_HIT)) map.removeLayer(BLM_ROUTES_HIT)
   if (map.getSource(BLM_SOURCE)) map.removeSource(BLM_SOURCE)
 }
