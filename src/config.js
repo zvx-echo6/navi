@@ -34,6 +34,7 @@ const FALLBACK_CONFIG = {
     has_contours_test_10ft: false,
     has_address_book_write: false,
     has_usfs_trails: false,
+    has_blm_trails: false,
     has_contacts: false,
   },
   defaults: {

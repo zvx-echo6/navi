@@ -49,6 +49,10 @@ const USFS_ROADS_LABEL = 'usfs-roads-label'
 const USFS_TRAILS_LABEL = 'usfs-trails-label'
 const USFS_ROADS_HIT = 'usfs-roads-hit'
 const USFS_TRAILS_HIT = 'usfs-trails-hit'
+const BLM_SOURCE = 'blm-trails-source'
+const BLM_ROUTES_LAYER = 'blm-routes-layer'
+const BLM_ROUTES_LABEL = 'blm-routes-label'
+const BLM_ROUTES_HIT = 'blm-routes-hit'
 
 
 // Highlight state - use data-driven expressions to target specific features
@@ -974,6 +978,100 @@ function removeUsfsTrails(map) {
   if (map.getLayer(USFS_ROADS_HIT)) map.removeLayer(USFS_ROADS_HIT)
   if (map.getSource(USFS_SOURCE)) map.removeSource(USFS_SOURCE)
 }
+/** Add BLM trails/roads vector tile overlay */
+function addBlmTrails(map) {
+  if (!map || map.getSource(BLM_SOURCE)) return
+
+  map.addSource(BLM_SOURCE, {
+    type: "vector",
+    url: "pmtiles:///tiles/blm-trails-roads.pmtiles",
+  })
+
+  // Insert below first symbol layer (above other overlays, below labels)
+  let beforeId = undefined
+  for (const layer of map.getStyle().layers) {
+    if (layer.type === "symbol") {
+      beforeId = layer.id
+      break
+    }
+  }
+
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark"
+  const opMod = isDark ? 0.8 : 1.0
+
+  // Invisible hit-area layer for easier clicking (wide transparent line)
+  map.addLayer({
+    id: BLM_ROUTES_HIT,
+    type: "line",
+    source: BLM_SOURCE,
+    "source-layer": "blm_routes",
+    minzoom: 10,
+    paint: {
+      "line-color": "#000000",
+      "line-opacity": 0,
+      "line-width": 14,
+    },
+  }, beforeId)
+
+  // Routes layer - dashed line, muted olive/sage color
+  map.addLayer({
+    id: BLM_ROUTES_LAYER,
+    type: "line",
+    source: BLM_SOURCE,
+    "source-layer": "blm_routes",
+    minzoom: 10,
+    paint: {
+      "line-color": isDark ? "#8a9a70" : "#6b7a55",
+      "line-opacity": 0.7 * opMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5],
+      "line-dasharray": [3, 2],
+    },
+  }, beforeId)
+
+  // Route labels (zoom 12+)
+  map.addLayer({
+    id: BLM_ROUTES_LABEL,
+    type: "symbol",
+    source: BLM_SOURCE,
+    "source-layer": "blm_routes",
+    minzoom: 12,
+    filter: ["has", "ROUTE_PRMRY_NM"],
+    layout: {
+      "text-field": ["get", "ROUTE_PRMRY_NM"],
+      "text-size": 10,
+      "text-font": ["Noto Sans Regular"],
+      "symbol-placement": "line",
+      "text-anchor": "center",
+      "symbol-spacing": 300,
+      "text-max-angle": 25,
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": isDark ? "#a0b090" : "#4a5a40",
+      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
+      "text-halo-width": 1.5,
+      "text-opacity": 0.85,
+    },
+  })
+
+  // Cursor pointer on hover for hit layer
+  map.on("mouseenter", BLM_ROUTES_HIT, () => {
+    map.getCanvas().style.cursor = "pointer"
+  })
+  map.on("mouseleave", BLM_ROUTES_HIT, () => {
+    map.getCanvas().style.cursor = ""
+  })
+}
+
+/** Remove BLM trails/roads layers and source */
+function removeBlmTrails(map) {
+  if (!map) return
+  if (map.getLayer(BLM_ROUTES_LABEL)) map.removeLayer(BLM_ROUTES_LABEL)
+  if (map.getLayer(BLM_ROUTES_LAYER)) map.removeLayer(BLM_ROUTES_LAYER)
+  if (map.getLayer(BLM_ROUTES_HIT)) map.removeLayer(BLM_ROUTES_HIT)
+  if (map.getSource(BLM_SOURCE)) map.removeSource(BLM_SOURCE)
+}
+
 
 /** Add boundary polygon layers with computed accent color (MapLibre rejects CSS vars in paint) */
 const BOUNDARY_FILL_LAYER = 'boundary-fill-layer'
@@ -1033,7 +1131,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const watchIdRef = useRef(null)
   const currentThemeRef = useRef('dark')
   // Track which overlay layers are currently active (for theme swap re-add)
-  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, contoursTest: false, contoursTest10ft: false, usfsTrails: false })
+  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, contoursTest: false, contoursTest10ft: false, usfsTrails: false, blmTrails: false })
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
   const highlightedFeatureRef = useRef(null) // { source, sourceLayer, id } for setFeatureState
@@ -1491,6 +1589,18 @@ const MapView = forwardRef(function MapView(_, ref) {
       removeUsfsTrails(map)
       activeLayersRef.current.usfsTrails = false
     },
+    addBlmTrailsLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      addBlmTrails(map)
+      activeLayersRef.current.blmTrails = true
+    },
+    removeBlmTrailsLayer() {
+      const map = mapInstance.current
+      if (!map) return
+      removeBlmTrails(map)
+      activeLayersRef.current.blmTrails = false
+    },
 
   }))
 
@@ -1656,6 +1766,37 @@ const MapView = forwardRef(function MapView(_, ref) {
             if (props.ROUTE_STAT) html += '<div><b>Status:</b> ' + props.ROUTE_STAT + '</div>'
           }
           html += '</div>'
+
+          // Remove existing popup
+          if (popupRef.current) popupRef.current.remove()
+
+          const popup = new maplibregl.Popup({ offset: 10, closeButton: true })
+            .setLngLat([lng, lat])
+            .setHTML(html)
+            .addTo(map)
+          popupRef.current = popup
+          return
+        }
+
+        // Check for BLM routes click (show info popup)
+        const blmLayers = [BLM_ROUTES_HIT]
+        const blmFeatures = map.queryRenderedFeatures(e.point, { layers: blmLayers })
+        const blmFeature = blmFeatures.find(f => f.properties)
+        if (blmFeature && hasFeature("has_blm_trails")) {
+          const props = blmFeature.properties
+          const name = props.ROUTE_PRMRY_NM || "Unnamed Route"
+
+          // Build popup content
+          let html = "<div style=\"font-size:12px;max-width:240px;line-height:1.4\">"
+          html += "<strong style=\"font-size:13px\">" + name + "</strong>"
+          html += "<div style=\"color:var(--text-secondary);font-size:11px;margin-bottom:4px\">BLM Route</div>"
+
+          // Route info - handle potential field name variations across states
+          if (props.PLAN_ASSET_CLASS) html += "<div><b>Asset Class:</b> " + props.PLAN_ASSET_CLASS + "</div>"
+          if (props.PLAN_MODE_TRNSPRT) html += "<div><b>Transport:</b> " + props.PLAN_MODE_TRNSPRT + "</div>"
+          if (props.OBSRVE_SRFCE_TYPE) html += "<div><b>Surface:</b> " + props.OBSRVE_SRFCE_TYPE + "</div>"
+          if (props.GIS_MILES) html += "<div><b>Length:</b> " + parseFloat(props.GIS_MILES).toFixed(1) + " mi</div>"
+          html += "</div>"
 
           // Remove existing popup
           if (popupRef.current) popupRef.current.remove()

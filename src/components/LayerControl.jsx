@@ -25,6 +25,7 @@ export default function LayerControl({ mapRef }) {
   const [contoursTest, setContoursTest] = useState(false)
   const [contoursTest10ft, setContoursTest10ft] = useState(false)
   const [usfsTrails, setUsfsTrails] = useState(false)
+  const [blmTrails, setBlmTrails] = useState(false)
   const panelRef = useRef(null)
 
   // Initialize from localStorage or defaults on mount
@@ -37,6 +38,7 @@ export default function LayerControl({ mapRef }) {
     const ctTestAvailable = hasFeature('has_contours_test')
     const ctTest10ftAvailable = hasFeature('has_contours_test_10ft')
     const usfsAvailable = hasFeature('has_usfs_trails')
+    const blmAvailable = hasFeature('has_blm_trails')
 
     if (saved) {
       setHillshade(hsAvailable && (saved.hillshade ?? true))
@@ -46,6 +48,7 @@ export default function LayerControl({ mapRef }) {
       setContoursTest(ctTestAvailable && (saved.contoursTest ?? false))
       setContoursTest10ft(ctTest10ftAvailable && (saved.contoursTest10ft ?? false))
       setUsfsTrails(usfsAvailable && (saved.usfsTrails ?? false))
+      setBlmTrails(blmAvailable && (saved.blmTrails ?? false))
     } else {
       // Defaults: hillshade ON if available, others OFF
       setHillshade(hsAvailable)
@@ -78,7 +81,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails })
+    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails, blmTrails })
     return () => map.off('style.load', apply)
   }, [hillshade, mapRef])
 
@@ -101,7 +104,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails })
+    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails, blmTrails })
     return () => map.off('style.load', apply)
   }, [traffic, mapRef])
 
@@ -124,7 +127,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails })
+    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails, blmTrails })
     return () => map.off('style.load', apply)
   }, [publicLands, mapRef])
 
@@ -147,7 +150,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails })
+    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails, blmTrails })
     return () => map.off('style.load', apply)
   }, [contours, mapRef])
 
@@ -170,7 +173,7 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails })
+    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails, blmTrails })
     return () => map.off('style.load', apply)
   }, [contoursTest, mapRef])
 
@@ -212,8 +215,29 @@ export default function LayerControl({ mapRef }) {
     } else {
       map.once('style.load', apply)
     }
-    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails })
+    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails, blmTrails })
   }, [usfsTrails, mapRef])
+
+  // Apply blmTrails layer
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.()
+    if (!map) return
+
+    const apply = () => {
+      if (blmTrails && hasFeature("has_blm_trails")) {
+        mapRef.current?.addBlmTrailsLayer?.()
+      } else {
+        mapRef.current?.removeBlmTrailsLayer?.()
+      }
+    }
+
+    if (map.isStyleLoaded()) {
+      apply()
+    } else {
+      map.once("style.load", apply)
+    }
+    savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails, blmTrails })
+  }, [blmTrails, mapRef])
 
   // Close on outside click
   useEffect(() => {
@@ -234,9 +258,10 @@ export default function LayerControl({ mapRef }) {
   const showContoursTest = hasFeature('has_contours_test')
   const showContoursTest10ft = hasFeature('has_contours_test_10ft')
   const showUsfsTrails = hasFeature('has_usfs_trails')
+  const showBlmTrails = hasFeature('has_blm_trails')
 
   // Don't render if no overlay features available
-  if (!showHillshade && !showTraffic && !showPublicLands && !showContours && !showContoursTest && !showContoursTest10ft && !showUsfsTrails) return null
+  if (!showHillshade && !showTraffic && !showPublicLands && !showContours && !showContoursTest && !showContoursTest10ft && !showUsfsTrails && !showBlmTrails) return null
 
   return (
     <div ref={panelRef} className="layer-control">
@@ -333,6 +358,18 @@ export default function LayerControl({ mapRef }) {
                 className="layer-control-toggle"
                 checked={usfsTrails}
                 onChange={(e) => setUsfsTrails(e.target.checked)}
+              />
+            </label>
+          )}
+
+          {showBlmTrails && (
+            <label className="layer-control-item">
+              <span className="layer-control-label">BLM Roads</span>
+              <input
+                type="checkbox"
+                className="layer-control-toggle"
+                checked={blmTrails}
+                onChange={(e) => setBlmTrails(e.target.checked)}
               />
             </label>
           )}
