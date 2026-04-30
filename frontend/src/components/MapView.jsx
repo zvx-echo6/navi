@@ -830,6 +830,7 @@ function removeContoursTest10ft(map) {
   if (map.getSource(CONTOUR_TEST_10FT_SOURCE)) map.removeSource(CONTOUR_TEST_10FT_SOURCE)
 }
 /** Add USFS trails and roads vector tile overlay */
+/** Add USFS trails and roads vector tile overlay */
 function addUsfsTrails(map) {
   if (!map || map.getSource(USFS_SOURCE)) return
 
@@ -838,7 +839,7 @@ function addUsfsTrails(map) {
     url: "pmtiles:///tiles/usfs-trails-roads.pmtiles",
   })
 
-  // Insert below first symbol layer (above other overlays, below labels)
+  // Insert below first symbol layer
   let beforeId = undefined
   for (const layer of map.getStyle().layers) {
     if (layer.type === "symbol") {
@@ -848,9 +849,8 @@ function addUsfsTrails(map) {
   }
 
   const isDark = document.documentElement.getAttribute("data-theme") === "dark"
-  const opMod = isDark ? 0.8 : 1.0
 
-  // Invisible hit-area layers for easier clicking (wide transparent lines)
+  // Invisible hit-area layers for easier clicking
   map.addLayer({
     id: USFS_ROADS_HIT,
     type: "line",
@@ -877,9 +877,7 @@ function addUsfsTrails(map) {
     },
   }, beforeId)
 
-
-
-  // Roads layer - solid khaki/tan line
+  // Roads layer - solid amber/tan line
   map.addLayer({
     id: USFS_ROADS_LAYER,
     type: "line",
@@ -887,13 +885,13 @@ function addUsfsTrails(map) {
     "source-layer": "roads",
     minzoom: 10,
     paint: {
-      "line-color": isDark ? "#9a8b70" : "#b8a87a",
-      "line-opacity": 0.65 * opMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.0, 14, 2.0, 16, 3.0],
+      "line-color": isDark ? "#d0a060" : "#c09050",
+      "line-opacity": 0.9,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5],
     },
   }, beforeId)
 
-  // Trails layer - dashed earth-tone brown
+  // Trails layer - color by allowed use
   map.addLayer({
     id: USFS_TRAILS_LAYER,
     type: "line",
@@ -901,9 +899,26 @@ function addUsfsTrails(map) {
     "source-layer": "trails",
     minzoom: 10,
     paint: {
-      "line-color": isDark ? "#a88960" : "#8b7355",
-      "line-opacity": 0.7 * opMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5],
+      "line-color": [
+        "case",
+        // Motorcycle/ATV trails - orange
+        ["any",
+          ["==", ["slice", ["get", "MOTORCYCLE"], 0, 1], "0"],
+          ["==", ["slice", ["get", "ATV_MANAGE"], 0, 1], "0"]
+        ], isDark ? "#e08050" : "#d07040",
+        // Bike trails - amber
+        ["==", ["slice", ["get", "BICYCLE_MA"], 0, 1], "0"],
+        isDark ? "#d09050" : "#c08040",
+        // Hiker/Horse only - green
+        ["any",
+          ["==", ["slice", ["get", "HIKER_PEDE"], 0, 1], "0"],
+          ["==", ["slice", ["get", "HORSE_MANA"], 0, 1], "0"]
+        ], isDark ? "#80b060" : "#70a050",
+        // Default - tan
+        isDark ? "#c0a060" : "#b09050"
+      ],
+      "line-opacity": 0.9,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2.0, 14, 3.0, 16, 4.0],
       "line-dasharray": [2, 1.5],
     },
   }, beforeId)
@@ -918,7 +933,7 @@ function addUsfsTrails(map) {
     filter: ["has", "NAME"],
     layout: {
       "text-field": ["get", "NAME"],
-      "text-size": 10,
+      "text-size": 11,
       "text-font": ["Noto Sans Regular"],
       "symbol-placement": "line",
       "text-anchor": "center",
@@ -927,10 +942,10 @@ function addUsfsTrails(map) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": isDark ? "#c0b090" : "#6a5a40",
+      "text-color": isDark ? "#d0c0a0" : "#6a5a40",
       "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
       "text-halo-width": 1.5,
-      "text-opacity": 0.85,
+      "text-opacity": 0.9,
     },
   })
 
@@ -944,7 +959,7 @@ function addUsfsTrails(map) {
     filter: ["has", "TRAIL_NAME"],
     layout: {
       "text-field": ["get", "TRAIL_NAME"],
-      "text-size": 10,
+      "text-size": 11,
       "text-font": ["Noto Sans Regular"],
       "symbol-placement": "line",
       "text-anchor": "center",
@@ -953,14 +968,14 @@ function addUsfsTrails(map) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": isDark ? "#c8a878" : "#5a4530",
+      "text-color": isDark ? "#d0b090" : "#5a4a30",
       "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
       "text-halo-width": 1.5,
-      "text-opacity": 0.85,
+      "text-opacity": 0.9,
     },
   })
 
-  // Cursor pointer on hover for hit layers
+  // Cursor pointer on hover
   ;[USFS_TRAILS_HIT, USFS_ROADS_HIT].forEach(layerId => {
     map.on("mouseenter", layerId, () => {
       map.getCanvas().style.cursor = "pointer"
@@ -970,8 +985,6 @@ function addUsfsTrails(map) {
     })
   })
 }
-
-/** Remove USFS trails/roads layers and source */
 function removeUsfsTrails(map) {
   if (!map) return
   if (map.getLayer(USFS_TRAILS_LABEL)) map.removeLayer(USFS_TRAILS_LABEL)
@@ -983,6 +996,7 @@ function removeUsfsTrails(map) {
   if (map.getSource(USFS_SOURCE)) map.removeSource(USFS_SOURCE)
 }
 /** Add BLM trails/roads vector tile overlay */
+/** Add BLM trails/roads vector tile overlay with surface-type styling */
 /** Add BLM trails/roads vector tile overlay with surface-type styling */
 function addBlmTrails(map) {
   if (!map || map.getSource(BLM_SOURCE)) return
@@ -1002,40 +1016,39 @@ function addBlmTrails(map) {
   }
 
   const isDark = document.documentElement.getAttribute("data-theme") === "dark"
-  const opMod = isDark ? 0.85 : 1.0
 
-  // Color expression based on route use class
+  // Color expression based on route use class - brighter palette
   const colorExpr = [
     "case",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD HIGH CLEARANCE / SPECIALIZED"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD High Clearance/Specialized"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4wd High Clearance / Specialized"]
-    ], isDark ? "#d08050" : "#c07040",
+    ], isDark ? "#e08050" : "#d07040",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD LOW"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD Low"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4wd Low"]
-    ], isDark ? "#b89070" : "#a08060",
+    ], isDark ? "#d09060" : "#c08050",
     ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "ATV"],
-    isDark ? "#b07060" : "#a06050",
+    isDark ? "#d06050" : "#c05040",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "MOTORIZED SINGLE TRACK"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "Motorized Single Track"]
-    ], isDark ? "#a06060" : "#905050",
+    ], isDark ? "#c06060" : "#b05050",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2WD LOW"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2WD Low"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2wd Low"]
-    ], isDark ? "#d0b090" : "#c0a080",
+    ], isDark ? "#e0b080" : "#d0a070",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "NON-MECHANIZED"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "Non-Mechanized"]
-    ], isDark ? "#70a070" : "#608060",
-    isDark ? "#909070" : "#808060"
+    ], isDark ? "#80b060" : "#70a050",
+    isDark ? "#c0a060" : "#b09050"
   ]
 
-  const lineWidth = ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5]
+  const lineWidth = ["interpolate", ["linear"], ["zoom"], 10, 2.0, 14, 3.0, 16, 4.0]
 
   // Filter out paved, arterial, collector, local, and highways
   const excludeUrban = [
@@ -1055,6 +1068,7 @@ function addBlmTrails(map) {
     // Exclude designated highways
     ["!", ["has", "HWY_CLASS"]]
   ]
+
   // Invisible hit-area layer for clicking
   map.addLayer({
     id: BLM_ROUTES_HIT,
@@ -1085,7 +1099,7 @@ function addBlmTrails(map) {
     ],
     paint: {
       "line-color": colorExpr,
-      "line-opacity": 0.75 * opMod,
+      "line-opacity": 0.9,
       "line-width": lineWidth,
     },
   }, beforeId)
@@ -1105,7 +1119,7 @@ function addBlmTrails(map) {
     ],
     paint: {
       "line-color": colorExpr,
-      "line-opacity": 0.75 * opMod,
+      "line-opacity": 0.9,
       "line-width": lineWidth,
       "line-dasharray": [4, 2],
     },
@@ -1126,13 +1140,13 @@ function addBlmTrails(map) {
     ],
     paint: {
       "line-color": colorExpr,
-      "line-opacity": 0.75 * opMod,
+      "line-opacity": 0.9,
       "line-width": lineWidth,
       "line-dasharray": [1, 2],
     },
   }, beforeId)
 
-  // SNOW surface - dash-dot
+  // SNOW surface - dash-dot, blue
   map.addLayer({
     id: BLM_ROUTES_SNOW,
     type: "line",
@@ -1146,8 +1160,8 @@ function addBlmTrails(map) {
       ]
     ],
     paint: {
-      "line-color": isDark ? "#90b0d0" : "#80a0c0",
-      "line-opacity": 0.75 * opMod,
+      "line-color": isDark ? "#80b0e0" : "#6090c0",
+      "line-opacity": 0.9,
       "line-width": lineWidth,
       "line-dasharray": [4, 2, 1, 2],
     },
@@ -1174,7 +1188,7 @@ function addBlmTrails(map) {
     ],
     paint: {
       "line-color": colorExpr,
-      "line-opacity": 0.65 * opMod,
+      "line-opacity": 0.85,
       "line-width": lineWidth,
       "line-dasharray": [4, 2, 1, 2, 1, 2],
     },
@@ -1190,7 +1204,7 @@ function addBlmTrails(map) {
     filter: ["all", excludeUrban, ["has", "ROUTE_PRMRY_NM"]],
     layout: {
       "text-field": ["get", "ROUTE_PRMRY_NM"],
-      "text-size": 10,
+      "text-size": 11,
       "text-font": ["Noto Sans Regular"],
       "symbol-placement": "line",
       "text-anchor": "center",
@@ -1199,10 +1213,10 @@ function addBlmTrails(map) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": isDark ? "#b0a090" : "#5a4a40",
+      "text-color": isDark ? "#d0c0a0" : "#5a4a30",
       "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
       "text-halo-width": 1.5,
-      "text-opacity": 0.85,
+      "text-opacity": 0.9,
     },
   })
 
@@ -1214,7 +1228,6 @@ function addBlmTrails(map) {
     map.getCanvas().style.cursor = ""
   })
 }
-
 /** Remove BLM trails/roads layers and source */
 function removeBlmTrails(map) {
   if (!map) return
