@@ -1038,22 +1038,19 @@ function addBlmTrails(map) {
   const lineWidth = ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5]
 
   // Filter out solid surface (paved)
-  // Filter out paved surfaces, arterial/collector roads, and highways
   const excludeUrban = [
     "all",
     // Exclude paved
     ["!=", ["get", "OBSRVE_SRFCE_TYPE"], "SOLID SURFACE"],
     ["!=", ["get", "OBSRVE_SRFCE_TYPE"], "Solid Surface"],
-    // Exclude arterial roads
-    ["!=", ["get", "OBSRVE_FUNC_CLASS"], "ARTERIAL"],
-    ["!=", ["get", "OBSRVE_FUNC_CLASS"], "Arterial"],
-    // Exclude collector roads
-    ["!=", ["get", "OBSRVE_FUNC_CLASS"], "COLLECTOR"],
-    ["!=", ["get", "OBSRVE_FUNC_CLASS"], "Collector"],
+    // Only RESOURCE functional class
+    ["any",
+      ["==", ["get", "OBSRVE_FUNC_CLASS"], "RESOURCE"],
+      ["==", ["get", "OBSRVE_FUNC_CLASS"], "Resource"]
+    ],
     // Exclude designated highways
     ["!", ["has", "HWY_CLASS"]]
   ]
-
   // Invisible hit-area layer for clicking
   map.addLayer({
     id: BLM_ROUTES_HIT,
