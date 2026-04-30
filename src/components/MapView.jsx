@@ -47,6 +47,8 @@ const USFS_ROADS_LAYER = 'usfs-roads-layer'
 const USFS_TRAILS_LAYER = 'usfs-trails-layer'
 const USFS_ROADS_LABEL = 'usfs-roads-label'
 const USFS_TRAILS_LABEL = 'usfs-trails-label'
+const USFS_ROADS_HIT = 'usfs-roads-hit'
+const USFS_TRAILS_HIT = 'usfs-trails-hit'
 
 
 // Highlight state - use data-driven expressions to target specific features
@@ -840,6 +842,35 @@ function addUsfsTrails(map) {
   const isDark = document.documentElement.getAttribute("data-theme") === "dark"
   const opMod = isDark ? 0.8 : 1.0
 
+  // Invisible hit-area layers for easier clicking (wide transparent lines)
+  map.addLayer({
+    id: USFS_ROADS_HIT,
+    type: "line",
+    source: USFS_SOURCE,
+    "source-layer": "roads",
+    minzoom: 10,
+    paint: {
+      "line-color": "#000000",
+      "line-opacity": 0,
+      "line-width": 14,
+    },
+  }, beforeId)
+
+  map.addLayer({
+    id: USFS_TRAILS_HIT,
+    type: "line",
+    source: USFS_SOURCE,
+    "source-layer": "trails",
+    minzoom: 10,
+    paint: {
+      "line-color": "#000000",
+      "line-opacity": 0,
+      "line-width": 14,
+    },
+  }, beforeId)
+
+
+
   // Roads layer - solid khaki/tan line
   map.addLayer({
     id: USFS_ROADS_LAYER,
@@ -920,6 +951,16 @@ function addUsfsTrails(map) {
       "text-opacity": 0.85,
     },
   })
+
+  // Cursor pointer on hover for hit layers
+  ;[USFS_TRAILS_HIT, USFS_ROADS_HIT].forEach(layerId => {
+    map.on("mouseenter", layerId, () => {
+      map.getCanvas().style.cursor = "pointer"
+    })
+    map.on("mouseleave", layerId, () => {
+      map.getCanvas().style.cursor = ""
+    })
+  })
 }
 
 /** Remove USFS trails/roads layers and source */
@@ -929,6 +970,8 @@ function removeUsfsTrails(map) {
   if (map.getLayer(USFS_ROADS_LABEL)) map.removeLayer(USFS_ROADS_LABEL)
   if (map.getLayer(USFS_TRAILS_LAYER)) map.removeLayer(USFS_TRAILS_LAYER)
   if (map.getLayer(USFS_ROADS_LAYER)) map.removeLayer(USFS_ROADS_LAYER)
+  if (map.getLayer(USFS_TRAILS_HIT)) map.removeLayer(USFS_TRAILS_HIT)
+  if (map.getLayer(USFS_ROADS_HIT)) map.removeLayer(USFS_ROADS_HIT)
   if (map.getSource(USFS_SOURCE)) map.removeSource(USFS_SOURCE)
 }
 
@@ -1579,12 +1622,12 @@ const MapView = forwardRef(function MapView(_, ref) {
         const MARKER_RADIUS_PX = 14 // half of 28px preview marker
 
         // Check for USFS trails/roads click (show info popup)
-        const usfsLayers = [USFS_TRAILS_LAYER, USFS_ROADS_LAYER]
+        const usfsLayers = [USFS_TRAILS_HIT, USFS_ROADS_HIT]
         const usfsFeatures = map.queryRenderedFeatures(e.point, { layers: usfsLayers })
         const usfsFeature = usfsFeatures.find(f => f.properties)
         if (usfsFeature && hasFeature('has_usfs_trails')) {
           const props = usfsFeature.properties
-          const isTrail = usfsFeature.layer?.id === USFS_TRAILS_LAYER
+          const isTrail = usfsFeature.layer?.id === USFS_TRAILS_HIT
           const name = isTrail ? (props.TRAIL_NAME || 'Unnamed Trail') : (props.NAME || 'Unnamed Road')
           const typeLabel = isTrail ? 'USFS Trail' : 'USFS Road'
 
