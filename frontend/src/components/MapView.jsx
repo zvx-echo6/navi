@@ -2,7 +2,8 @@ import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 're
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Protocol } from 'pmtiles'
-import { layers, namedTheme } from 'protomaps-themes-base'
+import { layers } from 'protomaps-themes-base'
+import { getTheme, getThemeColors, getThemeSprite } from '../themes/registry'
 import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse } from '../api'
@@ -11,6 +12,13 @@ import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star, Ruler, X }
 import RadialMenu from './RadialMenu'
 import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
+
+
+/** Check if current theme is dark based on registry */
+function isCurrentThemeDark() {
+  const themeId = document.documentElement.getAttribute('data-theme') || 'dark'
+  return getTheme(themeId).dark
+}
 
 const ROUTE_SOURCE = 'route-source'
 const BOUNDARY_SOURCE = 'boundary-source'
@@ -92,7 +100,7 @@ function applyHighlightExpression(map, layerId) {
   storeOriginalPaint(map, layerId)
 
   const orig = originalPaintValues[layerId]
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  const isDark = isCurrentThemeDark()
   const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7a9a6b'
 
   // Hover: darken text slightly, bump halo to full opacity for focus effect
@@ -236,7 +244,7 @@ function clearAllHighlights(map) {
 
 /** Apply improved base label styling for readability (Google Maps style) */
 function applyBaseLabelStyling(map) {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  const isDark = isCurrentThemeDark()
 
   INTERACTIVE_LABEL_LAYERS.forEach(layerId => {
     if (!map.getLayer(layerId)) return
@@ -265,7 +273,7 @@ function buildStyle(themeName) {
   return {
     version: 8,
     glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
-    sprite: `https://protomaps.github.io/basemaps-assets/sprites/v4/${themeName}`,
+    sprite: getThemeSprite(themeName),
     sources: {
       protomaps: {
         type: 'vector',
@@ -273,7 +281,7 @@ function buildStyle(themeName) {
         attribution,
       },
     },
-    layers: layers('protomaps', namedTheme(themeName), { lang: 'en' }),
+    layers: layers('protomaps', getThemeColors(themeName), { lang: 'en' }),
   }
 }
 
@@ -397,7 +405,7 @@ function addPublicLands(map) {
     }
   }
 
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  const isDark = isCurrentThemeDark()
   const opacityMod = isDark ? 0.7 : 1.0
 
   // Fill layer — data-driven color by agency + designation
@@ -541,7 +549,7 @@ function addContours(map) {
     }
   }
 
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+  const isDark = isCurrentThemeDark()
   const opMod = isDark ? 0.8 : 1.0
 
   // Minor contours (40ft) — visible z11+
@@ -643,7 +651,7 @@ function addContoursTest(map) {
     }
   }
 
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark"
+  const isDark = isCurrentThemeDark()
   const opMod = isDark ? 0.8 : 1.0
 
   // Minor contours (40ft) — blue scheme
@@ -745,7 +753,7 @@ function addContoursTest10ft(map) {
     }
   }
 
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark"
+  const isDark = isCurrentThemeDark()
   const opMod = isDark ? 0.8 : 1.0
 
   // Minor contours (10ft) — green scheme
@@ -848,7 +856,7 @@ function addUsfsTrails(map) {
     }
   }
 
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark"
+  const isDark = isCurrentThemeDark()
 
   // Invisible hit-area layers for easier clicking
   map.addLayer({
@@ -1015,7 +1023,7 @@ function addBlmTrails(map) {
     }
   }
 
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark"
+  const isDark = isCurrentThemeDark()
 
   // Color expression based on route use class - brighter palette
   const colorExpr = [
