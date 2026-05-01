@@ -11,9 +11,78 @@
  *   colors: object|null - null for built-in themes, full flavor object for custom
  *   satellite: object|null - raster adjustments when satellite layer is present
  *   overlay: object   - overlay layer styling configuration
+ *   ui: object        - CSS custom properties for UI elements
  */
 
 import { namedTheme } from 'protomaps-themes-base'
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UI CSS CUSTOM PROPERTIES
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Dark theme UI configuration
+ * All CSS custom properties from [data-theme="dark"] in index.css
+ */
+const darkUI = {
+  '--bg-base': '#1c1917',
+  '--bg-raised': '#252220',
+  '--bg-overlay': '#2e2a27',
+  '--bg-input': '#201d1a',
+  '--text-primary': '#dde3dc',
+  '--text-secondary': '#8f9a8e',
+  '--text-tertiary': '#5e6b5d',
+  '--text-inverse': '#1c1917',
+  '--border': '#3a3530',
+  '--border-subtle': '#2a2624',
+  '--accent': '#7a9a6b',
+  '--accent-hover': '#8fad7f',
+  '--accent-muted': '#3d4d36',
+  '--tan': '#b8a88a',
+  '--tan-muted': '#4a4235',
+  '--pin-origin': '#6b8f5e',
+  '--pin-destination': '#a67c52',
+  '--pin-intermediate': '#6b7268',
+  '--pin-stroke': '#1c1917',
+  '--status-success': '#6b8f5e',
+  '--status-warning': '#b89a4a',
+  '--status-danger': '#a65c52',
+  '--route-line': '#7a9a6b',
+  '--shadow': '0 2px 8px rgba(0, 0, 0, 0.4)',
+  '--shadow-lg': '0 4px 16px rgba(0, 0, 0, 0.5)',
+}
+
+/**
+ * Light theme UI configuration
+ * All CSS custom properties from [data-theme="light"] in index.css
+ */
+const lightUI = {
+  '--bg-base': '#ddd2b9',
+  '--bg-raised': '#e8dec8',
+  '--bg-overlay': '#e3d9c1',
+  '--bg-input': '#e8dec8',
+  '--text-primary': '#1a1d1a',
+  '--text-secondary': '#4f5a49',
+  '--text-tertiary': '#7a8674',
+  '--text-inverse': '#f5f2ed',
+  '--border': '#c4b89e',
+  '--border-subtle': '#d5cab2',
+  '--accent': '#4a7040',
+  '--accent-hover': '#3d5e35',
+  '--accent-muted': '#dce8d6',
+  '--tan': '#8a7556',
+  '--tan-muted': '#f0e8d8',
+  '--pin-origin': '#4a7040',
+  '--pin-destination': '#8a5c35',
+  '--pin-intermediate': '#6b6960',
+  '--pin-stroke': '#1a1d1a',
+  '--status-success': '#4a7040',
+  '--status-warning': '#8a7040',
+  '--status-danger': '#8a4040',
+  '--route-line': '#4a7040',
+  '--shadow': '0 2px 8px rgba(0, 0, 0, 0.08)',
+  '--shadow-lg': '0 4px 16px rgba(0, 0, 0, 0.12)',
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // OVERLAY CONFIGURATIONS
@@ -361,6 +430,7 @@ const themes = {
     colors: null,  // Use namedTheme('light')
     satellite: null,
     overlay: lightOverlay,
+    ui: lightUI,
   },
   dark: {
     id: 'dark',
@@ -369,6 +439,7 @@ const themes = {
     colors: null,  // Use namedTheme('dark')
     satellite: null,
     overlay: darkOverlay,
+    ui: darkUI,
   },
   // Custom themes go here. Example:
   // 'midnight': {
@@ -378,6 +449,7 @@ const themes = {
   //   colors: { /* full flavor object matching dark-flavor-reference.json schema */ },
   //   satellite: { opacity: 0.8, brightnessMin: 0.1 },
   //   overlay: { /* partial overrides - missing keys fall back to dark overlay */ },
+  //   ui: { /* partial overrides - missing keys fall back to dark ui */ },
   // },
 }
 
@@ -459,6 +531,36 @@ export function getOverlayConfig(themeId, layerKey) {
   }
 
   return baseConfig
+}
+
+/**
+ * Apply theme UI CSS custom properties to the document
+ *
+ * Sets the data-theme attribute AND applies all CSS variables from the
+ * theme's ui object directly to document.documentElement.style.
+ *
+ * For custom themes, missing ui keys fall back to the appropriate built-in
+ * theme (dark or light based on theme.dark flag).
+ *
+ * @param {object} theme - Theme config object (from getTheme())
+ */
+export function applyThemeUI(theme) {
+  const root = document.documentElement
+
+  // Set data-theme attribute for any CSS selectors that still reference it
+  root.setAttribute('data-theme', theme.id)
+
+  // Get base UI config from appropriate built-in theme
+  const builtinTheme = theme.dark ? themes.dark : themes.light
+  const baseUI = builtinTheme.ui
+
+  // Merge with any custom theme overrides
+  const ui = theme.ui ? { ...baseUI, ...theme.ui } : baseUI
+
+  // Apply all UI variables directly to root element style
+  for (const [prop, value] of Object.entries(ui)) {
+    root.style.setProperty(prop, value)
+  }
 }
 
 /**

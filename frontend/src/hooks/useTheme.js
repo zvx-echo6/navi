@@ -1,12 +1,13 @@
 import { useEffect } from 'react'
 import { useStore } from '../store'
+import { getTheme, applyThemeUI } from '../themes/registry'
 
 /**
  * Initializes and manages the theme system.
  * Call once in App — it handles:
  *  - Reading localStorage override on mount
  *  - Listening to system prefers-color-scheme
- *  - Applying data-theme to <html>
+ *  - Applying theme UI via registry (CSS custom properties)
  *  - Updating store.theme (resolved value)
  */
 export function useTheme() {
@@ -16,8 +17,11 @@ export function useTheme() {
   // Initialize override from localStorage on first mount
   useEffect(() => {
     const stored = localStorage.getItem('navi-theme-override')
-    if (stored === 'dark' || stored === 'light') {
-      useStore.getState().setThemeOverride(stored)
+    if (stored) {
+      const theme = getTheme(stored)
+      if (theme) {
+        useStore.getState().setThemeOverride(stored)
+      }
     }
   }, [])
 
@@ -30,7 +34,8 @@ export function useTheme() {
 
     function apply() {
       const resolved = resolve()
-      document.documentElement.setAttribute('data-theme', resolved)
+      const theme = getTheme(resolved)
+      applyThemeUI(theme)
       setTheme(resolved)
     }
 
