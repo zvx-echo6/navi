@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Protocol } from 'pmtiles'
 import { layers } from 'protomaps-themes-base'
-import { getTheme, getThemeColors, getThemeSprite } from '../themes/registry'
+import { getTheme, getThemeColors, getThemeSprite, getOverlayConfig } from '../themes/registry'
 import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse } from '../api'
@@ -311,11 +311,13 @@ const CHEVRON_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http
 </svg>`
 
 /** Add hillshade raster-dem source + layer to the map */
-function addHillshade(map) {
+function addHillshade(map, themeId) {
   if (!map || map.getSource(HILLSHADE_SOURCE)) return
   const config = getConfig()
   const hs = config?.tileset_hillshade
   if (!hs?.url) return
+
+  const c = getOverlayConfig(themeId, 'hillshade')
 
   map.addSource(HILLSHADE_SOURCE, {
     type: 'raster-dem',
@@ -339,10 +341,10 @@ function addHillshade(map) {
     type: 'hillshade',
     source: HILLSHADE_SOURCE,
     paint: {
-      'hillshade-exaggeration': 0.5,
-      'hillshade-illumination-direction': 315,
-      'hillshade-shadow-color': '#000000',
-      'hillshade-highlight-color': '#ffffff',
+      'hillshade-exaggeration': c.exaggeration,
+      'hillshade-illumination-direction': c.illuminationDirection,
+      'hillshade-shadow-color': c.shadowColor,
+      'hillshade-highlight-color': c.highlightColor,
     },
   }, beforeId)
 }
@@ -355,12 +357,13 @@ function removeHillshade(map) {
 }
 
 /** Add traffic raster tile source + layer */
-function addTraffic(map) {
+function addTraffic(map, themeId) {
   if (!map || map.getSource(TRAFFIC_SOURCE)) return
   const config = getConfig()
   const tr = config?.traffic
   if (!tr?.proxy_url) return
 
+  const c = getOverlayConfig(themeId, 'traffic')
   const tileUrl = tr.proxy_url.replace('{z}', '{z}').replace('{x}', '{x}').replace('{y}', '{y}')
 
   map.addSource(TRAFFIC_SOURCE, {
@@ -375,7 +378,7 @@ function addTraffic(map) {
     type: 'raster',
     source: TRAFFIC_SOURCE,
     paint: {
-      'raster-opacity': 0.6,
+      'raster-opacity': c.opacity,
     },
   })
 }
@@ -388,8 +391,10 @@ function removeTraffic(map) {
 }
 
 /** Add public lands vector tile overlay (PAD-US) */
-function addPublicLands(map) {
+function addPublicLands(map, themeId) {
   if (!map || map.getSource(PUBLIC_LANDS_SOURCE)) return
+
+  const c = getOverlayConfig(themeId, 'publicLands')
 
   map.addSource(PUBLIC_LANDS_SOURCE, {
     type: 'vector',
@@ -405,9 +410,6 @@ function addPublicLands(map) {
     }
   }
 
-  const isDark = isCurrentThemeDark()
-  const opacityMod = isDark ? 0.7 : 1.0
-
   // Fill layer — data-driven color by agency + designation
   map.addLayer({
     id: PUBLIC_LANDS_FILL,
@@ -417,40 +419,40 @@ function addPublicLands(map) {
     paint: {
       'fill-color': [
         'case',
-        ['==', ['get', 'designation'], 'WA'], '#7c6b2f',
-        ['==', ['get', 'designation'], 'WSA'], '#7c6b2f',
-        ['==', ['get', 'agency'], 'NPS'], '#3d6b1f',
-        ['==', ['get', 'agency'], 'USFS'], '#5a7c2f',
-        ['==', ['get', 'agency'], 'BLM'], '#c4a672',
-        ['==', ['get', 'agency'], 'FWS'], '#4a7a5a',
+        ['==', ['get', 'designation'], 'WA'], c.fillWA,
+        ['==', ['get', 'designation'], 'WSA'], c.fillWA,
+        ['==', ['get', 'agency'], 'NPS'], c.fillNPS,
+        ['==', ['get', 'agency'], 'USFS'], c.fillUSFS,
+        ['==', ['get', 'agency'], 'BLM'], c.fillBLM,
+        ['==', ['get', 'agency'], 'FWS'], c.fillFWS,
         ['any',
           ['==', ['get', 'manager_type'], 'STAT'],
           ['==', ['get', 'agency'], 'SPR'],
           ['==', ['get', 'agency'], 'SDC'],
           ['==', ['get', 'agency'], 'SLB']
-        ], '#5a8c7c',
+        ], c.fillSTAT,
         ['any',
           ['==', ['get', 'manager_type'], 'LOC'],
           ['==', ['get', 'manager_type'], 'DIST']
-        ], '#8ca694',
-        '#a0a0a0'
+        ], c.fillLOC,
+        c.fillDefault
       ],
       'fill-opacity': [
         'case',
-        ['==', ['get', 'designation'], 'WA'], 0.30 * opacityMod,
-        ['==', ['get', 'designation'], 'WSA'], 0.30 * opacityMod,
-        ['==', ['get', 'agency'], 'NPS'], 0.30 * opacityMod,
-        ['==', ['get', 'agency'], 'USFS'], 0.25 * opacityMod,
-        ['==', ['get', 'agency'], 'BLM'], 0.20 * opacityMod,
+        ['==', ['get', 'designation'], 'WA'], c.fillOpacityWA * c.opacityMod,
+        ['==', ['get', 'designation'], 'WSA'], c.fillOpacityWA * c.opacityMod,
+        ['==', ['get', 'agency'], 'NPS'], c.fillOpacityNPS * c.opacityMod,
+        ['==', ['get', 'agency'], 'USFS'], c.fillOpacityUSFS * c.opacityMod,
+        ['==', ['get', 'agency'], 'BLM'], c.fillOpacityBLM * c.opacityMod,
         ['any',
           ['==', ['get', 'manager_type'], 'STAT'],
           ['==', ['get', 'agency'], 'SPR']
-        ], 0.25 * opacityMod,
+        ], c.fillOpacitySTAT * c.opacityMod,
         ['any',
           ['==', ['get', 'manager_type'], 'LOC'],
           ['==', ['get', 'manager_type'], 'DIST']
-        ], 0.20 * opacityMod,
-        0.15 * opacityMod
+        ], c.fillOpacityLOC * c.opacityMod,
+        c.fillOpacityDefault * c.opacityMod
       ],
     },
   }, beforeId)
@@ -464,34 +466,34 @@ function addPublicLands(map) {
     paint: {
       'line-color': [
         'case',
-        ['==', ['get', 'designation'], 'WA'], '#5a4d20',
-        ['==', ['get', 'designation'], 'WSA'], '#5a4d20',
-        ['==', ['get', 'agency'], 'NPS'], '#2a4a15',
-        ['==', ['get', 'agency'], 'USFS'], '#3d5520',
-        ['==', ['get', 'agency'], 'BLM'], '#8a7343',
-        ['==', ['get', 'agency'], 'FWS'], '#2d5a3a',
+        ['==', ['get', 'designation'], 'WA'], c.outlineWA,
+        ['==', ['get', 'designation'], 'WSA'], c.outlineWA,
+        ['==', ['get', 'agency'], 'NPS'], c.outlineNPS,
+        ['==', ['get', 'agency'], 'USFS'], c.outlineUSFS,
+        ['==', ['get', 'agency'], 'BLM'], c.outlineBLM,
+        ['==', ['get', 'agency'], 'FWS'], c.outlineFWS,
         ['any',
           ['==', ['get', 'manager_type'], 'STAT'],
           ['==', ['get', 'agency'], 'SPR']
-        ], '#3d6055',
+        ], c.outlineSTAT,
         ['any',
           ['==', ['get', 'manager_type'], 'LOC'],
           ['==', ['get', 'manager_type'], 'DIST']
-        ], '#5c6e66',
-        '#707070'
+        ], c.outlineLOC,
+        c.outlineDefault
       ],
       'line-opacity': [
         'case',
-        ['==', ['get', 'agency'], 'NPS'], 0.7,
-        ['==', ['get', 'agency'], 'USFS'], 0.6,
-        ['==', ['get', 'agency'], 'BLM'], 0.5,
-        0.5
+        ['==', ['get', 'agency'], 'NPS'], c.outlineOpacityNPS,
+        ['==', ['get', 'agency'], 'USFS'], c.outlineOpacityUSFS,
+        ['==', ['get', 'agency'], 'BLM'], c.outlineOpacityDefault,
+        c.outlineOpacityDefault
       ],
       'line-width': [
         'interpolate', ['linear'], ['zoom'],
-        4, 0.3,
-        8, 0.8,
-        12, 1.2
+        4, c.outlineWidth.z4,
+        8, c.outlineWidth.z8,
+        12, c.outlineWidth.z12
       ],
     },
   }, beforeId)
@@ -505,8 +507,8 @@ function addPublicLands(map) {
     minzoom: 10,
     layout: {
       'text-field': ['get', 'name'],
-      'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 13],
-      'text-font': ['Noto Sans Regular'],
+      'text-size': ['interpolate', ['linear'], ['zoom'], 10, c.labelSize.z10, 14, c.labelSize.z14],
+      'text-font': c.labelFont,
       'symbol-placement': 'point',
       'text-anchor': 'center',
       'text-max-width': 8,
@@ -514,10 +516,10 @@ function addPublicLands(map) {
       'text-ignore-placement': false,
     },
     paint: {
-      'text-color': isDark ? '#c0c8b8' : '#3a4a30',
-      'text-halo-color': isDark ? '#1a1a1a' : '#ffffff',
-      'text-halo-width': 1.5,
-      'text-opacity': 0.85,
+      'text-color': c.labelColor,
+      'text-halo-color': c.labelHaloColor,
+      'text-halo-width': c.labelHaloWidth,
+      'text-opacity': c.labelOpacity,
     },
   })
 }
@@ -532,8 +534,10 @@ function removePublicLands(map) {
 }
 
 /** Add topographic contour vector tile overlay */
-function addContours(map) {
+function addContours(map, themeId) {
   if (!map || map.getSource(CONTOUR_SOURCE)) return
+
+  const c = getOverlayConfig(themeId, 'contours')
 
   map.addSource(CONTOUR_SOURCE, {
     type: 'vector',
@@ -549,9 +553,6 @@ function addContours(map) {
     }
   }
 
-  const isDark = isCurrentThemeDark()
-  const opMod = isDark ? 0.8 : 1.0
-
   // Minor contours (40ft) — visible z11+
   map.addLayer({
     id: CONTOUR_MINOR,
@@ -561,9 +562,9 @@ function addContours(map) {
     minzoom: 11,
     filter: ['==', ['get', 'tier'], 'minor'],
     paint: {
-      'line-color': '#8b6f47',
-      'line-opacity': 0.4 * opMod,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.5, 14, 1.0],
+      'line-color': c.minorColor,
+      'line-opacity': c.minorOpacity * c.opacityMod,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 11, c.minorWidth.z11, 14, c.minorWidth.z14],
     },
   }, beforeId)
 
@@ -576,9 +577,9 @@ function addContours(map) {
     minzoom: 8,
     filter: ['==', ['get', 'tier'], 'intermediate'],
     paint: {
-      'line-color': '#8b6f47',
-      'line-opacity': 0.7 * opMod,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 14, 1.2],
+      'line-color': c.intermediateColor,
+      'line-opacity': c.intermediateOpacity * c.opacityMod,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 8, c.intermediateWidth.z8, 14, c.intermediateWidth.z14],
     },
   }, beforeId)
 
@@ -591,9 +592,9 @@ function addContours(map) {
     minzoom: 4,
     filter: ['==', ['get', 'tier'], 'index'],
     paint: {
-      'line-color': '#6b4f2a',
-      'line-opacity': 0.9 * opMod,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 4, 1.2, 14, 1.8],
+      'line-color': c.indexColor,
+      'line-opacity': c.indexOpacity * c.opacityMod,
+      'line-width': ['interpolate', ['linear'], ['zoom'], 4, c.indexWidth.z4, 14, c.indexWidth.z14],
     },
   }, beforeId)
 
@@ -607,8 +608,8 @@ function addContours(map) {
     filter: ['==', ['get', 'tier'], 'index'],
     layout: {
       'text-field': ['concat', ['to-string', ['get', 'elevation_ft']], "'"],
-      'text-size': 10,
-      'text-font': ['Noto Sans Regular'],
+      'text-size': c.labelSize,
+      'text-font': c.labelFont,
       'symbol-placement': 'line',
       'text-anchor': 'center',
       'symbol-spacing': 400,
@@ -616,10 +617,10 @@ function addContours(map) {
       'text-allow-overlap': false,
     },
     paint: {
-      'text-color': isDark ? '#c0b898' : '#5a4020',
-      'text-halo-color': isDark ? '#1a1a1a' : '#ffffff',
-      'text-halo-width': 1.5,
-      'text-opacity': 0.85,
+      'text-color': c.labelColor,
+      'text-halo-color': c.labelHaloColor,
+      'text-halo-width': c.labelHaloWidth,
+      'text-opacity': c.labelOpacity,
     },
   })
 }
@@ -635,8 +636,10 @@ function removeContours(map) {
 }
 
 /** Add TEST topographic contour overlay (blue color scheme) */
-function addContoursTest(map) {
+function addContoursTest(map, themeId) {
   if (!map || map.getSource(CONTOUR_TEST_SOURCE)) return
+
+  const c = getOverlayConfig(themeId, 'contoursTest')
 
   map.addSource(CONTOUR_TEST_SOURCE, {
     type: "vector",
@@ -651,9 +654,6 @@ function addContoursTest(map) {
     }
   }
 
-  const isDark = isCurrentThemeDark()
-  const opMod = isDark ? 0.8 : 1.0
-
   // Minor contours (40ft) — blue scheme
   map.addLayer({
     id: CONTOUR_TEST_MINOR,
@@ -663,9 +663,9 @@ function addContoursTest(map) {
     minzoom: 11,
     filter: ["==", ["get", "tier"], "minor"],
     paint: {
-      "line-color": "#4a7c9b",
-      "line-opacity": 0.4 * opMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.5, 14, 1.0],
+      "line-color": c.minorColor,
+      "line-opacity": c.minorOpacity * c.opacityMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 11, c.minorWidth.z11, 14, c.minorWidth.z14],
     },
   }, beforeId)
 
@@ -678,9 +678,9 @@ function addContoursTest(map) {
     minzoom: 8,
     filter: ["==", ["get", "tier"], "intermediate"],
     paint: {
-      "line-color": "#4a7c9b",
-      "line-opacity": 0.7 * opMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.8, 14, 1.2],
+      "line-color": c.intermediateColor,
+      "line-opacity": c.intermediateOpacity * c.opacityMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, c.intermediateWidth.z8, 14, c.intermediateWidth.z14],
     },
   }, beforeId)
 
@@ -693,9 +693,9 @@ function addContoursTest(map) {
     minzoom: 4,
     filter: ["==", ["get", "tier"], "index"],
     paint: {
-      "line-color": "#2a5a7c",
-      "line-opacity": 0.9 * opMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.2, 14, 1.8],
+      "line-color": c.indexColor,
+      "line-opacity": c.indexOpacity * c.opacityMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 4, c.indexWidth.z4, 14, c.indexWidth.z14],
     },
   }, beforeId)
 
@@ -709,8 +709,8 @@ function addContoursTest(map) {
     filter: ["==", ["get", "tier"], "index"],
     layout: {
       "text-field": ["concat", ["to-string", ["get", "elevation_ft"]], ""],
-      "text-size": 10,
-      "text-font": ["Noto Sans Regular"],
+      "text-size": c.labelSize,
+      "text-font": c.labelFont,
       "symbol-placement": "line",
       "text-anchor": "center",
       "symbol-spacing": 400,
@@ -718,10 +718,10 @@ function addContoursTest(map) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": isDark ? "#98b8d0" : "#205080",
-      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
-      "text-halo-width": 1.5,
-      "text-opacity": 0.85,
+      "text-color": c.labelColor,
+      "text-halo-color": c.labelHaloColor,
+      "text-halo-width": c.labelHaloWidth,
+      "text-opacity": c.labelOpacity,
     },
   })
 }
@@ -737,8 +737,10 @@ function removeContoursTest(map) {
 }
 
 /** Add TEST 10ft topographic contour overlay (green color scheme) */
-function addContoursTest10ft(map) {
+function addContoursTest10ft(map, themeId) {
   if (!map || map.getSource(CONTOUR_TEST_10FT_SOURCE)) return
+
+  const c = getOverlayConfig(themeId, 'contoursTest10ft')
 
   map.addSource(CONTOUR_TEST_10FT_SOURCE, {
     type: "vector",
@@ -753,9 +755,6 @@ function addContoursTest10ft(map) {
     }
   }
 
-  const isDark = isCurrentThemeDark()
-  const opMod = isDark ? 0.8 : 1.0
-
   // Minor contours (10ft) — green scheme
   map.addLayer({
     id: CONTOUR_TEST_10FT_MINOR,
@@ -765,9 +764,9 @@ function addContoursTest10ft(map) {
     minzoom: 11,
     filter: ["==", ["get", "tier"], "minor"],
     paint: {
-      "line-color": "#3a7c4f",
-      "line-opacity": 0.4 * opMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.5, 14, 1.0],
+      "line-color": c.minorColor,
+      "line-opacity": c.minorOpacity * c.opacityMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 11, c.minorWidth.z11, 14, c.minorWidth.z14],
     },
   }, beforeId)
 
@@ -780,9 +779,9 @@ function addContoursTest10ft(map) {
     minzoom: 8,
     filter: ["==", ["get", "tier"], "intermediate"],
     paint: {
-      "line-color": "#3a7c4f",
-      "line-opacity": 0.7 * opMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.8, 14, 1.2],
+      "line-color": c.intermediateColor,
+      "line-opacity": c.intermediateOpacity * c.opacityMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, c.intermediateWidth.z8, 14, c.intermediateWidth.z14],
     },
   }, beforeId)
 
@@ -795,9 +794,9 @@ function addContoursTest10ft(map) {
     minzoom: 4,
     filter: ["==", ["get", "tier"], "index"],
     paint: {
-      "line-color": "#2a5c3a",
-      "line-opacity": 0.9 * opMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.2, 14, 1.8],
+      "line-color": c.indexColor,
+      "line-opacity": c.indexOpacity * c.opacityMod,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 4, c.indexWidth.z4, 14, c.indexWidth.z14],
     },
   }, beforeId)
 
@@ -811,8 +810,8 @@ function addContoursTest10ft(map) {
     filter: ["==", ["get", "tier"], "index"],
     layout: {
       "text-field": ["concat", ["to-string", ["get", "elevation_ft"]], "'"],
-      "text-size": 10,
-      "text-font": ["Noto Sans Regular"],
+      "text-size": c.labelSize,
+      "text-font": c.labelFont,
       "symbol-placement": "line",
       "text-anchor": "center",
       "symbol-spacing": 400,
@@ -820,10 +819,10 @@ function addContoursTest10ft(map) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": isDark ? "#98c0a8" : "#2a4030",
-      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
-      "text-halo-width": 1.5,
-      "text-opacity": 0.85,
+      "text-color": c.labelColor,
+      "text-halo-color": c.labelHaloColor,
+      "text-halo-width": c.labelHaloWidth,
+      "text-opacity": c.labelOpacity,
     },
   })
 }
@@ -838,9 +837,10 @@ function removeContoursTest10ft(map) {
   if (map.getSource(CONTOUR_TEST_10FT_SOURCE)) map.removeSource(CONTOUR_TEST_10FT_SOURCE)
 }
 /** Add USFS trails and roads vector tile overlay */
-/** Add USFS trails and roads vector tile overlay */
-function addUsfsTrails(map) {
+function addUsfsTrails(map, themeId) {
   if (!map || map.getSource(USFS_SOURCE)) return
+
+  const c = getOverlayConfig(themeId, 'usfsTrails')
 
   map.addSource(USFS_SOURCE, {
     type: "vector",
@@ -856,8 +856,6 @@ function addUsfsTrails(map) {
     }
   }
 
-  const isDark = isCurrentThemeDark()
-
   // Invisible hit-area layers for easier clicking
   map.addLayer({
     id: USFS_ROADS_HIT,
@@ -868,7 +866,7 @@ function addUsfsTrails(map) {
     paint: {
       "line-color": "#000000",
       "line-opacity": 0,
-      "line-width": 14,
+      "line-width": c.hitWidth,
     },
   }, beforeId)
 
@@ -881,7 +879,7 @@ function addUsfsTrails(map) {
     paint: {
       "line-color": "#000000",
       "line-opacity": 0,
-      "line-width": 14,
+      "line-width": c.hitWidth,
     },
   }, beforeId)
 
@@ -893,9 +891,9 @@ function addUsfsTrails(map) {
     "source-layer": "roads",
     minzoom: 10,
     paint: {
-      "line-color": isDark ? "#d0a060" : "#c09050",
-      "line-opacity": 0.9,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 14, 2.5, 16, 3.5],
+      "line-color": c.roadsColor,
+      "line-opacity": c.roadsOpacity,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 10, c.roadsWidth.z10, 14, c.roadsWidth.z14, 16, c.roadsWidth.z16],
     },
   }, beforeId)
 
@@ -913,21 +911,21 @@ function addUsfsTrails(map) {
         ["any",
           ["==", ["slice", ["get", "MOTORCYCLE"], 0, 1], "0"],
           ["==", ["slice", ["get", "ATV_MANAGE"], 0, 1], "0"]
-        ], isDark ? "#f08040" : "#e07030",
+        ], c.trailsMotorized,
         // Bike trails - amber
         ["==", ["slice", ["get", "BICYCLE_MA"], 0, 1], "0"],
-        isDark ? "#e0b040" : "#d0a030",
+        c.trailsBicycle,
         // Hiker/Horse only - green
         ["any",
           ["==", ["slice", ["get", "HIKER_PEDE"], 0, 1], "0"],
           ["==", ["slice", ["get", "HORSE_MANA"], 0, 1], "0"]
-        ], isDark ? "#60c050" : "#50b040",
+        ], c.trailsHiker,
         // Default - tan
-        isDark ? "#c0a060" : "#b09050"
+        c.trailsDefault
       ],
-      "line-opacity": 0.9,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2.0, 14, 3.0, 16, 4.0],
-      "line-dasharray": [2, 1.5],
+      "line-opacity": c.trailsOpacity,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 10, c.trailsWidth.z10, 14, c.trailsWidth.z14, 16, c.trailsWidth.z16],
+      "line-dasharray": c.trailsDash,
     },
   }, beforeId)
 
@@ -941,8 +939,8 @@ function addUsfsTrails(map) {
     filter: ["has", "NAME"],
     layout: {
       "text-field": ["get", "NAME"],
-      "text-size": 11,
-      "text-font": ["Noto Sans Regular"],
+      "text-size": c.roadsLabelSize,
+      "text-font": c.labelFont,
       "symbol-placement": "line",
       "text-anchor": "center",
       "symbol-spacing": 300,
@@ -950,10 +948,10 @@ function addUsfsTrails(map) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": isDark ? "#d0c0a0" : "#6a5a40",
-      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
-      "text-halo-width": 1.5,
-      "text-opacity": 0.9,
+      "text-color": c.roadsLabelColor,
+      "text-halo-color": c.roadsLabelHaloColor,
+      "text-halo-width": c.roadsLabelHaloWidth,
+      "text-opacity": c.roadsLabelOpacity,
     },
   })
 
@@ -967,8 +965,8 @@ function addUsfsTrails(map) {
     filter: ["has", "TRAIL_NAME"],
     layout: {
       "text-field": ["get", "TRAIL_NAME"],
-      "text-size": 11,
-      "text-font": ["Noto Sans Regular"],
+      "text-size": c.trailsLabelSize,
+      "text-font": c.labelFont,
       "symbol-placement": "line",
       "text-anchor": "center",
       "symbol-spacing": 300,
@@ -976,10 +974,10 @@ function addUsfsTrails(map) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": isDark ? "#d0b090" : "#5a4a30",
-      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
-      "text-halo-width": 1.5,
-      "text-opacity": 0.9,
+      "text-color": c.trailsLabelColor,
+      "text-halo-color": c.trailsLabelHaloColor,
+      "text-halo-width": c.trailsLabelHaloWidth,
+      "text-opacity": c.trailsLabelOpacity,
     },
   })
 
@@ -1003,11 +1001,11 @@ function removeUsfsTrails(map) {
   if (map.getLayer(USFS_ROADS_HIT)) map.removeLayer(USFS_ROADS_HIT)
   if (map.getSource(USFS_SOURCE)) map.removeSource(USFS_SOURCE)
 }
-/** Add BLM trails/roads vector tile overlay */
 /** Add BLM trails/roads vector tile overlay with surface-type styling */
-/** Add BLM trails/roads vector tile overlay with surface-type styling */
-function addBlmTrails(map) {
+function addBlmTrails(map, themeId) {
   if (!map || map.getSource(BLM_SOURCE)) return
+
+  const c = getOverlayConfig(themeId, 'blmTrails')
 
   map.addSource(BLM_SOURCE, {
     type: "vector",
@@ -1023,40 +1021,38 @@ function addBlmTrails(map) {
     }
   }
 
-  const isDark = isCurrentThemeDark()
-
-  // Color expression based on route use class - brighter palette
+  // Color expression based on route use class
   const colorExpr = [
     "case",
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD HIGH CLEARANCE / SPECIALIZED"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD High Clearance/Specialized"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4wd High Clearance / Specialized"]
-    ], isDark ? "#f08040" : "#e07030",
+    ], c.color4wdHigh,
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD LOW"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4WD Low"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "4wd Low"]
-    ], isDark ? "#e0b040" : "#d0a030",
+    ], c.color4wdLow,
     ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "ATV"],
-    isDark ? "#e04040" : "#d03030",
+    c.colorAtv,
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "MOTORIZED SINGLE TRACK"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "Motorized Single Track"]
-    ], isDark ? "#b070c0" : "#a060b0",
+    ], c.colorMotoSingle,
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2WD LOW"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2WD Low"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "2wd Low"]
-    ], isDark ? "#f0d070" : "#e0c060",
+    ], c.color2wdLow,
     ["any",
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "NON-MECHANIZED"],
       ["==", ["get", "OBSRVE_ROUTE_USE_CLASS"], "Non-Mechanized"]
-    ], isDark ? "#60c050" : "#50b040",
-    isDark ? "#c0a060" : "#b09050"
+    ], c.colorNonMech,
+    c.colorDefault
   ]
 
-  const lineWidth = ["interpolate", ["linear"], ["zoom"], 10, 2.0, 14, 3.0, 16, 4.0]
+  const lineWidth = ["interpolate", ["linear"], ["zoom"], 10, c.lineWidth.z10, 14, c.lineWidth.z14, 16, c.lineWidth.z16]
 
   // Filter out paved, arterial, collector, local, and highways
   const excludeUrban = [
@@ -1088,7 +1084,7 @@ function addBlmTrails(map) {
     paint: {
       "line-color": "#000000",
       "line-opacity": 0,
-      "line-width": 14,
+      "line-width": c.hitWidth,
     },
   }, beforeId)
 
@@ -1107,7 +1103,7 @@ function addBlmTrails(map) {
     ],
     paint: {
       "line-color": colorExpr,
-      "line-opacity": 0.9,
+      "line-opacity": c.lineOpacity,
       "line-width": lineWidth,
     },
   }, beforeId)
@@ -1127,9 +1123,9 @@ function addBlmTrails(map) {
     ],
     paint: {
       "line-color": colorExpr,
-      "line-opacity": 0.9,
+      "line-opacity": c.lineOpacity,
       "line-width": lineWidth,
-      "line-dasharray": [4, 2],
+      "line-dasharray": c.dashImproved,
     },
   }, beforeId)
 
@@ -1148,9 +1144,9 @@ function addBlmTrails(map) {
     ],
     paint: {
       "line-color": colorExpr,
-      "line-opacity": 0.9,
+      "line-opacity": c.lineOpacity,
       "line-width": lineWidth,
-      "line-dasharray": [1, 2],
+      "line-dasharray": c.dashAggregate,
     },
   }, beforeId)
 
@@ -1168,10 +1164,10 @@ function addBlmTrails(map) {
       ]
     ],
     paint: {
-      "line-color": isDark ? "#80b0e0" : "#6090c0",
-      "line-opacity": 0.9,
+      "line-color": c.colorSnow,
+      "line-opacity": c.lineOpacity,
       "line-width": lineWidth,
-      "line-dasharray": [4, 2, 1, 2],
+      "line-dasharray": c.dashSnow,
     },
   }, beforeId)
 
@@ -1196,9 +1192,9 @@ function addBlmTrails(map) {
     ],
     paint: {
       "line-color": colorExpr,
-      "line-opacity": 0.85,
+      "line-opacity": c.lineOpacityOther,
       "line-width": lineWidth,
-      "line-dasharray": [4, 2, 1, 2, 1, 2],
+      "line-dasharray": c.dashOther,
     },
   }, beforeId)
 
@@ -1212,8 +1208,8 @@ function addBlmTrails(map) {
     filter: ["all", excludeUrban, ["has", "ROUTE_PRMRY_NM"]],
     layout: {
       "text-field": ["get", "ROUTE_PRMRY_NM"],
-      "text-size": 11,
-      "text-font": ["Noto Sans Regular"],
+      "text-size": c.labelSize,
+      "text-font": c.labelFont,
       "symbol-placement": "line",
       "text-anchor": "center",
       "symbol-spacing": 300,
@@ -1221,10 +1217,10 @@ function addBlmTrails(map) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": isDark ? "#d0c0a0" : "#5a4a30",
-      "text-halo-color": isDark ? "#1a1a1a" : "#ffffff",
-      "text-halo-width": 1.5,
-      "text-opacity": 0.9,
+      "text-color": c.labelColor,
+      "text-halo-color": c.labelHaloColor,
+      "text-halo-width": c.labelHaloWidth,
+      "text-opacity": c.labelOpacity,
     },
   })
 
@@ -1236,6 +1232,7 @@ function addBlmTrails(map) {
     map.getCanvas().style.cursor = ""
   })
 }
+
 /** Remove BLM trails/roads layers and source */
 function removeBlmTrails(map) {
   if (!map) return
@@ -1685,7 +1682,7 @@ const MapView = forwardRef(function MapView(_, ref) {
     addHillshadeLayer() {
       const map = mapInstance.current
       if (!map) return
-      addHillshade(map)
+      addHillshade(map, currentThemeRef.current)
       activeLayersRef.current.hillshade = true
     },
     removeHillshadeLayer() {
@@ -1697,7 +1694,7 @@ const MapView = forwardRef(function MapView(_, ref) {
     addTrafficLayer() {
       const map = mapInstance.current
       if (!map) return
-      addTraffic(map)
+      addTraffic(map, currentThemeRef.current)
       activeLayersRef.current.traffic = true
     },
     removeTrafficLayer() {
@@ -1709,7 +1706,7 @@ const MapView = forwardRef(function MapView(_, ref) {
     addPublicLandsLayer() {
       const map = mapInstance.current
       if (!map) return
-      addPublicLands(map)
+      addPublicLands(map, currentThemeRef.current)
       activeLayersRef.current.publicLands = true
     },
     removePublicLandsLayer() {
@@ -1721,7 +1718,7 @@ const MapView = forwardRef(function MapView(_, ref) {
     addContoursLayer() {
       const map = mapInstance.current
       if (!map) return
-      addContours(map)
+      addContours(map, currentThemeRef.current)
       activeLayersRef.current.contours = true
     },
     removeContoursLayer() {
@@ -1733,7 +1730,7 @@ const MapView = forwardRef(function MapView(_, ref) {
     addContoursTestLayer() {
       const map = mapInstance.current
       if (!map) return
-      addContoursTest(map)
+      addContoursTest(map, currentThemeRef.current)
       activeLayersRef.current.contoursTest = true
     },
     removeContoursTestLayer() {
@@ -1745,7 +1742,7 @@ const MapView = forwardRef(function MapView(_, ref) {
     addContoursTest10ftLayer() {
       const map = mapInstance.current
       if (!map) return
-      addContoursTest10ft(map)
+      addContoursTest10ft(map, currentThemeRef.current)
       activeLayersRef.current.contoursTest10ft = true
     },
     removeContoursTest10ftLayer() {
@@ -1757,7 +1754,7 @@ const MapView = forwardRef(function MapView(_, ref) {
     addUsfsTrailsLayer() {
       const map = mapInstance.current
       if (!map) return
-      addUsfsTrails(map)
+      addUsfsTrails(map, currentThemeRef.current)
       activeLayersRef.current.usfsTrails = true
     },
     removeUsfsTrailsLayer() {
@@ -1769,7 +1766,7 @@ const MapView = forwardRef(function MapView(_, ref) {
     addBlmTrailsLayer() {
       const map = mapInstance.current
       if (!map) return
-      addBlmTrails(map)
+      addBlmTrails(map, currentThemeRef.current)
       activeLayersRef.current.blmTrails = true
     },
     removeBlmTrailsLayer() {
@@ -2139,24 +2136,24 @@ const MapView = forwardRef(function MapView(_, ref) {
         if (raw) {
           const prefs = JSON.parse(raw)
           if (prefs.hillshade && hasFeature('has_hillshade')) {
-            addHillshade(map)
+            addHillshade(map, currentThemeRef.current)
             activeLayersRef.current.hillshade = true
           }
           if (prefs.traffic && hasFeature('has_traffic_overlay')) {
-            addTraffic(map)
+            addTraffic(map, currentThemeRef.current)
             activeLayersRef.current.traffic = true
           }
           if (prefs.publicLands && hasFeature('has_public_lands_layer')) {
-            addPublicLands(map)
+            addPublicLands(map, currentThemeRef.current)
             activeLayersRef.current.publicLands = true
           }
           if (prefs.contours && hasFeature('has_contours')) {
-            addContours(map)
+            addContours(map, currentThemeRef.current)
             activeLayersRef.current.contours = true
           }
         } else if (hasFeature('has_hillshade')) {
           // Default: hillshade ON if available
-          addHillshade(map)
+          addHillshade(map, currentThemeRef.current)
           activeLayersRef.current.hillshade = true
         }
       } catch {}
@@ -2343,10 +2340,14 @@ const MapView = forwardRef(function MapView(_, ref) {
       applyBaseLabelStyling(map)
 
       // Re-add active overlay layers
-      if (activeLayersRef.current.hillshade) addHillshade(map)
-      if (activeLayersRef.current.traffic) addTraffic(map)
-      if (activeLayersRef.current.publicLands) addPublicLands(map)
-      if (activeLayersRef.current.contours) addContours(map)
+      if (activeLayersRef.current.hillshade) addHillshade(map, currentThemeRef.current)
+      if (activeLayersRef.current.traffic) addTraffic(map, currentThemeRef.current)
+      if (activeLayersRef.current.publicLands) addPublicLands(map, currentThemeRef.current)
+      if (activeLayersRef.current.contours) addContours(map, currentThemeRef.current)
+      if (activeLayersRef.current.contoursTest) addContoursTest(map, currentThemeRef.current)
+      if (activeLayersRef.current.contoursTest10ft) addContoursTest10ft(map, currentThemeRef.current)
+      if (activeLayersRef.current.usfsTrails) addUsfsTrails(map, currentThemeRef.current)
+      if (activeLayersRef.current.blmTrails) addBlmTrails(map, currentThemeRef.current)
 
       // Clear highlights on theme change (paint values will be re-stored on next interaction)
       clearAllHighlights(map)
