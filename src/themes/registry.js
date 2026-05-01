@@ -16,7 +16,6 @@
  *   fontImports: string[] - URLs for font CSS imports (empty for system fonts)
  */
 
-import { namedTheme } from 'protomaps-themes-base'
 import cleanTheme from './clean.js'
 import cyberpunkTheme from './cyberpunk.js'
 
@@ -516,21 +515,6 @@ const themes = {
  */
 export function getTheme(id) {
   return themes[id] || themes.dark
-}
-
-/**
- * Get the color flavor for a theme
- * For built-in themes, calls namedTheme(). For custom themes, returns colors directly.
- * @param {string} id - Theme ID
- * @returns {object} Flavor object for use with protomaps layers()
- */
-export function getThemeColors(id) {
-  const theme = getTheme(id)
-  if (theme.colors === null) {
-    // Built-in theme - use namedTheme from protomaps-themes-base
-    return namedTheme(id)
-  }
-  return theme.colors
 }
 
 /**
