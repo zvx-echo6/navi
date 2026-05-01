@@ -48,7 +48,7 @@ export default function LocateButton({ mapRef }) {
       title="My location"
       aria-label="Center map on my location"
     >
-      <Locate size={18} />
+      <Locate size={20} />
     </button>
   )
 }

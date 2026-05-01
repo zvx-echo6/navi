@@ -271,7 +271,7 @@ export default function LayerControl({ mapRef }) {
         title="Map layers"
         aria-label="Toggle map layers"
       >
-        <Layers size={18} />
+        <Layers size={20} />
       </button>
 
       {open && (

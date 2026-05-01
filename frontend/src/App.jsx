@@ -96,8 +96,12 @@ export default function App() {
       <Panel onManeuverClick={handleManeuverClick} />
       
       <ContactModal />
-      <LayerControl mapRef={mapViewRef} />
-      <LocateButton mapRef={mapViewRef} />
+      
+      {/* Bottom-right map controls */}
+      <div className="map-controls-br">
+        <LocateButton mapRef={mapViewRef} />
+        <LayerControl mapRef={mapViewRef} />
+      </div>
     </div>
   )
 }
