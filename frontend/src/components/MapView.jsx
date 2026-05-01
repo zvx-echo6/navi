@@ -2,8 +2,8 @@ import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 're
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Protocol } from 'pmtiles'
-import { layers } from 'protomaps-themes-base'
-import { getTheme, getThemeColors, getThemeSprite, getOverlayConfig } from '../themes/registry'
+import { layers, namedTheme } from 'protomaps-themes-base'
+import { getTheme, getThemeSprite, getOverlayConfig } from '../themes/registry'
 import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse } from '../api'
@@ -270,6 +270,10 @@ function buildStyle(themeName) {
   const tileUrl = config?.tileset?.url || '/tiles/na.pmtiles'
   const attribution = config?.tileset?.attribution || 'Protomaps \u00a9 OSM'
 
+  // Use namedTheme directly for built-in themes, custom colors for others
+  const theme = getTheme(themeName)
+  const colors = theme.colors || namedTheme(themeName)
+
   return {
     version: 8,
     glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
@@ -281,7 +285,7 @@ function buildStyle(themeName) {
         attribution,
       },
     },
-    layers: layers('protomaps', getThemeColors(themeName), { lang: 'en' }),
+    layers: layers('protomaps', colors, { lang: 'en' }),
   }
 }
 
@@ -1906,8 +1910,10 @@ const MapView = forwardRef(function MapView(_, ref) {
         const MARKER_RADIUS_PX = 14 // half of 28px preview marker
 
         // Check for USFS trails/roads click (show info popup)
-        const usfsLayers = [USFS_TRAILS_HIT, USFS_ROADS_HIT]
-        const usfsFeatures = map.queryRenderedFeatures(e.point, { layers: usfsLayers })
+        const usfsLayers = [USFS_TRAILS_HIT, USFS_ROADS_HIT].filter(id => map.getLayer(id))
+        const usfsFeatures = usfsLayers.length > 0
+          ? map.queryRenderedFeatures(e.point, { layers: usfsLayers })
+          : []
         const usfsFeature = usfsFeatures.find(f => f.properties)
         if (usfsFeature && hasFeature('has_usfs_trails')) {
           const props = usfsFeature.properties
@@ -1953,8 +1959,10 @@ const MapView = forwardRef(function MapView(_, ref) {
         }
 
         // Check for BLM routes click (show info popup)
-        const blmLayers = [BLM_ROUTES_HIT]
-        const blmFeatures = map.queryRenderedFeatures(e.point, { layers: blmLayers })
+        const blmLayers = [BLM_ROUTES_HIT].filter(id => map.getLayer(id))
+        const blmFeatures = blmLayers.length > 0
+          ? map.queryRenderedFeatures(e.point, { layers: blmLayers })
+          : []
         const blmFeature = blmFeatures.find(f => f.properties)
         if (blmFeature && hasFeature("has_blm_trails")) {
           const props = blmFeature.properties
