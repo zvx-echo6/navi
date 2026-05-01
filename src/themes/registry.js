@@ -21,6 +21,7 @@ import cyberpunkTheme from './cyberpunk.js'
 import rangerTheme from './ranger.js'
 import tacticalTheme from './tactical.js'
 import nightopsTheme from './nightops.js'
+import parchmentTheme from './parchment.js'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UI CSS CUSTOM PROPERTIES
@@ -496,6 +497,7 @@ const themes = {
   ranger: rangerTheme,
   tactical: tacticalTheme,
   nightops: nightopsTheme,
+  parchment: parchmentTheme,
   // Custom themes go here. Example:
   // 'midnight': {
   //   id: 'midnight',
