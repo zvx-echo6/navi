@@ -18,6 +18,7 @@
 
 import { namedTheme } from 'protomaps-themes-base'
 import cleanTheme from './clean.js'
+import cyberpunkTheme from './cyberpunk.js'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UI CSS CUSTOM PROPERTIES
@@ -31,6 +32,7 @@ const darkUI = {
   // Fonts
   '--font-sans': "'Inter', system-ui, -apple-system, sans-serif",
   '--font-mono': "'JetBrains Mono', ui-monospace, monospace",
+  '--font-heading': "'Inter', system-ui, -apple-system, sans-serif",
   // Backgrounds
   '--bg-base': '#1c1917',
   '--bg-raised': '#252220',
@@ -80,6 +82,7 @@ const lightUI = {
   // Fonts
   '--font-sans': "'Inter', system-ui, -apple-system, sans-serif",
   '--font-mono': "'JetBrains Mono', ui-monospace, monospace",
+  '--font-heading': "'Inter', system-ui, -apple-system, sans-serif",
   // Backgrounds
   '--bg-base': '#ddd2b9',
   '--bg-raised': '#e8dec8',
@@ -487,6 +490,7 @@ const themes = {
     swatch: ['#f5f5f5', '#1a73e8', '#34a853'],
     fontImports: [],
   },
+  cyberpunk: cyberpunkTheme,
   // Custom themes go here. Example:
   // 'midnight': {
   //   id: 'midnight',

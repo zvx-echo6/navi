@@ -165,6 +165,7 @@ const cleanUI = {
   // Fonts
   '--font-sans': "'Inter', system-ui, -apple-system, sans-serif",
   '--font-mono': "'JetBrains Mono', ui-monospace, monospace",
+  '--font-heading': "'Inter', system-ui, -apple-system, sans-serif",
   // Backgrounds
   '--bg-base': '#f5f5f5',
   '--bg-raised': '#ffffff',
