@@ -351,16 +351,6 @@ const cleanOverlay = {
     labelFont: ['Noto Sans Regular'],
     hitWidth: 14,
   },
-
-  // ── Highlight (boundary/selection) ────────────────────────────────────────
-  highlight: {
-    lineColor: "#1a73e8",  // Google blue for selection
-    lineWidth: 2,
-    lineDash: [4, 4],
-    lineOpacity: 0.7,
-    fillColor: "#1a73e8",
-    fillOpacity: 0.06,
-  },
 }
 
 /**
