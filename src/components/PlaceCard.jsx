@@ -348,9 +348,8 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
   // Reverse geocode to get OSM type/id if not present (e.g., basemap label clicks)
   useEffect(() => {
     if (!hasFeature('has_nominatim_details')) return
-    if (wikidataId) return  // Prefer wikidata path for basemap features with wikidata
-    if (placeLat == null || placeLon == null) return
     if (osmType && osmId) return
+    if (placeLat == null || placeLon == null) return
     // Skip for dropped pins - they get reverse geocoded by MapView
     if (place?.source === 'map_click') return
     
@@ -369,7 +368,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
       }
     })
     return () => controller.abort()
-  }, [wikidataId, placeLat, placeLon, osmType, osmId, place?.source])
+  }, [placeLat, placeLon, osmType, osmId, place?.source])
 
 
   useEffect(() => {
@@ -394,6 +393,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
   }, [osmType, osmId, placeLat, placeLon])
 
   useEffect(() => {
+    if (osmType && osmId) return
     if (!wikidataId) return
     const controller = new AbortController()
     fetchPlaceByWikidata(wikidataId, controller.signal).then((data) => {
