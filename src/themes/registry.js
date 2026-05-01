@@ -5,13 +5,15 @@
  * protomaps themes (light/dark) and custom themes with full flavor objects.
  *
  * Theme config structure:
- *   id: string        - unique identifier (used in store, data-theme attr)
- *   name: string      - display name for UI
- *   dark: boolean     - true if dark theme (affects overlay styling, sprite fallback)
- *   colors: object|null - null for built-in themes, full flavor object for custom
+ *   id: string           - unique identifier (used in store, data-theme attr)
+ *   name: string         - display name for UI
+ *   dark: boolean        - true if dark theme (affects overlay styling, sprite fallback)
+ *   colors: object|null  - null for built-in themes, full flavor object for custom
  *   satellite: object|null - raster adjustments when satellite layer is present
- *   overlay: object   - overlay layer styling configuration
- *   ui: object        - CSS custom properties for UI elements
+ *   overlay: object      - overlay layer styling configuration
+ *   ui: object           - CSS custom properties for UI elements
+ *   swatch: string[3]    - 3 hex colors for theme picker preview
+ *   fontImports: string[] - URLs for font CSS imports (empty for system fonts)
  */
 
 import { namedTheme } from 'protomaps-themes-base'
@@ -23,64 +25,98 @@ import cleanTheme from './clean.js'
 
 /**
  * Dark theme UI configuration
- * All CSS custom properties from [data-theme="dark"] in index.css
+ * All CSS custom properties for dark theme UI
  */
 const darkUI = {
+  // Fonts
+  '--font-sans': "'Inter', system-ui, -apple-system, sans-serif",
+  '--font-mono': "'JetBrains Mono', ui-monospace, monospace",
+  // Backgrounds
   '--bg-base': '#1c1917',
   '--bg-raised': '#252220',
   '--bg-overlay': '#2e2a27',
   '--bg-input': '#201d1a',
+  '--bg-inset': '#181614',
+  '--bg-muted': '#2a2725',
+  // Text
   '--text-primary': '#dde3dc',
   '--text-secondary': '#8f9a8e',
   '--text-tertiary': '#5e6b5d',
   '--text-inverse': '#1c1917',
+  // Borders
   '--border': '#3a3530',
   '--border-subtle': '#2a2624',
+  // Accent
   '--accent': '#7a9a6b',
   '--accent-hover': '#8fad7f',
   '--accent-muted': '#3d4d36',
+  // Tan
   '--tan': '#b8a88a',
   '--tan-muted': '#4a4235',
+  // Pins
   '--pin-origin': '#6b8f5e',
   '--pin-destination': '#a67c52',
   '--pin-intermediate': '#6b7268',
   '--pin-stroke': '#1c1917',
+  // Status
   '--status-success': '#6b8f5e',
   '--status-warning': '#b89a4a',
   '--status-danger': '#a65c52',
+  '--success': '#6b8f5e',
+  '--warning': '#b89a4a',
+  '--warning-muted': '#4a4235',
+  // Route
   '--route-line': '#7a9a6b',
+  // Shadows
   '--shadow': '0 2px 8px rgba(0, 0, 0, 0.4)',
   '--shadow-lg': '0 4px 16px rgba(0, 0, 0, 0.5)',
 }
 
 /**
  * Light theme UI configuration
- * All CSS custom properties from [data-theme="light"] in index.css
+ * All CSS custom properties for light theme UI
  */
 const lightUI = {
+  // Fonts
+  '--font-sans': "'Inter', system-ui, -apple-system, sans-serif",
+  '--font-mono': "'JetBrains Mono', ui-monospace, monospace",
+  // Backgrounds
   '--bg-base': '#ddd2b9',
   '--bg-raised': '#e8dec8',
   '--bg-overlay': '#e3d9c1',
   '--bg-input': '#e8dec8',
+  '--bg-inset': '#d5cab2',
+  '--bg-muted': '#e0d6c0',
+  // Text
   '--text-primary': '#1a1d1a',
   '--text-secondary': '#4f5a49',
   '--text-tertiary': '#7a8674',
   '--text-inverse': '#f5f2ed',
+  // Borders
   '--border': '#c4b89e',
   '--border-subtle': '#d5cab2',
+  // Accent
   '--accent': '#4a7040',
   '--accent-hover': '#3d5e35',
   '--accent-muted': '#dce8d6',
+  // Tan
   '--tan': '#8a7556',
   '--tan-muted': '#f0e8d8',
+  // Pins
   '--pin-origin': '#4a7040',
   '--pin-destination': '#8a5c35',
   '--pin-intermediate': '#6b6960',
   '--pin-stroke': '#1a1d1a',
+  // Status
   '--status-success': '#4a7040',
   '--status-warning': '#8a7040',
   '--status-danger': '#8a4040',
+  '--success': '#4a7040',
+  '--warning': '#8a7040',
+  '--warning-muted': '#f0e8d8',
+  // Route
   '--route-line': '#4a7040',
+  // Shadows
   '--shadow': '0 2px 8px rgba(0, 0, 0, 0.08)',
   '--shadow-lg': '0 4px 16px rgba(0, 0, 0, 0.12)',
 }
@@ -432,6 +468,8 @@ const themes = {
     satellite: null,
     overlay: lightOverlay,
     ui: lightUI,
+    swatch: ['#ddd2b9', '#4a7040', '#8a7556'],
+    fontImports: [],
   },
   dark: {
     id: 'dark',
@@ -441,8 +479,14 @@ const themes = {
     satellite: null,
     overlay: darkOverlay,
     ui: darkUI,
+    swatch: ['#1c1917', '#7a9a6b', '#b8a88a'],
+    fontImports: [],
   },
-  clean: cleanTheme,
+  clean: {
+    ...cleanTheme,
+    swatch: ['#f5f5f5', '#1a73e8', '#34a853'],
+    fontImports: [],
+  },
   // Custom themes go here. Example:
   // 'midnight': {
   //   id: 'midnight',
@@ -452,6 +496,8 @@ const themes = {
   //   satellite: { opacity: 0.8, brightnessMin: 0.1 },
   //   overlay: { /* partial overrides - missing keys fall back to dark overlay */ },
   //   ui: { /* partial overrides - missing keys fall back to dark ui */ },
+  //   swatch: ['#0a0a12', '#6060ff', '#4040a0'],
+  //   fontImports: ['https://fonts.googleapis.com/css2?family=Orbitron&display=swap'],
   // },
 }
 
@@ -541,6 +587,9 @@ export function getOverlayConfig(themeId, layerKey) {
  * Sets the data-theme attribute AND applies all CSS variables from the
  * theme's ui object directly to document.documentElement.style.
  *
+ * Also manages font imports: removes previously injected font <link> tags
+ * and injects new ones for the current theme's fontImports array.
+ *
  * For custom themes, missing ui keys fall back to the appropriate built-in
  * theme (dark or light based on theme.dark flag).
  *
@@ -563,14 +612,28 @@ export function applyThemeUI(theme) {
   for (const [prop, value] of Object.entries(ui)) {
     root.style.setProperty(prop, value)
   }
+
+  // Manage font imports
+  // Remove any previously injected theme font links
+  document.querySelectorAll('link[data-theme-font]').forEach(link => link.remove())
+
+  // Inject new font links for this theme
+  const fontImports = theme.fontImports || []
+  for (const url of fontImports) {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = url
+    link.setAttribute('data-theme-font', theme.id)
+    document.head.appendChild(link)
+  }
 }
 
 /**
  * Get list of available themes for UI display
- * @returns {Array<{id: string, name: string, dark: boolean}>}
+ * @returns {Array<{id: string, name: string, dark: boolean, swatch: string[]}>}
  */
 export function themeList() {
-  return Object.values(themes).map(({ id, name, dark }) => ({ id, name, dark }))
+  return Object.values(themes).map(({ id, name, dark, swatch }) => ({ id, name, dark, swatch }))
 }
 
 /**
