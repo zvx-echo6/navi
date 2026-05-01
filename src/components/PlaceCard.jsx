@@ -359,6 +359,8 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
       if (result?.raw?.osm_type && result?.raw?.osm_id) {
         const current = useStore.getState().selectedPlace
         if (current && current.lat === placeLat && current.lon === placeLon) {
+          // Skip if OSM data already set (e.g., by wikidata path with osm_relation_id)
+          if (current.raw?.osm_type && current.raw?.osm_id) return
           // Merge OSM data into raw, preserving existing data
           useStore.getState().setSelectedPlace({ 
             ...current, 
@@ -393,7 +395,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
   }, [osmType, osmId, placeLat, placeLon])
 
   useEffect(() => {
-    if (osmType && osmId) return
+    // Always run wikidata path when wikidataId is present
     if (!wikidataId) return
     const controller = new AbortController()
     fetchPlaceByWikidata(wikidataId, controller.signal).then((data) => {
@@ -405,6 +407,16 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
           osm_relation_id: data.osm_relation_id,
           extratags: { ...(prev && prev !== "loading" ? prev.extratags : {}), ...data.extratags },
         }))
+        // Set OSM data from wikidata response so Effect 3 can fetch wiki_summary
+        if (data.osm_relation_id) {
+          const current = useStore.getState().selectedPlace
+          if (current && current.lat === placeLat && current.lon === placeLon) {
+            useStore.getState().setSelectedPlace({ 
+              ...current, 
+              raw: { ...current.raw, osm_type: "R", osm_id: data.osm_relation_id }
+            })
+          }
+        }
         if (data?.boundary) {
           const current = useStore.getState().selectedPlace
           if (current && current.lat === placeLat && current.lon === placeLon) {
@@ -417,7 +429,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
       }
     })
     return () => controller.abort()
-  }, [wikidataId, osmType, osmId, placeLat, placeLon])
+  }, [wikidataId, placeLat, placeLon])
 
   useEffect(() => {
     if (variant !== "preview" || !userLocation || placeLat == null || placeLon == null) { setDriveTime(null); return }
