@@ -1,23 +1,355 @@
 /**
  * Theme Registry for Navi
- * 
+ *
  * Provides a centralized registry for map themes, supporting both built-in
  * protomaps themes (light/dark) and custom themes with full flavor objects.
- * 
+ *
  * Theme config structure:
  *   id: string        - unique identifier (used in store, data-theme attr)
  *   name: string      - display name for UI
  *   dark: boolean     - true if dark theme (affects overlay styling, sprite fallback)
  *   colors: object|null - null for built-in themes, full flavor object for custom
  *   satellite: object|null - raster adjustments when satellite layer is present
- *   overlay: object|null   - reserved for future overlay-specific customizations
+ *   overlay: object   - overlay layer styling configuration
  */
 
 import { namedTheme } from 'protomaps-themes-base'
 
+// ═══════════════════════════════════════════════════════════════════════════
+// OVERLAY CONFIGURATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Dark theme overlay configuration
+ * All hardcoded values from overlay add functions extracted here
+ */
+const darkOverlay = {
+  // ── Hillshade ─────────────────────────────────────────────────────────────
+  hillshade: {
+    exaggeration: 0.5,
+    illuminationDirection: 315,
+    shadowColor: '#000000',
+    highlightColor: '#ffffff',
+  },
+
+  // ── Traffic ───────────────────────────────────────────────────────────────
+  traffic: {
+    opacity: 0.6,
+  },
+
+  // ── Contours (main, brown/tan scheme) ─────────────────────────────────────
+  contours: {
+    opacityMod: 0.8,
+    minorColor: '#8b6f47',
+    minorOpacity: 0.4,
+    minorWidth: { z11: 0.5, z14: 1.0 },
+    intermediateColor: '#8b6f47',
+    intermediateOpacity: 0.7,
+    intermediateWidth: { z8: 0.8, z14: 1.2 },
+    indexColor: '#6b4f2a',
+    indexOpacity: 0.9,
+    indexWidth: { z4: 1.2, z14: 1.8 },
+    labelColor: '#c0b898',
+    labelHaloColor: '#1a1a1a',
+    labelHaloWidth: 1.5,
+    labelOpacity: 0.85,
+    labelSize: 10,
+    labelFont: ['Noto Sans Regular'],
+  },
+
+  // ── Contours Test (blue scheme) ───────────────────────────────────────────
+  // Missing keys cascade from contours
+  contoursTest: {
+    minorColor: '#4a7c9b',
+    intermediateColor: '#4a7c9b',
+    indexColor: '#2a5a7c',
+    labelColor: '#98b8d0',
+  },
+
+  // ── Contours Test 10ft (green scheme) ─────────────────────────────────────
+  // Missing keys cascade from contours
+  contoursTest10ft: {
+    minorColor: '#3a7c4f',
+    intermediateColor: '#3a7c4f',
+    indexColor: '#2a5c3a',
+    labelColor: '#98c0a8',
+  },
+
+  // ── Public Lands (PAD-US) ─────────────────────────────────────────────────
+  publicLands: {
+    opacityMod: 0.7,
+    // Fill colors per category
+    fillWA: '#7c6b2f',
+    fillNPS: '#3d6b1f',
+    fillUSFS: '#5a7c2f',
+    fillBLM: '#c4a672',
+    fillFWS: '#4a7a5a',
+    fillSTAT: '#5a8c7c',
+    fillLOC: '#8ca694',
+    fillDefault: '#a0a0a0',
+    // Fill base opacities (multiplied by opacityMod)
+    fillOpacityWA: 0.30,
+    fillOpacityNPS: 0.30,
+    fillOpacityUSFS: 0.25,
+    fillOpacityBLM: 0.20,
+    fillOpacitySTAT: 0.25,
+    fillOpacityLOC: 0.20,
+    fillOpacityDefault: 0.15,
+    // Outline colors per category
+    outlineWA: '#5a4d20',
+    outlineNPS: '#2a4a15',
+    outlineUSFS: '#3d5520',
+    outlineBLM: '#8a7343',
+    outlineFWS: '#2d5a3a',
+    outlineSTAT: '#3d6055',
+    outlineLOC: '#5c6e66',
+    outlineDefault: '#707070',
+    // Outline opacities
+    outlineOpacityNPS: 0.7,
+    outlineOpacityUSFS: 0.6,
+    outlineOpacityDefault: 0.5,
+    // Outline width
+    outlineWidth: { z4: 0.3, z8: 0.8, z12: 1.2 },
+    // Labels
+    labelColor: '#c0c8b8',
+    labelHaloColor: '#1a1a1a',
+    labelHaloWidth: 1.5,
+    labelOpacity: 0.85,
+    labelSize: { z10: 10, z14: 13 },
+    labelFont: ['Noto Sans Regular'],
+  },
+
+  // ── USFS Trails ───────────────────────────────────────────────────────────
+  usfsTrails: {
+    // Roads
+    roadsColor: '#d0a060',
+    roadsOpacity: 0.9,
+    roadsWidth: { z10: 1.5, z14: 2.5, z16: 3.5 },
+    // Trails colors by use type
+    trailsMotorized: '#f08040',
+    trailsBicycle: '#e0b040',
+    trailsHiker: '#60c050',
+    trailsDefault: '#c0a060',
+    trailsOpacity: 0.9,
+    trailsWidth: { z10: 2.0, z14: 3.0, z16: 4.0 },
+    trailsDash: [2, 1.5],
+    // Road labels
+    roadsLabelColor: '#d0c0a0',
+    roadsLabelHaloColor: '#1a1a1a',
+    roadsLabelHaloWidth: 1.5,
+    roadsLabelOpacity: 0.9,
+    roadsLabelSize: 11,
+    // Trail labels
+    trailsLabelColor: '#d0b090',
+    trailsLabelHaloColor: '#1a1a1a',
+    trailsLabelHaloWidth: 1.5,
+    trailsLabelOpacity: 0.9,
+    trailsLabelSize: 11,
+    labelFont: ['Noto Sans Regular'],
+    // Hit layer
+    hitWidth: 14,
+  },
+
+  // ── BLM Trails / Roads ────────────────────────────────────────────────────
+  blmTrails: {
+    // Route colors by use class
+    color4wdHigh: '#f08040',
+    color4wdLow: '#e0b040',
+    colorAtv: '#e04040',
+    colorMotoSingle: '#b070c0',
+    color2wdLow: '#f0d070',
+    colorNonMech: '#60c050',
+    colorDefault: '#c0a060',
+    colorSnow: '#80b0e0',
+    lineOpacity: 0.9,
+    lineOpacityOther: 0.85,
+    lineWidth: { z10: 2.0, z14: 3.0, z16: 4.0 },
+    // Dash patterns by surface type
+    dashImproved: [4, 2],
+    dashAggregate: [1, 2],
+    dashSnow: [4, 2, 1, 2],
+    dashOther: [4, 2, 1, 2, 1, 2],
+    // Labels
+    labelColor: '#d0c0a0',
+    labelHaloColor: '#1a1a1a',
+    labelHaloWidth: 1.5,
+    labelOpacity: 0.9,
+    labelSize: 11,
+    labelFont: ['Noto Sans Regular'],
+    // Hit layer
+    hitWidth: 14,
+  },
+}
+
+/**
+ * Light theme overlay configuration
+ * All hardcoded values from overlay add functions extracted here
+ */
+const lightOverlay = {
+  // ── Hillshade ─────────────────────────────────────────────────────────────
+  hillshade: {
+    exaggeration: 0.5,
+    illuminationDirection: 315,
+    shadowColor: '#000000',
+    highlightColor: '#ffffff',
+  },
+
+  // ── Traffic ───────────────────────────────────────────────────────────────
+  traffic: {
+    opacity: 0.6,
+  },
+
+  // ── Contours (main, brown/tan scheme) ─────────────────────────────────────
+  contours: {
+    opacityMod: 1.0,
+    minorColor: '#8b6f47',
+    minorOpacity: 0.4,
+    minorWidth: { z11: 0.5, z14: 1.0 },
+    intermediateColor: '#8b6f47',
+    intermediateOpacity: 0.7,
+    intermediateWidth: { z8: 0.8, z14: 1.2 },
+    indexColor: '#6b4f2a',
+    indexOpacity: 0.9,
+    indexWidth: { z4: 1.2, z14: 1.8 },
+    labelColor: '#5a4020',
+    labelHaloColor: '#ffffff',
+    labelHaloWidth: 1.5,
+    labelOpacity: 0.85,
+    labelSize: 10,
+    labelFont: ['Noto Sans Regular'],
+  },
+
+  // ── Contours Test (blue scheme) ───────────────────────────────────────────
+  // Missing keys cascade from contours
+  contoursTest: {
+    minorColor: '#4a7c9b',
+    intermediateColor: '#4a7c9b',
+    indexColor: '#2a5a7c',
+    labelColor: '#205080',
+  },
+
+  // ── Contours Test 10ft (green scheme) ─────────────────────────────────────
+  // Missing keys cascade from contours
+  contoursTest10ft: {
+    minorColor: '#3a7c4f',
+    intermediateColor: '#3a7c4f',
+    indexColor: '#2a5c3a',
+    labelColor: '#2a4030',
+  },
+
+  // ── Public Lands (PAD-US) ─────────────────────────────────────────────────
+  publicLands: {
+    opacityMod: 1.0,
+    // Fill colors per category
+    fillWA: '#7c6b2f',
+    fillNPS: '#3d6b1f',
+    fillUSFS: '#5a7c2f',
+    fillBLM: '#c4a672',
+    fillFWS: '#4a7a5a',
+    fillSTAT: '#5a8c7c',
+    fillLOC: '#8ca694',
+    fillDefault: '#a0a0a0',
+    // Fill base opacities (multiplied by opacityMod)
+    fillOpacityWA: 0.30,
+    fillOpacityNPS: 0.30,
+    fillOpacityUSFS: 0.25,
+    fillOpacityBLM: 0.20,
+    fillOpacitySTAT: 0.25,
+    fillOpacityLOC: 0.20,
+    fillOpacityDefault: 0.15,
+    // Outline colors per category
+    outlineWA: '#5a4d20',
+    outlineNPS: '#2a4a15',
+    outlineUSFS: '#3d5520',
+    outlineBLM: '#8a7343',
+    outlineFWS: '#2d5a3a',
+    outlineSTAT: '#3d6055',
+    outlineLOC: '#5c6e66',
+    outlineDefault: '#707070',
+    // Outline opacities
+    outlineOpacityNPS: 0.7,
+    outlineOpacityUSFS: 0.6,
+    outlineOpacityDefault: 0.5,
+    // Outline width
+    outlineWidth: { z4: 0.3, z8: 0.8, z12: 1.2 },
+    // Labels
+    labelColor: '#3a4a30',
+    labelHaloColor: '#ffffff',
+    labelHaloWidth: 1.5,
+    labelOpacity: 0.85,
+    labelSize: { z10: 10, z14: 13 },
+    labelFont: ['Noto Sans Regular'],
+  },
+
+  // ── USFS Trails ───────────────────────────────────────────────────────────
+  usfsTrails: {
+    // Roads
+    roadsColor: '#c09050',
+    roadsOpacity: 0.9,
+    roadsWidth: { z10: 1.5, z14: 2.5, z16: 3.5 },
+    // Trails colors by use type
+    trailsMotorized: '#e07030',
+    trailsBicycle: '#d0a030',
+    trailsHiker: '#50b040',
+    trailsDefault: '#b09050',
+    trailsOpacity: 0.9,
+    trailsWidth: { z10: 2.0, z14: 3.0, z16: 4.0 },
+    trailsDash: [2, 1.5],
+    // Road labels
+    roadsLabelColor: '#6a5a40',
+    roadsLabelHaloColor: '#ffffff',
+    roadsLabelHaloWidth: 1.5,
+    roadsLabelOpacity: 0.9,
+    roadsLabelSize: 11,
+    // Trail labels
+    trailsLabelColor: '#5a4a30',
+    trailsLabelHaloColor: '#ffffff',
+    trailsLabelHaloWidth: 1.5,
+    trailsLabelOpacity: 0.9,
+    trailsLabelSize: 11,
+    labelFont: ['Noto Sans Regular'],
+    // Hit layer
+    hitWidth: 14,
+  },
+
+  // ── BLM Trails / Roads ────────────────────────────────────────────────────
+  blmTrails: {
+    // Route colors by use class
+    color4wdHigh: '#e07030',
+    color4wdLow: '#d0a030',
+    colorAtv: '#d03030',
+    colorMotoSingle: '#a060b0',
+    color2wdLow: '#e0c060',
+    colorNonMech: '#50b040',
+    colorDefault: '#b09050',
+    colorSnow: '#6090c0',
+    lineOpacity: 0.9,
+    lineOpacityOther: 0.85,
+    lineWidth: { z10: 2.0, z14: 3.0, z16: 4.0 },
+    // Dash patterns by surface type
+    dashImproved: [4, 2],
+    dashAggregate: [1, 2],
+    dashSnow: [4, 2, 1, 2],
+    dashOther: [4, 2, 1, 2, 1, 2],
+    // Labels
+    labelColor: '#5a4a30',
+    labelHaloColor: '#ffffff',
+    labelHaloWidth: 1.5,
+    labelOpacity: 0.9,
+    labelSize: 11,
+    labelFont: ['Noto Sans Regular'],
+    // Hit layer
+    hitWidth: 14,
+  },
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THEME REGISTRY
+// ═══════════════════════════════════════════════════════════════════════════
+
 /**
  * Theme registry - maps theme IDs to theme configurations
- * 
+ *
  * Built-in themes (light/dark) use colors: null to signal that namedTheme()
  * should be called at render time. Custom themes provide a full flavor object.
  */
@@ -28,7 +360,7 @@ const themes = {
     dark: false,
     colors: null,  // Use namedTheme('light')
     satellite: null,
-    overlay: null,
+    overlay: lightOverlay,
   },
   dark: {
     id: 'dark',
@@ -36,7 +368,7 @@ const themes = {
     dark: true,
     colors: null,  // Use namedTheme('dark')
     satellite: null,
-    overlay: null,
+    overlay: darkOverlay,
   },
   // Custom themes go here. Example:
   // 'midnight': {
@@ -45,9 +377,13 @@ const themes = {
   //   dark: true,
   //   colors: { /* full flavor object matching dark-flavor-reference.json schema */ },
   //   satellite: { opacity: 0.8, brightnessMin: 0.1 },
-  //   overlay: null,
+  //   overlay: { /* partial overrides - missing keys fall back to dark overlay */ },
   // },
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXPORTED FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * Get a theme configuration by ID
@@ -85,6 +421,44 @@ export function getThemeSprite(id) {
   // Custom themes don't have matching sprites on CDN - fall back based on dark flag
   const spriteTheme = theme.colors === null ? id : (theme.dark ? 'dark' : 'light')
   return `https://protomaps.github.io/basemaps-assets/sprites/v4/${spriteTheme}`
+}
+
+/**
+ * Get overlay configuration for a specific layer
+ *
+ * For contour variants (contoursTest, contoursTest10ft), missing keys cascade
+ * from the same theme's contours config.
+ *
+ * For custom themes, missing keys fall back to the appropriate built-in theme
+ * (dark or light based on theme.dark flag).
+ *
+ * @param {string} themeId - Theme ID
+ * @param {string} layerKey - Overlay layer key (hillshade, contours, publicLands, etc.)
+ * @returns {object} Merged overlay config for the layer
+ */
+export function getOverlayConfig(themeId, layerKey) {
+  const theme = getTheme(themeId)
+  const builtinTheme = theme.dark ? themes.dark : themes.light
+  const builtinOverlay = builtinTheme.overlay[layerKey] || {}
+
+  // For contour variants, cascade from same theme's contours config
+  let baseConfig = builtinOverlay
+  if (layerKey === 'contoursTest' || layerKey === 'contoursTest10ft') {
+    const contoursBase = builtinTheme.overlay.contours || {}
+    baseConfig = { ...contoursBase, ...builtinOverlay }
+  }
+
+  // If this is a custom theme with overlay overrides, merge them
+  if (theme.overlay && theme.overlay[layerKey]) {
+    // For contour variants in custom themes, also cascade from custom contours
+    if (layerKey === 'contoursTest' || layerKey === 'contoursTest10ft') {
+      const customContours = theme.overlay.contours || {}
+      return { ...baseConfig, ...customContours, ...theme.overlay[layerKey] }
+    }
+    return { ...baseConfig, ...theme.overlay[layerKey] }
+  }
+
+  return baseConfig
 }
 
 /**
