@@ -18,6 +18,7 @@
 
 import cleanTheme from './clean.js'
 import cyberpunkTheme from './cyberpunk.js'
+import tacticalTheme from './tactical.js'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UI CSS CUSTOM PROPERTIES
@@ -490,6 +491,7 @@ const themes = {
     fontImports: [],
   },
   cyberpunk: cyberpunkTheme,
+  tactical: tacticalTheme,
   // Custom themes go here. Example:
   // 'midnight': {
   //   id: 'midnight',
