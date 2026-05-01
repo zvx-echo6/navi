@@ -236,42 +236,80 @@ body {
   opacity: 1;
 }
 
-/* ═══ LAYER CONTROL ═══ */
-.layer-control {
+/* ═══ BOTTOM-RIGHT MAP CONTROLS ═══ */
+.map-controls-br {
   position: absolute;
-  bottom: 32px;
+  bottom: 40px;
   right: 10px;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.layer-control-btn {
-  width: 36px;
-  height: 36px;
+.map-control-btn {
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg-raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--text-secondary);
   cursor: pointer;
   box-shadow: var(--shadow);
-  transition: color 0.1s, border-color 0.1s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.map-control-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: var(--bg-overlay);
+}
+
+.map-control-btn:active {
+  background: var(--bg-muted);
+}
+
+/* ═══ LAYER CONTROL ═══ */
+.layer-control {
+  position: relative;
+}
+
+.layer-control-btn {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 
 .layer-control-btn:hover {
   color: var(--text-primary);
   border-color: var(--accent);
+  background: var(--bg-overlay);
+}
+
+.layer-control-btn:active {
+  background: var(--bg-muted);
 }
 
 .layer-control-popover {
   position: absolute;
-  bottom: 44px;
-  right: 0;
-  min-width: 160px;
+  bottom: 0;
+  right: 52px;
+  min-width: 180px;
   background: var(--bg-raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 8px 0;
   box-shadow: var(--shadow-lg);
 }
@@ -367,27 +405,28 @@ body {
 
 /* ═══ LOCATE BUTTON ═══ */
 .locate-btn {
-  position: absolute;
-  bottom: 80px;
-  right: 10px;
-  z-index: 10;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg-raised);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--text-secondary);
   cursor: pointer;
   box-shadow: var(--shadow);
-  transition: color 0.1s, border-color 0.1s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 
 .locate-btn:hover {
   color: var(--text-primary);
   border-color: var(--accent);
+  background: var(--bg-overlay);
+}
+
+.locate-btn:active {
+  background: var(--bg-muted);
 }
 
 /* ═══ STOP REMOVE BUTTON (touch-friendly) ═══ */
@@ -406,16 +445,15 @@ body {
     overflow-x: hidden;
   }
 
-  .layer-control {
-    bottom: auto;
-    top: 120px;
-    right: 10px;
+  .map-controls-br {
+    bottom: 24px;
+    right: 8px;
   }
 
-  .locate-btn {
-    bottom: auto;
-    top: 166px;
-    right: 10px;
+  .layer-control-popover {
+    right: 52px;
+    max-height: 60vh;
+    overflow-y: auto;
   }
 
   .stop-remove-btn {
@@ -500,4 +538,15 @@ body {
   padding: 0 5px;
   line-height: 1.5;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+}
+
+/* ═══ MAPLIBRE CONTROL POSITIONING ═══ */
+.maplibregl-ctrl-bottom-right {
+  bottom: 10px;
+  right: 10px;
+}
+
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl-scale {
+  margin-right: 0;
+  margin-bottom: 0;
 }
