@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Palette } from 'lucide-react'
+
 import { themeList } from '../themes/registry'
 import { useStore } from '../store'
 
@@ -78,18 +78,27 @@ export default function ThemePicker() {
 
   return (
     <div style={{ position: 'relative' }}>
-      {/* Trigger button */}
+      {/* Trigger button - shows current theme name */}
       <button
         ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
-        className="p-1.5 rounded flex items-center justify-center"
-        style={{ color: 'var(--text-secondary)' }}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          padding: '4px 8px',
+          cursor: 'pointer',
+          fontSize: 'var(--text-sm)',
+          color: 'var(--text-secondary)',
+          transition: 'color 0.15s',
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
+        onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-secondary)'}
         aria-label="Select theme"
         title="Select theme"
         aria-expanded={isOpen}
         aria-haspopup="true"
       >
-        <Palette size={16} />
+        {currentTheme.name}
       </button>
 
       {/* Popover */}
