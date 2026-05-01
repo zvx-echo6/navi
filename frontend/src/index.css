@@ -239,7 +239,7 @@ body {
 /* ═══ BOTTOM-RIGHT MAP CONTROLS ═══ */
 .map-controls-br {
   position: absolute;
-  bottom: 40px;
+  bottom: 80px;
   right: 10px;
   z-index: 10;
   display: flex;
@@ -446,7 +446,7 @@ body {
   }
 
   .map-controls-br {
-    bottom: 24px;
+    bottom: 70px;
     right: 8px;
   }
 
@@ -542,7 +542,7 @@ body {
 
 /* ═══ MAPLIBRE CONTROL POSITIONING ═══ */
 .maplibregl-ctrl-bottom-right {
-  bottom: 10px;
+  bottom: 24px;
   right: 10px;
 }
 
