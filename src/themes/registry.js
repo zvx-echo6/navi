@@ -288,6 +288,16 @@ const darkOverlay = {
     // Hit layer
     hitWidth: 14,
   },
+
+  // ── Highlight (boundary/selection) ────────────────────────────────────────
+  highlight: {
+    lineColor: "#7a9a6b",  // Muted olive-green for dark backgrounds
+    lineWidth: 2,
+    lineDash: [4, 4],
+    lineOpacity: 0.8,
+    fillColor: "#7a9a6b",
+    fillOpacity: 0.08,
+  },
 }
 
 /**
@@ -449,6 +459,16 @@ const lightOverlay = {
     labelFont: ['Noto Sans Regular'],
     // Hit layer
     hitWidth: 14,
+  },
+
+  // ── Highlight (boundary/selection) ────────────────────────────────────────
+  highlight: {
+    lineColor: "#4a7040",  // Forest green for light backgrounds
+    lineWidth: 2,
+    lineDash: [4, 4],
+    lineOpacity: 0.7,
+    fillColor: "#4a7040",
+    fillOpacity: 0.06,
   },
 }
 

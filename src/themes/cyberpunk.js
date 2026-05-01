@@ -368,6 +368,16 @@ const cyberpunkOverlay = {
     // Hit layer
     hitWidth: 14,
   },
+
+  // ── Highlight (boundary/selection) ────────────────────────────────────────
+  highlight: {
+    lineColor: "#00f0ff",  // Electric cyan for selection
+    lineWidth: 2,
+    lineDash: [4, 4],
+    lineOpacity: 0.9,
+    fillColor: "#00f0ff",
+    fillOpacity: 0.1,
+  },
 }
 
 /**
