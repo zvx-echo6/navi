@@ -1247,10 +1247,10 @@ function removeBlmTrails(map) {
 }
 
 
-/** Add boundary polygon layers with computed accent color (MapLibre rejects CSS vars in paint) */
+/** Add boundary polygon layers using theme-aware highlight config */
 const BOUNDARY_FILL_LAYER = 'boundary-fill-layer'
 
-function addBoundaryLayer(map) {
+function addBoundaryLayer(map, themeId) {
   if (!map || map.getLayer(BOUNDARY_LAYER)) return
   if (!map.getSource(BOUNDARY_SOURCE)) {
     map.addSource(BOUNDARY_SOURCE, {
@@ -1258,7 +1258,14 @@ function addBoundaryLayer(map) {
       data: { type: "FeatureCollection", features: [] },
     })
   }
-  const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#7a9a6b"
+  // Get highlight config from theme overlay
+  const highlight = getOverlayConfig(themeId, "highlight") || {}
+  const lineColor = highlight.lineColor || "#7a9a6b"
+  const lineWidth = highlight.lineWidth || 2
+  const lineDash = highlight.lineDash || [4, 4]
+  const lineOpacity = highlight.lineOpacity || 0.8
+  const fillColor = highlight.fillColor || lineColor
+  const fillOpacity = highlight.fillOpacity || 0.08
 
   // Find first symbol layer to insert boundary layers below labels
   const layers = map.getStyle().layers
@@ -1276,8 +1283,8 @@ function addBoundaryLayer(map) {
     type: "fill",
     source: BOUNDARY_SOURCE,
     paint: {
-      "fill-color": accentColor,
-      "fill-opacity": 0.05,
+      "fill-color": fillColor,
+      "fill-opacity": fillOpacity,
     },
   }, firstSymbolId)
 
@@ -1287,10 +1294,10 @@ function addBoundaryLayer(map) {
     type: "line",
     source: BOUNDARY_SOURCE,
     paint: {
-      "line-color": accentColor,
-      "line-width": 2,
-      "line-opacity": 0.7,
-      "line-dasharray": [3, 2],
+      "line-color": lineColor,
+      "line-width": lineWidth,
+      "line-opacity": lineOpacity,
+      "line-dasharray": lineDash,
     },
   }, firstSymbolId)
 }
@@ -1498,7 +1505,14 @@ const MapView = forwardRef(function MapView(_, ref) {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
     })
-    const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#7a9a6b"
+    // Get highlight config from theme overlay
+  const highlight = getOverlayConfig(themeId, "highlight") || {}
+  const lineColor = highlight.lineColor || "#7a9a6b"
+  const lineWidth = highlight.lineWidth || 2
+  const lineDash = highlight.lineDash || [4, 4]
+  const lineOpacity = highlight.lineOpacity || 0.8
+  const fillColor = highlight.fillColor || lineColor
+  const fillOpacity = highlight.fillOpacity || 0.08
     map.addLayer({
       id: MEASURE_LINE_LAYER,
       type: "line",
@@ -2124,7 +2138,7 @@ const MapView = forwardRef(function MapView(_, ref) {
 
       // Boundary polygon layer for selected places
       if (!map.getLayer(BOUNDARY_LAYER)) {
-        addBoundaryLayer(map)
+        addBoundaryLayer(map, currentThemeRef.current)
       }
 
       // Apply improved base label styling for readability
@@ -2333,7 +2347,7 @@ const MapView = forwardRef(function MapView(_, ref) {
 
       // Boundary polygon layer
       if (!map.getLayer(BOUNDARY_LAYER)) {
-        addBoundaryLayer(map)
+        addBoundaryLayer(map, currentThemeRef.current)
       }
 
       // Apply improved base label styling for readability
