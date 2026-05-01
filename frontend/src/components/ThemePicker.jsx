@@ -113,9 +113,9 @@ export default function ThemePicker() {
         >
           <div
             style={{
-              display: 'flex',
-              gap: '16px',
-              justifyContent: 'center',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: '12px',
             }}
           >
             {themes.map((t) => (
@@ -145,7 +145,7 @@ export default function ThemePicker() {
               >
                 <ThemeSwatch
                   colors={t.swatch}
-                  size={32}
+                  size={28}
                   active={t.id === theme}
                 />
                 <span
