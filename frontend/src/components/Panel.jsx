@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
-import { Sun, Moon, Sparkles, LogIn, LogOut } from 'lucide-react'
-import { themeList } from '../themes/registry'
+import { LogIn, LogOut } from 'lucide-react'
+import ThemePicker from './ThemePicker'
 import { useStore, usePanelState } from '../store'
 import { hasFeature } from '../config'
 import SearchBar from './SearchBar'
@@ -54,32 +54,6 @@ export default function Panel({ onManeuverClick }) {
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
-
-  // Theme toggle - cycles through all available themes
-  const toggleTheme = () => {
-    const themes = themeList()
-    const currentIdx = themes.findIndex(t => t.id === theme)
-    const nextIdx = (currentIdx + 1) % themes.length
-    setThemeOverride(themes[nextIdx].id)
-  }
-
-  // Get theme icon based on current theme
-  const getThemeIcon = () => {
-    switch (theme) {
-      case 'dark': return <Moon size={16} />
-      case 'light': return <Sun size={16} />
-      case 'clean': return <Sparkles size={16} />
-      default: return <Sun size={16} />
-    }
-  }
-
-  // Get next theme name for tooltip
-  const getNextThemeName = () => {
-    const themes = themeList()
-    const currentIdx = themes.findIndex(t => t.id === theme)
-    const nextIdx = (currentIdx + 1) % themes.length
-    return themes[nextIdx].name
-  }
 
   // Auth handlers
   const handleLogin = () => { window.location.href = '/outpost.goauthentik.io/start?rd=%2F' }
@@ -274,15 +248,7 @@ export default function Panel({ onManeuverClick }) {
             </button>
           )
         )}
-        <button
-          onClick={toggleTheme}
-          className="p-1.5 rounded"
-          style={{ color: 'var(--text-secondary)' }}
-          aria-label={`Switch to ${getNextThemeName()} theme`}
-          title={`Switch to ${getNextThemeName()} theme`}
-        >
-          {getThemeIcon()}
-        </button>
+        <ThemePicker />
       </div>
     </div>
   )

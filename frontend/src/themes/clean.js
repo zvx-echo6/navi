@@ -162,29 +162,46 @@ const cleanColors = {
  * Clean Google-inspired white panels with standard gray text
  */
 const cleanUI = {
+  // Fonts
+  '--font-sans': "'Inter', system-ui, -apple-system, sans-serif",
+  '--font-mono': "'JetBrains Mono', ui-monospace, monospace",
+  // Backgrounds
   '--bg-base': '#f5f5f5',
   '--bg-raised': '#ffffff',
   '--bg-overlay': '#ffffff',
   '--bg-input': '#ffffff',
+  '--bg-inset': '#f0f0f0',
+  '--bg-muted': '#f8f9fa',
+  // Text
   '--text-primary': '#202124',
   '--text-secondary': '#5f6368',
   '--text-tertiary': '#9aa0a6',
   '--text-inverse': '#ffffff',
+  // Borders
   '--border': '#dadce0',
   '--border-subtle': '#e8eaed',
+  // Accent
   '--accent': '#1a73e8',
   '--accent-hover': '#1557b0',
   '--accent-muted': '#e8f0fe',
+  // Tan
   '--tan': '#f9a825',
   '--tan-muted': '#fef7e0',
+  // Pins
   '--pin-origin': '#34a853',
   '--pin-destination': '#ea4335',
   '--pin-intermediate': '#5f6368',
   '--pin-stroke': '#ffffff',
+  // Status
   '--status-success': '#34a853',
   '--status-warning': '#fbbc04',
   '--status-danger': '#ea4335',
+  '--success': '#34a853',
+  '--warning': '#fbbc04',
+  '--warning-muted': '#fef7e0',
+  // Route
   '--route-line': '#1a73e8',
+  // Shadows
   '--shadow': '0 1px 3px rgba(60, 64, 67, 0.15), 0 1px 2px rgba(60, 64, 67, 0.1)',
   '--shadow-lg': '0 2px 6px rgba(60, 64, 67, 0.2), 0 1px 3px rgba(60, 64, 67, 0.15)',
 }
