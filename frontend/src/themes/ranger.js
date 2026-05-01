@@ -1,5 +1,5 @@
 /**
- * Tactical Theme for Navi
+ * Ranger Theme for Navi
  *
  * Military topographic map meets NVG-compatible night display. Dark olive/charcoal
  * base with muted sage greens for text — readable but low-signature. Subdued amber
@@ -18,7 +18,7 @@
  * Map flavor colors - protomaps-themes-base schema
  * All 73 flat keys + pois + landcover nested objects
  */
-const tacticalColors = {
+const rangerColors = {
   // Background & earth - dark olive
   background: "#0a0e0a",
   earth: "#0d110d",
@@ -134,9 +134,9 @@ const tacticalColors = {
 }
 
 /**
- * UI CSS custom properties - tactical field display
+ * UI CSS custom properties - ranger field display
  */
-const tacticalUI = {
+const rangerUI = {
   "--font-sans": "'Inter', system-ui, -apple-system, sans-serif",
   "--font-mono": "'JetBrains Mono', ui-monospace, monospace",
   "--font-heading": "'Inter', system-ui, -apple-system, sans-serif",
@@ -175,7 +175,7 @@ const tacticalUI = {
 /**
  * Overlay configuration - prominent contours, subdued everything else
  */
-const tacticalOverlay = {
+const rangerOverlay = {
   hillshade: {
     exaggeration: 0.5,
     illuminationDirection: 315,
@@ -301,7 +301,7 @@ const tacticalOverlay = {
   },
 }
 
-const tacticalSatellite = {
+const rangerSatellite = {
   opacity: 0.75,
   brightnessMin: 0.0,
   brightnessMax: 0.35,
@@ -310,16 +310,16 @@ const tacticalSatellite = {
   hueRotate: 0,
 }
 
-const tacticalTheme = {
-  id: "tactical",
-  name: "Tactical",
+const rangerTheme = {
+  id: "ranger",
+  name: "Ranger",
   dark: true,
   swatch: ["#0d110d", "#c89030", "#a0b090"],
   fontImports: [],
-  colors: tacticalColors,
-  satellite: tacticalSatellite,
-  overlay: tacticalOverlay,
-  ui: tacticalUI,
+  colors: rangerColors,
+  satellite: rangerSatellite,
+  overlay: rangerOverlay,
+  ui: rangerUI,
 }
 
-export default tacticalTheme
+export default rangerTheme
