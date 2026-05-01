@@ -1288,8 +1288,8 @@ function addBoundaryLayer(map) {
     source: BOUNDARY_SOURCE,
     paint: {
       "line-color": accentColor,
-      "line-width": 2,
-      "line-opacity": 0.7,
+      "line-width": 2.5,
+      "line-opacity": 0.8,
       "line-dasharray": [3, 2],
     },
   }, firstSymbolId)
@@ -1504,8 +1504,8 @@ const MapView = forwardRef(function MapView(_, ref) {
       type: "line",
       source: MEASURE_SOURCE,
       paint: {
-        "line-color": accentColor,
-        "line-width": 2,
+        "line-color": "#ff0000",
+        "line-width": 8,
         "line-dasharray": [8, 4],
       },
     })
@@ -2175,6 +2175,34 @@ const MapView = forwardRef(function MapView(_, ref) {
             geometry: boundaryGeometry,
             properties: {},
           })
+
+          console.log("BOUNDARY DEBUG:")
+          console.log("  source exists:", !!map.getSource(BOUNDARY_SOURCE))
+          console.log("  line layer exists:", !!map.getLayer(BOUNDARY_LAYER))
+          console.log("  fill layer exists:", !!map.getLayer(BOUNDARY_FILL_LAYER))
+          console.log("  line-color:", map.getPaintProperty(BOUNDARY_LAYER, "line-color"))
+          console.log("  line-opacity:", map.getPaintProperty(BOUNDARY_LAYER, "line-opacity"))
+          console.log("  line-width:", map.getPaintProperty(BOUNDARY_LAYER, "line-width"))
+          console.log("  fill-color:", map.getPaintProperty(BOUNDARY_FILL_LAYER, "fill-color"))
+          console.log("  visibility:", map.getLayoutProperty(BOUNDARY_LAYER, "visibility"))
+          console.log("  feature count:", source._data?.features?.length || "unknown")
+          console.log("  geometry type:", boundaryGeometry.type)
+          console.log("  coord count:", boundaryGeometry.type === "Polygon" ? boundaryGeometry.coordinates[0]?.length : boundaryGeometry.coordinates?.length)
+          console.log("  first coord:", boundaryGeometry.type === "Polygon" ? boundaryGeometry.coordinates[0]?.[0] : boundaryGeometry.coordinates?.[0]?.[0]?.[0])
+          console.log("  map center:", map.getCenter())
+          console.log("  map zoom:", map.getZoom())
+          
+          // Check if layer is actually in style
+          const styleLayers = map.getStyle().layers
+          const boundaryLayerInStyle = styleLayers.find(l => l.id === BOUNDARY_LAYER)
+          console.log("  layer in style.layers:", !!boundaryLayerInStyle)
+          if (boundaryLayerInStyle) {
+            console.log("  layer def:", JSON.stringify(boundaryLayerInStyle))
+          }
+          
+          // Force repaint
+          map.triggerRepaint()
+          console.log("  triggered repaint")
 
           // Zoom to fit boundary
           try {
