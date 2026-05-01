@@ -15,6 +15,7 @@
  */
 
 import { namedTheme } from 'protomaps-themes-base'
+import cleanTheme from './clean.js'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UI CSS CUSTOM PROPERTIES
@@ -441,6 +442,7 @@ const themes = {
     overlay: darkOverlay,
     ui: darkUI,
   },
+  clean: cleanTheme,
   // Custom themes go here. Example:
   // 'midnight': {
   //   id: 'midnight',
