@@ -2421,16 +2421,24 @@ const MapView = forwardRef(function MapView(_, ref) {
               // Validate bounds before fitting
               if (minLng >= -180 && maxLng <= 180 && minLat >= -90 && maxLat <= 90 &&
                   minLng < maxLng && minLat < maxLat) {
-                // Only fit bounds if zoomed out (< z14). At z14+ just draw boundary silently.
+                const bounds = [[minLng, minLat], [maxLng, maxLat]]
                 const currentZoom = map.getZoom()
-                if (currentZoom < 14) {
-                  const bounds = [[minLng, minLat], [maxLng, maxLat]]
-                  map.fitBounds(bounds, {
-                    padding: 50,
-                    duration: 700,
-                    maxZoom: 16,
-                  })
+                const target = map.cameraForBounds(bounds, { padding: 50 })
+                
+                // Zoom-in only: allow zoom in to show boundary, never zoom out
+                // - target.zoom > currentZoom → zoom IN to fit (always allowed)
+                // - target.zoom < currentZoom → DON'T zoom out (skip fitBounds)
+                // - target.zoom == currentZoom → pan only (allowed)
+                if (!target || target.zoom < currentZoom) {
+                  // Would zoom out — just draw the boundary without moving camera
+                  return
                 }
+                
+                map.fitBounds(bounds, {
+                  padding: 50,
+                  duration: 700,
+                  maxZoom: 16,
+                })
               }
             }
           } catch (e) {
