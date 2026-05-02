@@ -269,7 +269,7 @@ function applyBaseLabelStyling(map) {
 /** Build a full MapLibre style object for the given theme */
 function buildStyle(themeName) {
   const config = getConfig()
-  const tileUrl = config?.tileset?.url || '/tiles/na.pmtiles'
+  const tileUrl = config?.tileset?.url || '/tiles/planet-20260420.pmtiles'
   const attribution = config?.tileset?.attribution || 'Protomaps \u00a9 OSM'
 
   // Use namedTheme directly for built-in themes, custom colors for others
