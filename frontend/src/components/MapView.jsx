@@ -1334,9 +1334,9 @@ function hideVectorFills(map) {
   if (!style || !style.layers) return
   
   for (const layer of style.layers) {
-    // Hide fill layers (land, water, parks, buildings, etc.)
+    // Hide fill and background layers (land, water, parks, buildings, etc.)
     // But keep line, symbol, and circle layers
-    if (layer.type === 'fill' || layer.type === 'fill-extrusion') {
+    if (layer.type === 'fill' || layer.type === 'fill-extrusion' || layer.type === 'background') {
       // Don't hide our own overlay fills (public lands, etc)
       if (layer.id.startsWith('public-lands') || 
           layer.id.startsWith('boundary') ||
