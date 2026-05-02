@@ -100,7 +100,7 @@ export const useStore = create((set, get) => ({
   autocompleteOpen: false,
   theme: 'dark', // 'dark' | 'light' (resolved value — what's actually applied)
   themeOverride: null, // null | 'dark' | 'light' (manual override, persisted)
-  viewMode: 'map', // 'map' | 'satellite' | 'hybrid'
+  viewMode: (typeof localStorage !== 'undefined' && localStorage.getItem('navi-view-mode')) || 'map', // 'map' | 'satellite' | 'hybrid'
 
   setSheetState: (s) => set({ sheetState: s }),
   setViewMode: (mode) => {

@@ -2097,15 +2097,21 @@ const MapView = forwardRef(function MapView(_, ref) {
             })
           }
         } else {
-          // Outside circle → deselect, no new selection
+          // Outside circle → clear current selection and fall through to select new
           store.clearClickMarker()
           store.clearSelectedPlace()
           // Clear boundary when deselecting
           if (updateBoundaryRef.current) updateBoundaryRef.current(null)
           setSelectedHighlight(map, null)
+          // Fall through to State A to select new feature at click point
         }
-      } else {
-        // State A: nothing selected → select
+      }
+      
+      // Select new feature at click point (State A or after clearing previous selection)
+      {
+        const store = useStore.getState() // refresh store state after potential clear
+        if (store.clickMarker) return // already handled above
+        
         if (window.innerWidth < 768) setSheetState('collapsed')
 
         const { lng, lat } = e.lngLat
@@ -2414,7 +2420,15 @@ const MapView = forwardRef(function MapView(_, ref) {
               // Validate bounds before fitting
               if (minLng >= -180 && maxLng <= 180 && minLat >= -90 && maxLat <= 90 &&
                   minLng < maxLng && minLat < maxLat) {
-                map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+                const bounds = [[minLng, minLat], [maxLng, maxLat]]
+                const currentZoom = map.getZoom()
+                const target = map.cameraForBounds(bounds, { padding: 50 })
+                // NEVER zoom out - user's zoom level is intentional
+                if (target && target.zoom < currentZoom) {
+                  // Would zoom out — just draw the boundary without moving camera
+                  return
+                }
+                map.fitBounds(bounds, {
                   padding: 50,
                   duration: 700,
                   maxZoom: 16,
