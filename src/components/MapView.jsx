@@ -265,6 +265,21 @@ function applyBaseLabelStyling(map) {
       'text-halo-width': 1.8,
     }
   })
+
+  // Adjust label zoom ranges for proper hierarchy:
+  // - Countries at z2+
+  // - States/provinces at z3+
+  // - Cities follow their natural min_zoom in the data
+  try {
+    if (map.getLayer('places_country')) {
+      map.setLayerZoomRange('places_country', 2, 24)
+    }
+    if (map.getLayer('places_region')) {
+      map.setLayerZoomRange('places_region', 3, 24)
+    }
+  } catch (e) {
+    // Ignore if layers don't exist
+  }
 }
 
 /** Build a full MapLibre style object for the given theme */
