@@ -1497,6 +1497,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const highlightedFeatureRef = useRef(null) // { source, sourceLayer, id } for setFeatureState
   const hoveredFeatureRef = useRef(null) // for hover highlight
   const updateBoundaryRef = useRef(null) // boundary update function
+  const lastFlyTargetRef = useRef(null) // track last fly target to avoid re-flying on metadata updates
   // Refs for measurement state (accessible in click handlers)
   const measuringRef = useRef({ active: false, points: [] })
   const measureLabelsRef = useRef([]) // HTML label elements
@@ -2420,21 +2421,16 @@ const MapView = forwardRef(function MapView(_, ref) {
               // Validate bounds before fitting
               if (minLng >= -180 && maxLng <= 180 && minLat >= -90 && maxLat <= 90 &&
                   minLng < maxLng && minLat < maxLat) {
-                const bounds = [[minLng, minLat], [maxLng, maxLat]]
+                // Only fit bounds if zoomed out (< z14). At z14+ just draw boundary silently.
                 const currentZoom = map.getZoom()
-                const target = map.cameraForBounds(bounds, { padding: 50 })
-                // NEVER zoom out - user's zoom level is intentional
-                if (target && target.zoom < currentZoom) {
-                  // Would zoom out — just draw the boundary without moving camera
-                  return
+                if (currentZoom < 14) {
+                  const bounds = [[minLng, minLat], [maxLng, maxLat]]
+                  map.fitBounds(bounds, {
+                    padding: 50,
+                    duration: 700,
+                    maxZoom: 16,
+                  })
                 }
-                map.fitBounds(bounds, {
-                  padding: 50,
-                  duration: 700,
-                  maxZoom: 16,
-                })
-              } else {
-                console.warn('Invalid bounds:', { minLng, maxLng, minLat, maxLat })
               }
             }
           } catch (e) {
@@ -2622,11 +2618,26 @@ const MapView = forwardRef(function MapView(_, ref) {
       previewMarkerRef.current = null
     }
 
-    if (!selectedPlace) return
+    if (!selectedPlace) {
+      lastFlyTargetRef.current = null
+      return
+    }
 
-    // Only fly to place if it came from search (not map-click which already centered)
-    if (selectedPlace.source !== 'map_click' && selectedPlace.source !== 'basemap_label') {
-      map.flyTo({ center: [selectedPlace.lon, selectedPlace.lat], zoom: 14, duration: 800 })
+    // Track place identity - only fly on NEW place selection, not metadata updates
+    const placeKey = `${selectedPlace.lat}-${selectedPlace.lon}-${selectedPlace.name}`
+    if (placeKey === lastFlyTargetRef.current) {
+      // Same place, skip flyTo (this is just a metadata update)
+    } else {
+      lastFlyTargetRef.current = placeKey
+      
+      // Only fly to place if it came from search (not map-click which already centered)
+      if (selectedPlace.source !== 'map_click' && selectedPlace.source !== 'basemap_label') {
+        // Only fly IN if below z14. At z14+ do nothing.
+        const currentZoom = map.getZoom()
+        if (currentZoom < 14) {
+          map.flyTo({ center: [selectedPlace.lon, selectedPlace.lat], zoom: 14, duration: 800 })
+        }
+      }
     }
 
     // Different visual feedback based on mode
