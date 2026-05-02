@@ -2401,7 +2401,7 @@ const MapView = forwardRef(function MapView(_, ref) {
           try {
             const coords = boundaryGeometry.type === 'Polygon'
               ? boundaryGeometry.coordinates[0]
-              : boundaryGeometry.coordinates.flat(1)
+              : boundaryGeometry.coordinates.flat(2)
 
             if (coords.length > 0) {
               let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity
@@ -2411,11 +2411,17 @@ const MapView = forwardRef(function MapView(_, ref) {
                 if (lat < minLat) minLat = lat
                 if (lat > maxLat) maxLat = lat
               }
-              map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
-                padding: 50,
-                duration: 700,
-                maxZoom: 16,
-              })
+              // Validate bounds before fitting
+              if (minLng >= -180 && maxLng <= 180 && minLat >= -90 && maxLat <= 90 &&
+                  minLng < maxLng && minLat < maxLat) {
+                map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+                  padding: 50,
+                  duration: 700,
+                  maxZoom: 16,
+                })
+              } else {
+                console.warn('Invalid bounds:', { minLng, maxLng, minLat, maxLat })
+              }
             }
           } catch (e) {
             console.warn('fitBounds error:', e)
