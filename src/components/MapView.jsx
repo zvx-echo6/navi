@@ -267,15 +267,15 @@ function applyBaseLabelStyling(map) {
   })
 
   // Adjust label zoom ranges for proper hierarchy:
-  // - Countries at z2+
-  // - States/provinces at z3+
-  // - Cities follow their natural min_zoom in the data
+  // - Countries: z1-z4 (fade out as states appear)
+  // - States/provinces: z4-z7 (appear as countries fade, fade as cities dominate)
+  // - Cities: unchanged (natural min_zoom in tile data)
   try {
     if (map.getLayer('places_country')) {
-      map.setLayerZoomRange('places_country', 2, 24)
+      map.setLayerZoomRange('places_country', 1, 4)
     }
     if (map.getLayer('places_region')) {
-      map.setLayerZoomRange('places_region', 3, 24)
+      map.setLayerZoomRange('places_region', 4, 7)
     }
   } catch (e) {
     // Ignore if layers don't exist
