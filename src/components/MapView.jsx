@@ -272,10 +272,18 @@ function applyBaseLabelStyling(map) {
   // - Cities: unchanged (natural min_zoom in tile data)
   try {
     if (map.getLayer('places_country')) {
-      map.setLayerZoomRange('places_country', 1, 4)
+      map.setLayerZoomRange('places_country', 1, 5)
     }
     if (map.getLayer('places_region')) {
-      map.setLayerZoomRange('places_region', 4, 7)
+      map.setLayerZoomRange('places_region', 4, 8)
+      // FIX: The protomaps theme uses name:short which doesn't exist in tiles
+      // Use coalesce to fall back to ref (e.g., "CA") then name (e.g., "California")
+      map.setLayoutProperty('places_region', 'text-field', [
+        'coalesce',
+        ['get', 'name:short'],
+        ['get', 'ref'],
+        ['get', 'name']
+      ])
     }
   } catch (e) {
     // Ignore if layers don't exist
