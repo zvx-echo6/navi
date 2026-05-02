@@ -352,6 +352,9 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
     if (placeLat == null || placeLon == null) return
     // Skip for dropped pins - they get reverse geocoded by MapView
     if (place?.source === 'map_click') return
+    // Don't reverse geocode if we already identified the entity from a label click
+    // The basemap label provides name, kind, wikidata - reverse geocode would return wrong entity
+    if (place?.source === 'basemap_label' && place?.raw?.kind) return
     
     const controller = new AbortController()
     fetchReverse(placeLat, placeLon).then((result) => {
