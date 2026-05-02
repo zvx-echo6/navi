@@ -408,6 +408,16 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
           osm_relation_id: data.osm_relation_id,
           extratags: { ...(prev && prev !== "loading" ? prev.extratags : {}), ...data.extratags },
         }))
+        // Set osm_type/osm_id from osm_relation_id to trigger Effect 3 (wiki summary fetch)
+        if (data?.osm_relation_id) {
+          const current = useStore.getState().selectedPlace
+          if (current && current.lat === placeLat && current.lon === placeLon) {
+            useStore.getState().setSelectedPlace({ 
+              ...current, 
+              raw: { ...current.raw, osm_type: 'R', osm_id: data.osm_relation_id }
+            })
+          }
+        }
         if (data?.boundary) {
           const current = useStore.getState().selectedPlace
           if (current && current.lat === placeLat && current.lon === placeLon) {
