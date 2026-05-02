@@ -23,6 +23,7 @@ function isCurrentThemeDark() {
 const ROUTE_SOURCE = 'route-source'
 const BOUNDARY_SOURCE = 'boundary-source'
 const BOUNDARY_LAYER = 'boundary-layer'
+const STATE_BOUNDARIES_LAYER = 'state-boundaries-z4-z7'
 const ROUTE_LAYER_PREFIX = 'route-layer-'
 const HILLSHADE_SOURCE = 'hillshade-dem'
 const HILLSHADE_LAYER = 'hillshade-layer'
@@ -1481,6 +1482,63 @@ function addBoundaryLayer(map) {
   }, firstSymbolId)
 }
 
+/**
+ * FIX D: Add state/province boundary lines visible at z4-z7
+ * These are administrative boundaries with kind_detail = 4 (state/province level)
+ * Uses theme-aware styling from the boundaries color
+ */
+function addStateBoundaries(map, themeId) {
+  if (!map || map.getLayer(STATE_BOUNDARIES_LAYER)) return
+  
+  // Get the boundaries color from the current theme
+  const theme = getTheme(themeId)
+  const boundaryColor = theme?.colors?.boundaries || '#808080'
+  
+  // Find first symbol layer to insert below labels
+  const layers = map.getStyle().layers
+  let firstSymbolId = null
+  for (const layer of layers) {
+    if (layer.type === 'symbol') {
+      firstSymbolId = layer.id
+      break
+    }
+  }
+  
+  // Add state/province boundaries layer for z4-z7
+  // kind_detail 4 = state/province level administrative boundaries
+  map.addLayer({
+    id: STATE_BOUNDARIES_LAYER,
+    type: 'line',
+    source: 'protomaps',
+    'source-layer': 'boundaries',
+    filter: ['==', 'kind_detail', 4],
+    minzoom: 4,
+    maxzoom: 8,
+    paint: {
+      'line-color': boundaryColor,
+      'line-width': [
+        'interpolate', ['linear'], ['zoom'],
+        4, 0.5,
+        7, 1.0
+      ],
+      'line-opacity': [
+        'interpolate', ['linear'], ['zoom'],
+        4, 0.4,
+        7, 0.6
+      ],
+      'line-dasharray': [4, 2],
+    },
+  }, firstSymbolId)
+}
+
+/** Remove state boundaries layer */
+function removeStateBoundaries(map) {
+  if (!map) return
+  if (map.getLayer(STATE_BOUNDARIES_LAYER)) {
+    map.removeLayer(STATE_BOUNDARIES_LAYER)
+  }
+}
+
 const MapView = forwardRef(function MapView(_, ref) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
@@ -2383,6 +2441,9 @@ const MapView = forwardRef(function MapView(_, ref) {
       // Apply improved base label styling for readability
       applyBaseLabelStyling(map)
 
+      // FIX D: Add state/province boundary lines at z4-z7
+      addStateBoundaries(map, currentThemeRef.current)
+
       // Restore overlay layers from localStorage prefs
       try {
         const raw = localStorage.getItem('navi-layer-prefs')
@@ -2598,6 +2659,9 @@ const MapView = forwardRef(function MapView(_, ref) {
 
       // Apply improved base label styling for readability
       applyBaseLabelStyling(map)
+
+      // FIX D: Re-add state boundaries with new theme colors
+      addStateBoundaries(map, currentThemeRef.current)
 
       // Re-add active overlay layers
       if (activeLayersRef.current.hillshade) addHillshade(map, currentThemeRef.current)
