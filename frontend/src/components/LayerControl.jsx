@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { Layers, Trees, Mountain } from 'lucide-react'
+import { Layers, Map, Satellite, Globe } from 'lucide-react'
 import { hasFeature, getConfig } from '../config'
+import { useStore } from '../store'
 
 const STORAGE_KEY = 'navi-layer-prefs'
 
@@ -27,6 +28,10 @@ export default function LayerControl({ mapRef }) {
   const [usfsTrails, setUsfsTrails] = useState(false)
   const [blmTrails, setBlmTrails] = useState(false)
   const panelRef = useRef(null)
+  
+  // View mode: map | satellite | hybrid
+  const viewMode = useStore((s) => s.viewMode)
+  const setViewMode = useStore((s) => s.setViewMode)
 
   // Initialize from localStorage or defaults on mount
   useEffect(() => {
@@ -239,6 +244,25 @@ export default function LayerControl({ mapRef }) {
     savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails, blmTrails })
   }, [blmTrails, mapRef])
 
+  // Apply view mode changes
+  useEffect(() => {
+    const mapView = mapRef?.current
+    if (!mapView) return
+    const map = mapView.getMap?.()
+    if (!map) return
+
+    const apply = () => {
+      mapView.setViewMode?.(viewMode)
+    }
+
+    if (map.isStyleLoaded()) {
+      apply()
+    } else {
+      map.once('style.load', apply)
+    }
+    return () => map.off('style.load', apply)
+  }, [viewMode, mapRef])
+
   // Close on outside click
   useEffect(() => {
     if (!open) return
@@ -276,6 +300,34 @@ export default function LayerControl({ mapRef }) {
 
       {open && (
         <div className="layer-control-popover">
+          {/* View mode segmented control */}
+          <div className="view-mode-control">
+            <button
+              className={`view-mode-btn ${viewMode === 'map' ? 'active' : ''}`}
+              onClick={() => setViewMode('map')}
+              title="Map view"
+            >
+              <Map size={14} />
+              <span>Map</span>
+            </button>
+            <button
+              className={`view-mode-btn ${viewMode === 'satellite' ? 'active' : ''}`}
+              onClick={() => setViewMode('satellite')}
+              title="Satellite view"
+            >
+              <Satellite size={14} />
+              <span>Satellite</span>
+            </button>
+            <button
+              className={`view-mode-btn ${viewMode === 'hybrid' ? 'active' : ''}`}
+              onClick={() => setViewMode('hybrid')}
+              title="Hybrid view"
+            >
+              <Globe size={14} />
+              <span>Hybrid</span>
+            </button>
+          </div>
+          
           <div className="layer-control-header">Layers</div>
 
           {showHillshade && (

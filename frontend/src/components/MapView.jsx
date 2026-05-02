@@ -65,6 +65,8 @@ const BLM_ROUTES_SNOW = 'blm-routes-snow'
 const BLM_ROUTES_OTHER = 'blm-routes-other'
 const BLM_ROUTES_LABEL = 'blm-routes-label'
 const BLM_ROUTES_HIT = 'blm-routes-hit'
+const SATELLITE_SOURCE = 'satellite-source'
+const SATELLITE_LAYER = 'satellite-layer'
 
 
 // Highlight state - use data-driven expressions to target specific features
@@ -1251,6 +1253,154 @@ function removeBlmTrails(map) {
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SATELLITE IMAGERY
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Add satellite raster source (called once on map load) */
+function addSatelliteSource(map) {
+  if (!map || map.getSource(SATELLITE_SOURCE)) return
+  map.addSource(SATELLITE_SOURCE, {
+    type: 'raster',
+    tiles: ['/tiles/satellite/{z}/{x}/{y}'],
+    tileSize: 256,
+    maxzoom: 18,
+    attribution: '© Esri',
+  })
+}
+
+/** Add satellite raster layer with theme-specific styling */
+function addSatelliteLayer(map, themeId) {
+  if (!map) return
+  if (map.getLayer(SATELLITE_LAYER)) return
+  if (!map.getSource(SATELLITE_SOURCE)) {
+    addSatelliteSource(map)
+  }
+  
+  const theme = getTheme(themeId)
+  const sat = theme.satellite || {}
+  
+  // Find the first layer to insert below (we want satellite at the bottom)
+  const layers = map.getStyle().layers
+  let firstLayerId = layers.length > 0 ? layers[0].id : undefined
+  
+  map.addLayer({
+    id: SATELLITE_LAYER,
+    type: 'raster',
+    source: SATELLITE_SOURCE,
+    paint: {
+      'raster-opacity': sat.opacity ?? 1.0,
+      'raster-brightness-min': sat.brightnessMin ?? 0.0,
+      'raster-brightness-max': sat.brightnessMax ?? 1.0,
+      'raster-contrast': sat.contrast ?? 0.0,
+      'raster-saturation': sat.saturation ?? 0.0,
+      'raster-hue-rotate': sat.hueRotate ?? 0,
+    },
+  }, firstLayerId)
+}
+
+/** Remove satellite raster layer */
+function removeSatelliteLayer(map) {
+  if (!map) return
+  if (map.getLayer(SATELLITE_LAYER)) {
+    map.removeLayer(SATELLITE_LAYER)
+  }
+}
+
+/** Update satellite layer paint properties for current theme */
+function updateSatellitePaint(map, themeId) {
+  if (!map || !map.getLayer(SATELLITE_LAYER)) return
+  
+  const theme = getTheme(themeId)
+  const sat = theme.satellite || {}
+  
+  map.setPaintProperty(SATELLITE_LAYER, 'raster-opacity', sat.opacity ?? 1.0)
+  map.setPaintProperty(SATELLITE_LAYER, 'raster-brightness-min', sat.brightnessMin ?? 0.0)
+  map.setPaintProperty(SATELLITE_LAYER, 'raster-brightness-max', sat.brightnessMax ?? 1.0)
+  map.setPaintProperty(SATELLITE_LAYER, 'raster-contrast', sat.contrast ?? 0.0)
+  map.setPaintProperty(SATELLITE_LAYER, 'raster-saturation', sat.saturation ?? 0.0)
+  map.setPaintProperty(SATELLITE_LAYER, 'raster-hue-rotate', sat.hueRotate ?? 0)
+}
+
+// Track which vector layers are hidden in satellite/hybrid mode
+let hiddenVectorLayers = []
+
+/** Hide vector fill layers for satellite mode */
+function hideVectorFills(map) {
+  if (!map) return
+  hiddenVectorLayers = []
+  
+  const style = map.getStyle()
+  if (!style || !style.layers) return
+  
+  for (const layer of style.layers) {
+    // Hide fill layers (land, water, parks, buildings, etc.)
+    // But keep line, symbol, and circle layers
+    if (layer.type === 'fill' || layer.type === 'fill-extrusion') {
+      // Don't hide our own overlay fills (public lands, etc)
+      if (layer.id.startsWith('public-lands') || 
+          layer.id.startsWith('boundary') ||
+          layer.id.startsWith('route')) continue
+      
+      const visibility = map.getLayoutProperty(layer.id, 'visibility')
+      if (visibility !== 'none') {
+        hiddenVectorLayers.push(layer.id)
+        map.setLayoutProperty(layer.id, 'visibility', 'none')
+      }
+    }
+  }
+}
+
+/** Show all hidden vector layers */
+function showVectorFills(map) {
+  if (!map) return
+  
+  for (const layerId of hiddenVectorLayers) {
+    if (map.getLayer(layerId)) {
+      map.setLayoutProperty(layerId, 'visibility', 'visible')
+    }
+  }
+  hiddenVectorLayers = []
+}
+
+/** Set map to satellite-only mode */
+function setSatelliteMode(map, themeId) {
+  if (!map) return
+  addSatelliteLayer(map, themeId)
+  hideVectorFills(map)
+  // Also hide line layers in pure satellite mode (keep only labels for reference)
+  const style = map.getStyle()
+  if (style && style.layers) {
+    for (const layer of style.layers) {
+      if (layer.type === 'line' && !layer.id.startsWith('route') && 
+          !layer.id.startsWith('boundary') && !layer.id.startsWith('measure')) {
+        const visibility = map.getLayoutProperty(layer.id, 'visibility')
+        if (visibility !== 'none') {
+          hiddenVectorLayers.push(layer.id)
+          map.setLayoutProperty(layer.id, 'visibility', 'none')
+        }
+      }
+    }
+  }
+}
+
+/** Set map to hybrid mode (satellite + labels/roads) */
+function setHybridMode(map, themeId) {
+  if (!map) return
+  addSatelliteLayer(map, themeId)
+  hideVectorFills(map)
+  // In hybrid mode, keep road lines and labels visible
+  // They're already visible by default, just fills are hidden
+}
+
+/** Set map back to normal map mode */
+function setMapMode(map) {
+  if (!map) return
+  removeSatelliteLayer(map)
+  showVectorFills(map)
+}
+
+
 /** Add boundary polygon layers with computed accent color (MapLibre rejects CSS vars in paint) */
 const BOUNDARY_FILL_LAYER = 'boundary-fill-layer'
 
@@ -1780,6 +1930,26 @@ const MapView = forwardRef(function MapView(_, ref) {
       activeLayersRef.current.blmTrails = false
     },
 
+    // View mode functions
+    setViewMode(mode) {
+      const map = mapInstance.current
+      if (!map) return
+      
+      if (mode === 'satellite') {
+        setSatelliteMode(map, currentThemeRef.current)
+      } else if (mode === 'hybrid') {
+        setHybridMode(map, currentThemeRef.current)
+      } else {
+        setMapMode(map)
+      }
+    },
+    
+    updateSatelliteTheme() {
+      const map = mapInstance.current
+      if (!map) return
+      updateSatellitePaint(map, currentThemeRef.current)
+    },
+
   }))
 
   // Initialize map
@@ -2122,6 +2292,17 @@ const MapView = forwardRef(function MapView(_, ref) {
     })
 
     map.on('load', () => {
+      // Add satellite source (persists across view modes)
+      addSatelliteSource(map)
+      
+      // Restore view mode from localStorage
+      const savedViewMode = localStorage.getItem('navi-view-mode') || 'map'
+      if (savedViewMode === 'satellite') {
+        setSatelliteMode(map, currentThemeRef.current)
+      } else if (savedViewMode === 'hybrid') {
+        setHybridMode(map, currentThemeRef.current)
+      }
+      
       // Guard against double-mount in React strict mode
       if (!map.getSource(ROUTE_SOURCE)) {
         map.addSource(ROUTE_SOURCE, {
@@ -2356,6 +2537,15 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (activeLayersRef.current.contoursTest10ft) addContoursTest10ft(map, currentThemeRef.current)
       if (activeLayersRef.current.usfsTrails) addUsfsTrails(map, currentThemeRef.current)
       if (activeLayersRef.current.blmTrails) addBlmTrails(map, currentThemeRef.current)
+
+      // Re-add satellite source and restore view mode
+      addSatelliteSource(map)
+      const savedViewMode = localStorage.getItem('navi-view-mode') || 'map'
+      if (savedViewMode === 'satellite') {
+        setSatelliteMode(map, currentThemeRef.current)
+      } else if (savedViewMode === 'hybrid') {
+        setHybridMode(map, currentThemeRef.current)
+      }
 
       // Clear highlights on theme change (paint values will be re-stored on next interaction)
       clearAllHighlights(map)
