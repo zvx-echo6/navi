@@ -280,9 +280,9 @@ function applyBaseLabelStyling(map) {
       // Use coalesce to fall back to ref (e.g., "CA") then name (e.g., "California")
       map.setLayoutProperty('places_region', 'text-field', [
         'coalesce',
-        ['get', 'name:short'],
+        ['get', 'name'],
         ['get', 'ref'],
-        ['get', 'name']
+        ['get', 'name:short']
       ])
     }
   } catch (e) {
