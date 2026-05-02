@@ -1323,81 +1323,113 @@ function updateSatellitePaint(map, themeId) {
 }
 
 // Track which vector layers are hidden in satellite/hybrid mode
-let hiddenVectorLayers = []
+// Track hidden layers for each mode - separate arrays for proper restoration
+let hiddenFillLayers = []
+let hiddenLineLayers = []
+let hiddenSymbolLayers = []
 
-/** Hide vector fill layers for satellite mode */
-function hideVectorFills(map) {
-  if (!map) return
-  hiddenVectorLayers = []
-  
-  const style = map.getStyle()
-  if (!style || !style.layers) return
-  
-  for (const layer of style.layers) {
-    // Hide fill and background layers (land, water, parks, buildings, etc.)
-    // But keep line, symbol, and circle layers
-    if (layer.type === 'fill' || layer.type === 'fill-extrusion' || layer.type === 'background') {
-      // Don't hide our own overlay fills (public lands, etc)
-      if (layer.id.startsWith('public-lands') || 
-          layer.id.startsWith('boundary') ||
-          layer.id.startsWith('route')) continue
-      
-      const visibility = map.getLayoutProperty(layer.id, 'visibility')
-      if (visibility !== 'none') {
-        hiddenVectorLayers.push(layer.id)
-        map.setLayoutProperty(layer.id, 'visibility', 'none')
-      }
-    }
+// Layers we never hide (our own overlays)
+function isProtectedLayer(id) {
+  return id.startsWith('public-lands') ||
+         id.startsWith('boundary') ||
+         id.startsWith('route') ||
+         id.startsWith('measure') ||
+         id.startsWith('contour') ||
+         id.startsWith('usfs') ||
+         id.startsWith('blm') ||
+         id.startsWith('hillshade') ||
+         id.startsWith('traffic') ||
+         id === SATELLITE_LAYER
+}
+
+/** Hide a layer and track it */
+function hideLayer(map, layerId, trackingArray) {
+  if (!map.getLayer(layerId)) return
+  const vis = map.getLayoutProperty(layerId, 'visibility')
+  if (vis !== 'none') {
+    trackingArray.push(layerId)
+    map.setLayoutProperty(layerId, 'visibility', 'none')
   }
 }
 
-/** Show all hidden vector layers */
-function showVectorFills(map) {
-  if (!map) return
-  
-  for (const layerId of hiddenVectorLayers) {
-    if (map.getLayer(layerId)) {
-      map.setLayoutProperty(layerId, 'visibility', 'visible')
+/** Show all layers in a tracking array */
+function showLayers(map, trackingArray) {
+  for (const id of trackingArray) {
+    if (map.getLayer(id)) {
+      map.setLayoutProperty(id, 'visibility', 'visible')
     }
   }
-  hiddenVectorLayers = []
+  trackingArray.length = 0
 }
 
-/** Set map to satellite-only mode */
+/** Set map to satellite-only mode - hide ALL vector layers except our overlays */
 function setSatelliteMode(map, themeId) {
   if (!map) return
+  
+  // First restore any previously hidden layers to clean slate
+  showLayers(map, hiddenFillLayers)
+  showLayers(map, hiddenLineLayers)
+  showLayers(map, hiddenSymbolLayers)
+  
   addSatelliteLayer(map, themeId)
-  hideVectorFills(map)
-  // Also hide line layers in pure satellite mode (keep only labels for reference)
+  
   const style = map.getStyle()
-  if (style && style.layers) {
-    for (const layer of style.layers) {
-      if (layer.type === 'line' && !layer.id.startsWith('route') && 
-          !layer.id.startsWith('boundary') && !layer.id.startsWith('measure')) {
-        const visibility = map.getLayoutProperty(layer.id, 'visibility')
-        if (visibility !== 'none') {
-          hiddenVectorLayers.push(layer.id)
-          map.setLayoutProperty(layer.id, 'visibility', 'none')
-        }
-      }
+  if (!style?.layers) return
+  
+  for (const layer of style.layers) {
+    if (isProtectedLayer(layer.id)) continue
+    
+    if (layer.type === 'fill' || layer.type === 'fill-extrusion' || layer.type === 'background') {
+      hideLayer(map, layer.id, hiddenFillLayers)
+    } else if (layer.type === 'line') {
+      hideLayer(map, layer.id, hiddenLineLayers)
+    } else if (layer.type === 'symbol') {
+      hideLayer(map, layer.id, hiddenSymbolLayers)
     }
   }
+  
+  console.log('[Satellite] Hidden:', hiddenFillLayers.length, 'fills,', hiddenLineLayers.length, 'lines,', hiddenSymbolLayers.length, 'symbols')
 }
 
-/** Set map to hybrid mode (satellite + labels/roads) */
+/** Set map to hybrid mode - satellite + roads + labels */
 function setHybridMode(map, themeId) {
   if (!map) return
+  
+  // First restore any previously hidden layers to clean slate
+  showLayers(map, hiddenFillLayers)
+  showLayers(map, hiddenLineLayers)
+  showLayers(map, hiddenSymbolLayers)
+  
   addSatelliteLayer(map, themeId)
-  hideVectorFills(map)
-  // In hybrid mode, keep road lines and labels visible
-  // They're already visible by default, just fills are hidden
+  
+  const style = map.getStyle()
+  if (!style?.layers) return
+  
+  // In hybrid: hide fills/background, keep lines and symbols visible
+  for (const layer of style.layers) {
+    if (isProtectedLayer(layer.id)) continue
+    
+    if (layer.type === 'fill' || layer.type === 'fill-extrusion' || layer.type === 'background') {
+      hideLayer(map, layer.id, hiddenFillLayers)
+    }
+    // Lines and symbols stay visible for hybrid mode
+  }
+  
+  console.log('[Hybrid] Hidden:', hiddenFillLayers.length, 'fills, keeping lines and symbols visible')
 }
 
 /** Set map back to normal map mode */
 function setMapMode(map) {
   if (!map) return
+  
   removeSatelliteLayer(map)
-  showVectorFills(map)
+  
+  // Restore all hidden layers
+  showLayers(map, hiddenFillLayers)
+  showLayers(map, hiddenLineLayers)
+  showLayers(map, hiddenSymbolLayers)
+  
+  console.log('[Map] Restored all vector layers')
 }
 
 
