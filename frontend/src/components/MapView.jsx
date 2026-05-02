@@ -2233,6 +2233,25 @@ const MapView = forwardRef(function MapView(_, ref) {
             featureLat = geom.coordinates[1]
           }
 
+          // FIX A: For park-type features, also query polygon layers to get boundary geometry
+          const parkKinds = ['national_park', 'park', 'cemetery', 'protected_area', 'nature_reserve', 'forest', 'golf_course', 'wood', 'zoo', 'garden']
+          let polygonGeometry = null
+          if (parkKinds.includes(props.kind)) {
+            // Query fill layers at the same point to find the polygon
+            const fillLayers = ['landuse_park', 'landuse_other'].filter(id => map.getLayer(id))
+            if (fillLayers.length > 0) {
+              const fillFeatures = map.queryRenderedFeatures(e.point, { layers: fillLayers })
+              // Find a polygon feature with matching name or at the same location
+              const matchingPolygon = fillFeatures.find(f => 
+                f.properties?.name === props.name || 
+                (f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon')
+              )
+              if (matchingPolygon?.geometry) {
+                polygonGeometry = matchingPolygon.geometry
+              }
+            }
+          }
+
           // Apply feature state highlight
           const featureId = labelFeature.id ?? props.mvt_id
           const sourceLayer = labelFeature.sourceLayer
@@ -2250,6 +2269,11 @@ const MapView = forwardRef(function MapView(_, ref) {
 
           // For feature clicks, don't show pin marker
           store.clearClickMarker()
+
+          // If we found polygon geometry from the fill layer, use it as boundary directly
+          if (polygonGeometry && updateBoundaryRef.current) {
+            updateBoundaryRef.current(polygonGeometry)
+          }
 
           store.setSelectedPlace({
             lat: featureLat,
@@ -2269,6 +2293,7 @@ const MapView = forwardRef(function MapView(_, ref) {
               kind: props.kind || null,
               kind_detail: props.kind_detail || null,
               elevation: props.elevation || null,
+              polygonGeometry: polygonGeometry || null,  // Store polygon if found
             },
           })
         } else {
@@ -2421,19 +2446,9 @@ const MapView = forwardRef(function MapView(_, ref) {
               // Validate bounds before fitting
               if (minLng >= -180 && maxLng <= 180 && minLat >= -90 && maxLat <= 90 &&
                   minLng < maxLng && minLat < maxLat) {
+                // FIX B: ALWAYS fitBounds when boundary exists - zoom in OR out
+                // The boundary defines what the user should see
                 const bounds = [[minLng, minLat], [maxLng, maxLat]]
-                const currentZoom = map.getZoom()
-                const target = map.cameraForBounds(bounds, { padding: 50 })
-                
-                // Zoom-in only: allow zoom in to show boundary, never zoom out
-                // - target.zoom > currentZoom → zoom IN to fit (always allowed)
-                // - target.zoom < currentZoom → DON'T zoom out (skip fitBounds)
-                // - target.zoom == currentZoom → pan only (allowed)
-                if (!target || target.zoom < currentZoom) {
-                  // Would zoom out — just draw the boundary without moving camera
-                  return
-                }
-                
                 map.fitBounds(bounds, {
                   padding: 50,
                   duration: 700,
@@ -2638,14 +2653,17 @@ const MapView = forwardRef(function MapView(_, ref) {
     } else {
       lastFlyTargetRef.current = placeKey
       
-      // Only fly to place if it came from search (not map-click which already centered)
+      // FIX B: Camera behavior depends on source and whether boundary exists
+      // - map_click / basemap_label: NO camera movement (boundary fitBounds handles it if exists)
+      // - search results: fly to center, but DON'T change zoom (user chose their zoom)
       if (selectedPlace.source !== 'map_click' && selectedPlace.source !== 'basemap_label') {
-        // Only fly IN if below z14. At z14+ do nothing.
+        // Search result - fly to center without changing zoom
+        // Note: if this place has a boundary, the boundary fitBounds will zoom appropriately
         const currentZoom = map.getZoom()
-        if (currentZoom < 14) {
-          map.flyTo({ center: [selectedPlace.lon, selectedPlace.lat], zoom: 14, duration: 800 })
-        }
+        map.flyTo({ center: [selectedPlace.lon, selectedPlace.lat], zoom: currentZoom, duration: 800 })
       }
+      // For map_click and basemap_label: do nothing to camera
+      // The boundary fitBounds will handle zooming if a boundary is fetched
     }
 
     // Different visual feedback based on mode
