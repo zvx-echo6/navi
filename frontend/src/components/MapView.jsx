@@ -38,16 +38,6 @@ const PUBLIC_LANDS_LABEL = 'public-lands-label'
 const CONTOUR_SOURCE = 'contour-source'
 const CONTOUR_LINE = 'contour-lines'
 const CONTOUR_LABEL = 'contour-labels'
-const CONTOUR_TEST_SOURCE = 'contour-test-tiles'
-const CONTOUR_TEST_MINOR = 'contour-test-minor'
-const CONTOUR_TEST_INTERMEDIATE = 'contour-test-intermediate'
-const CONTOUR_TEST_INDEX = 'contour-test-index'
-const CONTOUR_TEST_LABEL = 'contour-test-label'
-const CONTOUR_TEST_10FT_SOURCE = 'contour-test-10ft-tiles'
-const CONTOUR_TEST_10FT_MINOR = 'contour-test-10ft-minor'
-const CONTOUR_TEST_10FT_INTERMEDIATE = 'contour-test-10ft-intermediate'
-const CONTOUR_TEST_10FT_INDEX = 'contour-test-10ft-index'
-const CONTOUR_TEST_10FT_LABEL = 'contour-test-10ft-label'
 const MEASURE_SOURCE = 'measure-source'
 const MEASURE_LINE_LAYER = 'measure-line-layer'
 const MEASURE_POINT_LAYER = 'measure-point-layer'
@@ -641,207 +631,6 @@ function removeContours(map) {
   if (map.getSource(CONTOUR_SOURCE)) map.removeSource(CONTOUR_SOURCE)
 }
 
-/** Add TEST topographic contour overlay (blue color scheme) */
-function addContoursTest(map, themeId) {
-  if (!map || map.getSource(CONTOUR_TEST_SOURCE)) return
-
-  const c = getOverlayConfig(themeId, 'contoursTest')
-
-  map.addSource(CONTOUR_TEST_SOURCE, {
-    type: "vector",
-    url: "pmtiles:///tiles/contours-test.pmtiles",
-  })
-
-  let beforeId = undefined
-  for (const layer of map.getStyle().layers) {
-    if (layer.type === "symbol") {
-      beforeId = layer.id
-      break
-    }
-  }
-
-  // Minor contours (40ft) — blue scheme
-  map.addLayer({
-    id: CONTOUR_TEST_MINOR,
-    type: "line",
-    source: CONTOUR_TEST_SOURCE,
-    "source-layer": "contours",
-    minzoom: 11,
-    filter: ["==", ["get", "tier"], "minor"],
-    paint: {
-      "line-color": c.minorColor,
-      "line-opacity": c.minorOpacity * c.opacityMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 11, c.minorWidth.z11, 14, c.minorWidth.z14],
-    },
-  }, beforeId)
-
-  // Intermediate contours (200ft)
-  map.addLayer({
-    id: CONTOUR_TEST_INTERMEDIATE,
-    type: "line",
-    source: CONTOUR_TEST_SOURCE,
-    "source-layer": "contours",
-    minzoom: 8,
-    filter: ["==", ["get", "tier"], "intermediate"],
-    paint: {
-      "line-color": c.intermediateColor,
-      "line-opacity": c.intermediateOpacity * c.opacityMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 8, c.intermediateWidth.z8, 14, c.intermediateWidth.z14],
-    },
-  }, beforeId)
-
-  // Index contours (1000ft)
-  map.addLayer({
-    id: CONTOUR_TEST_INDEX,
-    type: "line",
-    source: CONTOUR_TEST_SOURCE,
-    "source-layer": "contours",
-    minzoom: 4,
-    filter: ["==", ["get", "tier"], "index"],
-    paint: {
-      "line-color": c.indexColor,
-      "line-opacity": c.indexOpacity * c.opacityMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 4, c.indexWidth.z4, 14, c.indexWidth.z14],
-    },
-  }, beforeId)
-
-  // Labels
-  map.addLayer({
-    id: CONTOUR_TEST_LABEL,
-    type: "symbol",
-    source: CONTOUR_TEST_SOURCE,
-    "source-layer": "contours",
-    minzoom: 12,
-    filter: ["==", ["get", "tier"], "index"],
-    layout: {
-      "text-field": ["concat", ["to-string", ["get", "elevation_ft"]], ""],
-      "text-size": c.labelSize,
-      "text-font": c.labelFont,
-      "symbol-placement": "line",
-      "text-anchor": "center",
-      "symbol-spacing": 400,
-      "text-max-angle": 30,
-      "text-allow-overlap": false,
-    },
-    paint: {
-      "text-color": c.labelColor,
-      "text-halo-color": c.labelHaloColor,
-      "text-halo-width": c.labelHaloWidth,
-      "text-opacity": c.labelOpacity,
-    },
-  })
-}
-
-/** Remove TEST contour layers + source */
-function removeContoursTest(map) {
-  if (!map) return
-  if (map.getLayer(CONTOUR_TEST_LABEL)) map.removeLayer(CONTOUR_TEST_LABEL)
-  if (map.getLayer(CONTOUR_TEST_INDEX)) map.removeLayer(CONTOUR_TEST_INDEX)
-  if (map.getLayer(CONTOUR_TEST_INTERMEDIATE)) map.removeLayer(CONTOUR_TEST_INTERMEDIATE)
-  if (map.getLayer(CONTOUR_TEST_MINOR)) map.removeLayer(CONTOUR_TEST_MINOR)
-  if (map.getSource(CONTOUR_TEST_SOURCE)) map.removeSource(CONTOUR_TEST_SOURCE)
-}
-
-/** Add TEST 10ft topographic contour overlay (green color scheme) */
-function addContoursTest10ft(map, themeId) {
-  if (!map || map.getSource(CONTOUR_TEST_10FT_SOURCE)) return
-
-  const c = getOverlayConfig(themeId, 'contoursTest10ft')
-
-  map.addSource(CONTOUR_TEST_10FT_SOURCE, {
-    type: "vector",
-    url: "pmtiles:///tiles/contours-test-10ft.pmtiles",
-  })
-
-  let beforeId = undefined
-  for (const layer of map.getStyle().layers) {
-    if (layer.type === "symbol") {
-      beforeId = layer.id
-      break
-    }
-  }
-
-  // Minor contours (10ft) — green scheme
-  map.addLayer({
-    id: CONTOUR_TEST_10FT_MINOR,
-    type: "line",
-    source: CONTOUR_TEST_10FT_SOURCE,
-    "source-layer": "contours",
-    minzoom: 11,
-    filter: ["==", ["get", "tier"], "minor"],
-    paint: {
-      "line-color": c.minorColor,
-      "line-opacity": c.minorOpacity * c.opacityMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 11, c.minorWidth.z11, 14, c.minorWidth.z14],
-    },
-  }, beforeId)
-
-  // Intermediate contours (50ft) — green scheme
-  map.addLayer({
-    id: CONTOUR_TEST_10FT_INTERMEDIATE,
-    type: "line",
-    source: CONTOUR_TEST_10FT_SOURCE,
-    "source-layer": "contours",
-    minzoom: 8,
-    filter: ["==", ["get", "tier"], "intermediate"],
-    paint: {
-      "line-color": c.intermediateColor,
-      "line-opacity": c.intermediateOpacity * c.opacityMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 8, c.intermediateWidth.z8, 14, c.intermediateWidth.z14],
-    },
-  }, beforeId)
-
-  // Index contours (250ft) — darker green
-  map.addLayer({
-    id: CONTOUR_TEST_10FT_INDEX,
-    type: "line",
-    source: CONTOUR_TEST_10FT_SOURCE,
-    "source-layer": "contours",
-    minzoom: 4,
-    filter: ["==", ["get", "tier"], "index"],
-    paint: {
-      "line-color": c.indexColor,
-      "line-opacity": c.indexOpacity * c.opacityMod,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 4, c.indexWidth.z4, 14, c.indexWidth.z14],
-    },
-  }, beforeId)
-
-  // Elevation labels on index contours (z12+)
-  map.addLayer({
-    id: CONTOUR_TEST_10FT_LABEL,
-    type: "symbol",
-    source: CONTOUR_TEST_10FT_SOURCE,
-    "source-layer": "contours",
-    minzoom: 12,
-    filter: ["==", ["get", "tier"], "index"],
-    layout: {
-      "text-field": ["concat", ["to-string", ["get", "elevation_ft"]], "'"],
-      "text-size": c.labelSize,
-      "text-font": c.labelFont,
-      "symbol-placement": "line",
-      "text-anchor": "center",
-      "symbol-spacing": 400,
-      "text-max-angle": 30,
-      "text-allow-overlap": false,
-    },
-    paint: {
-      "text-color": c.labelColor,
-      "text-halo-color": c.labelHaloColor,
-      "text-halo-width": c.labelHaloWidth,
-      "text-opacity": c.labelOpacity,
-    },
-  })
-}
-
-/** Remove test 10ft contour layers + source */
-function removeContoursTest10ft(map) {
-  if (!map) return
-  if (map.getLayer(CONTOUR_TEST_10FT_LABEL)) map.removeLayer(CONTOUR_TEST_10FT_LABEL)
-  if (map.getLayer(CONTOUR_TEST_10FT_INDEX)) map.removeLayer(CONTOUR_TEST_10FT_INDEX)
-  if (map.getLayer(CONTOUR_TEST_10FT_INTERMEDIATE)) map.removeLayer(CONTOUR_TEST_10FT_INTERMEDIATE)
-  if (map.getLayer(CONTOUR_TEST_10FT_MINOR)) map.removeLayer(CONTOUR_TEST_10FT_MINOR)
-  if (map.getSource(CONTOUR_TEST_10FT_SOURCE)) map.removeSource(CONTOUR_TEST_10FT_SOURCE)
-}
 /** Add USFS trails and roads vector tile overlay */
 function addUsfsTrails(map, themeId) {
   if (!map || map.getSource(USFS_SOURCE)) return
@@ -1548,7 +1337,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const watchIdRef = useRef(null)
   const currentThemeRef = useRef('dark')
   // Track which overlay layers are currently active (for theme swap re-add)
-  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, contoursTest: false, contoursTest10ft: false, usfsTrails: false, blmTrails: false })
+  const activeLayersRef = useRef({ hillshade: false, traffic: false, contours: false, usfsTrails: false, blmTrails: false })
   // Flag to suppress map-click when a stop pin was clicked
   const pinClickedRef = useRef(false)
   const highlightedFeatureRef = useRef(null) // { source, sourceLayer, id } for setFeatureState
@@ -1970,30 +1759,6 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (!map) return
       removeContours(map)
       activeLayersRef.current.contours = false
-    },
-    addContoursTestLayer() {
-      const map = mapInstance.current
-      if (!map) return
-      addContoursTest(map, currentThemeRef.current)
-      activeLayersRef.current.contoursTest = true
-    },
-    removeContoursTestLayer() {
-      const map = mapInstance.current
-      if (!map) return
-      removeContoursTest(map)
-      activeLayersRef.current.contoursTest = false
-    },
-    addContoursTest10ftLayer() {
-      const map = mapInstance.current
-      if (!map) return
-      addContoursTest10ft(map, currentThemeRef.current)
-      activeLayersRef.current.contoursTest10ft = true
-    },
-    removeContoursTest10ftLayer() {
-      const map = mapInstance.current
-      if (!map) return
-      removeContoursTest10ft(map)
-      activeLayersRef.current.contoursTest10ft = false
     },
     addUsfsTrailsLayer() {
       const map = mapInstance.current
@@ -2682,8 +2447,6 @@ const MapView = forwardRef(function MapView(_, ref) {
       if (activeLayersRef.current.traffic) addTraffic(map, currentThemeRef.current)
       if (activeLayersRef.current.publicLands) addPublicLands(map, currentThemeRef.current)
       if (activeLayersRef.current.contours) addContours(map, currentThemeRef.current)
-      if (activeLayersRef.current.contoursTest) addContoursTest(map, currentThemeRef.current)
-      if (activeLayersRef.current.contoursTest10ft) addContoursTest10ft(map, currentThemeRef.current)
       if (activeLayersRef.current.usfsTrails) addUsfsTrails(map, currentThemeRef.current)
       if (activeLayersRef.current.blmTrails) addBlmTrails(map, currentThemeRef.current)
 
