@@ -10,7 +10,7 @@ const FALLBACK_CONFIG = {
   profile: 'home',
   region_name: 'North America',
   tileset: {
-    url: '/tiles/na.pmtiles',
+    url: '/tiles/planet/current.pmtiles',
     bounds: [-168, 14, -52, 72],
     max_zoom: 15,
     attribution: 'Protomaps © OSM',
@@ -30,8 +30,6 @@ const FALLBACK_CONFIG = {
     has_landclass: false,
     has_public_lands_layer: false,
     has_contours: true,
-    has_contours_test: true,
-    has_contours_test_10ft: false,
     has_address_book_write: false,
     has_usfs_trails: false,
     has_blm_trails: false,
