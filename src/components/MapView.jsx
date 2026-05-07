@@ -621,7 +621,7 @@ function addContours(map) {
       'symbol-placement': 'line',
       'text-size': ['interpolate', ['linear'], ['zoom'], 7, 9, 11, 11, 14, 13],
       'text-field': ['concat', ['number-format', ['get', 'ele'], {}], "'"],
-      'text-font': ['Noto Sans Bold'],
+      'text-font': ['Noto Sans Medium'],
       'text-max-angle': 25,
     },
     paint: {
