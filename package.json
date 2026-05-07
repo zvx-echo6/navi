@@ -10,11 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@acalcutt/maplibre-contour-pmtiles": "^0.1.2",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "lucide-react": "^1.8.0",
-    "maplibre-contour": "^0.1.0",
     "maplibre-gl": "^5.23.0",
     "opening_hours": "^3.12.0",
     "pmtiles": "^4.4.1",

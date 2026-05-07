@@ -12,7 +12,7 @@ import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star, Ruler, X }
 import RadialMenu from './RadialMenu'
 import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
-import mlcontour from 'maplibre-contour'
+import mlcontour from '@acalcutt/maplibre-contour-pmtiles'
 
 let demSourceInstance = null
 
@@ -565,19 +565,34 @@ function removePublicLands(map) {
 
 /** Add topographic contours via maplibre-contour */
 function addContours(map) {
-  console.log('[CONTOUR] addContours called, source exists:', !!map?.getSource(CONTOUR_SOURCE))
-  if (!map || map.getSource(CONTOUR_SOURCE)) return
+  console.log('[CONTOUR] addContours called, source exists:', !!map?.getSource(CONTOUR_SOURCE), 'demSource:', !!demSourceInstance)
+  if (!map || !demSourceInstance || map.getSource(CONTOUR_SOURCE)) return
+  const contourThresholds = {
+    3:  [5000, 25000],
+    4:  [2500, 10000],
+    5:  [1000, 5000],
+    6:  [1000, 5000],
+    7:  [500, 2500],
+    8:  [500, 2500],
+    9:  [250, 1000],
+    10: [200, 1000],
+    11: [200, 1000],
+    12: [100, 500],
+    13: [100, 500],
+    14: [50, 200],
+    15: [20, 100],
+  }
   map.addSource(CONTOUR_SOURCE, {
     type: 'vector',
     tiles: [demSourceInstance.contourProtocolUrl({
       multiplier: 3.28084,
-      thresholds: { 11: [200, 1000], 12: [100, 500], 13: [100, 500], 14: [50, 200] },
+      thresholds: contourThresholds,
     })],
-    maxzoom: 15,
+    maxzoom: 16,
   })
   console.log('[CONTOUR] protocol URL:', demSourceInstance.contourProtocolUrl({
     multiplier: 3.28084,
-    thresholds: { 11: [200, 1000], 12: [100, 500], 13: [100, 500], 14: [50, 200] },
+    thresholds: contourThresholds,
   }))
   console.log('[CONTOUR] source added:', !!map.getSource(CONTOUR_SOURCE))
   let beforeId = undefined
@@ -589,9 +604,13 @@ function addContours(map) {
     id: CONTOUR_LINE, type: 'line', source: CONTOUR_SOURCE,
     'source-layer': 'contours',
     paint: {
-      'line-color': isDark ? '#c0b898' : '#8b6f47',
-      'line-opacity': 0.7,
-      'line-width': ['match', ['get', 'level'], 1, 1.5, 0.5],
+      'line-color': 'rgba(0,0,0,0.35)',
+      'line-width': [
+        'interpolate', ['linear'], ['zoom'],
+        7, ['match', ['get', 'level'], 1, 1, 0.3],
+        11, ['match', ['get', 'level'], 1, 1.5, 0.6],
+        14, ['match', ['get', 'level'], 1, 2, 0.8],
+      ],
     },
   }, beforeId)
   map.addLayer({
@@ -599,13 +618,15 @@ function addContours(map) {
     'source-layer': 'contours',
     filter: ['>', ['get', 'level'], 0],
     layout: {
-      'symbol-placement': 'line', 'text-size': 10,
+      'symbol-placement': 'line',
+      'text-size': ['interpolate', ['linear'], ['zoom'], 7, 9, 11, 11, 14, 13],
       'text-field': ['concat', ['number-format', ['get', 'ele'], {}], "'"],
-      'text-font': ['Noto Sans Regular'],
+      'text-font': ['Noto Sans Bold'],
+      'text-max-angle': 25,
     },
     paint: {
-      'text-color': isDark ? '#c0b898' : '#5a4020',
-      'text-halo-color': isDark ? '#1a1a1a' : '#ffffff',
+      'text-color': 'rgba(0,0,0,0.7)',
+      'text-halo-color': 'rgba(255,255,255,0.9)',
       'text-halo-width': 1.5,
     },
   })
@@ -2026,18 +2047,22 @@ const MapView = forwardRef(function MapView(_, ref) {
     const protocol = new Protocol()
     maplibregl.addProtocol('pmtiles', protocol.tile)
 
-    // Initialize DemSource for maplibre-contour
-    if (!demSourceInstance) {
-      demSourceInstance = new mlcontour.DemSource({
-        url: `${window.location.origin}/tiles/terrain/{z}/{x}/{y}`,
-        encoding: 'terrarium',
-        maxzoom: 14,
-        worker: true,
-      })
-      demSourceInstance.setupMaplibre(maplibregl)
-    }
-
     const config = getConfig()
+
+    // Initialize DemSource for maplibre-contour (uses same PMTiles as hillshade)
+    if (!demSourceInstance) {
+      const hs = config?.tileset_hillshade
+      if (hs?.url) {
+        demSourceInstance = new mlcontour.DemSource({
+          url: `pmtiles://${window.location.origin}${hs.url}`,
+          encoding: hs.encoding || 'terrarium',
+          maxzoom: hs.max_zoom || 12,
+          worker: true,
+          cacheSize: 100,
+        })
+        demSourceInstance.setupMaplibre(maplibregl)
+      }
+    }
     const DEFAULT_CENTER = config?.defaults?.center
       ? [config.defaults.center[1], config.defaults.center[0]]  // config is [lat,lon], MapLibre wants [lon,lat]
       : [-114.6066, 42.5736]
