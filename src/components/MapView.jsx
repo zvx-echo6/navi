@@ -12,7 +12,9 @@ import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star, Ruler, X }
 import RadialMenu from './RadialMenu'
 import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
+import mlcontour from 'maplibre-contour'
 
+let demSourceInstance = null
 
 /** Check if current theme is dark based on registry */
 function isCurrentThemeDark() {
@@ -33,11 +35,9 @@ const PUBLIC_LANDS_SOURCE = 'public-lands-tiles'
 const PUBLIC_LANDS_FILL = 'public-lands-fill'
 const PUBLIC_LANDS_LINE = 'public-lands-line'
 const PUBLIC_LANDS_LABEL = 'public-lands-label'
-const CONTOUR_SOURCE = 'contour-tiles'
-const CONTOUR_MINOR = 'contour-minor'
-const CONTOUR_INTERMEDIATE = 'contour-intermediate'
-const CONTOUR_INDEX = 'contour-index'
-const CONTOUR_LABEL = 'contour-label'
+const CONTOUR_SOURCE = 'contour-source'
+const CONTOUR_LINE = 'contour-lines'
+const CONTOUR_LABEL = 'contour-labels'
 const CONTOUR_TEST_SOURCE = 'contour-test-tiles'
 const CONTOUR_TEST_MINOR = 'contour-test-minor'
 const CONTOUR_TEST_INTERMEDIATE = 'contour-test-intermediate'
@@ -563,105 +563,60 @@ function removePublicLands(map) {
   if (map.getSource(PUBLIC_LANDS_SOURCE)) map.removeSource(PUBLIC_LANDS_SOURCE)
 }
 
-/** Add topographic contour vector tile overlay */
-function addContours(map, themeId) {
+/** Add topographic contours via maplibre-contour */
+function addContours(map) {
+  console.log('[CONTOUR] addContours called, source exists:', !!map?.getSource(CONTOUR_SOURCE))
   if (!map || map.getSource(CONTOUR_SOURCE)) return
-
-  const c = getOverlayConfig(themeId, 'contours')
-
   map.addSource(CONTOUR_SOURCE, {
     type: 'vector',
-    url: 'pmtiles:///tiles/contours-na.pmtiles',
+    tiles: [demSourceInstance.contourProtocolUrl({
+      multiplier: 3.28084,
+      thresholds: { 11: [200, 1000], 12: [100, 500], 13: [100, 500], 14: [50, 200] },
+    })],
+    maxzoom: 15,
   })
-
-  // Insert below first symbol layer (above hillshade, below labels)
+  console.log('[CONTOUR] protocol URL:', demSourceInstance.contourProtocolUrl({
+    multiplier: 3.28084,
+    thresholds: { 11: [200, 1000], 12: [100, 500], 13: [100, 500], 14: [50, 200] },
+  }))
+  console.log('[CONTOUR] source added:', !!map.getSource(CONTOUR_SOURCE))
   let beforeId = undefined
   for (const layer of map.getStyle().layers) {
-    if (layer.type === 'symbol') {
-      beforeId = layer.id
-      break
-    }
+    if (layer.type === 'symbol') { beforeId = layer.id; break }
   }
-
-  // Minor contours (40ft) — visible z11+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
   map.addLayer({
-    id: CONTOUR_MINOR,
-    type: 'line',
-    source: CONTOUR_SOURCE,
+    id: CONTOUR_LINE, type: 'line', source: CONTOUR_SOURCE,
     'source-layer': 'contours',
-    minzoom: 11,
-    filter: ['==', ['get', 'tier'], 'minor'],
     paint: {
-      'line-color': c.minorColor,
-      'line-opacity': c.minorOpacity * c.opacityMod,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 11, c.minorWidth.z11, 14, c.minorWidth.z14],
+      'line-color': isDark ? '#c0b898' : '#8b6f47',
+      'line-opacity': 0.7,
+      'line-width': ['match', ['get', 'level'], 1, 1.5, 0.5],
     },
   }, beforeId)
-
-  // Intermediate contours (200ft) — visible z8+
   map.addLayer({
-    id: CONTOUR_INTERMEDIATE,
-    type: 'line',
-    source: CONTOUR_SOURCE,
+    id: CONTOUR_LABEL, type: 'symbol', source: CONTOUR_SOURCE,
     'source-layer': 'contours',
-    minzoom: 8,
-    filter: ['==', ['get', 'tier'], 'intermediate'],
-    paint: {
-      'line-color': c.intermediateColor,
-      'line-opacity': c.intermediateOpacity * c.opacityMod,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 8, c.intermediateWidth.z8, 14, c.intermediateWidth.z14],
-    },
-  }, beforeId)
-
-  // Index contours (1000ft) — visible z4+
-  map.addLayer({
-    id: CONTOUR_INDEX,
-    type: 'line',
-    source: CONTOUR_SOURCE,
-    'source-layer': 'contours',
-    minzoom: 4,
-    filter: ['==', ['get', 'tier'], 'index'],
-    paint: {
-      'line-color': c.indexColor,
-      'line-opacity': c.indexOpacity * c.opacityMod,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 4, c.indexWidth.z4, 14, c.indexWidth.z14],
-    },
-  }, beforeId)
-
-  // Elevation labels on index contours (z12+)
-  map.addLayer({
-    id: CONTOUR_LABEL,
-    type: 'symbol',
-    source: CONTOUR_SOURCE,
-    'source-layer': 'contours',
-    minzoom: 12,
-    filter: ['==', ['get', 'tier'], 'index'],
+    filter: ['>', ['get', 'level'], 0],
     layout: {
-      'text-field': ['concat', ['to-string', ['get', 'elevation_ft']], "'"],
-      'text-size': c.labelSize,
-      'text-font': c.labelFont,
-      'symbol-placement': 'line',
-      'text-anchor': 'center',
-      'symbol-spacing': 400,
-      'text-max-angle': 30,
-      'text-allow-overlap': false,
+      'symbol-placement': 'line', 'text-size': 10,
+      'text-field': ['concat', ['number-format', ['get', 'ele'], {}], "'"],
+      'text-font': ['Noto Sans Regular'],
     },
     paint: {
-      'text-color': c.labelColor,
-      'text-halo-color': c.labelHaloColor,
-      'text-halo-width': c.labelHaloWidth,
-      'text-opacity': c.labelOpacity,
+      'text-color': isDark ? '#c0b898' : '#5a4020',
+      'text-halo-color': isDark ? '#1a1a1a' : '#ffffff',
+      'text-halo-width': 1.5,
     },
   })
+  console.log('[CONTOUR] layers added:', !!map.getLayer(CONTOUR_LINE), !!map.getLayer(CONTOUR_LABEL))
 }
 
 /** Remove contour layers + source */
 function removeContours(map) {
   if (!map) return
   if (map.getLayer(CONTOUR_LABEL)) map.removeLayer(CONTOUR_LABEL)
-  if (map.getLayer(CONTOUR_INDEX)) map.removeLayer(CONTOUR_INDEX)
-  if (map.getLayer(CONTOUR_INTERMEDIATE)) map.removeLayer(CONTOUR_INTERMEDIATE)
-  if (map.getLayer(CONTOUR_MINOR)) map.removeLayer(CONTOUR_MINOR)
+  if (map.getLayer(CONTOUR_LINE)) map.removeLayer(CONTOUR_LINE)
   if (map.getSource(CONTOUR_SOURCE)) map.removeSource(CONTOUR_SOURCE)
 }
 
@@ -2070,6 +2025,17 @@ const MapView = forwardRef(function MapView(_, ref) {
   useEffect(() => {
     const protocol = new Protocol()
     maplibregl.addProtocol('pmtiles', protocol.tile)
+
+    // Initialize DemSource for maplibre-contour
+    if (!demSourceInstance) {
+      demSourceInstance = new mlcontour.DemSource({
+        url: `${window.location.origin}/tiles/terrain/{z}/{x}/{y}`,
+        encoding: 'terrarium',
+        maxzoom: 14,
+        worker: true,
+      })
+      demSourceInstance.setupMaplibre(maplibregl)
+    }
 
     const config = getConfig()
     const DEFAULT_CENTER = config?.defaults?.center
