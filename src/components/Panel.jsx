@@ -9,6 +9,7 @@ import ContactList from './ContactList'
 import { PlaceCard } from './PlaceCard'
 
 const TRAVEL_MODES = [
+  { id: 'auto', label: 'Drive', Icon: Car },
   { id: 'foot', label: 'Foot', Icon: Footprints },
   { id: 'mtb', label: 'MTB', Icon: Bike },
   { id: 'atv', label: 'ATV', Icon: Car },
@@ -151,26 +152,28 @@ export default function Panel({ onClearRoute }) {
             })}
           </div>
 
-          <div className="flex gap-1 mb-3">
-            {BOUNDARY_MODES.map((m) => {
-              const active = boundaryMode === m.id
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => setBoundaryMode(m.id)}
-                  className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs rounded transition-colors"
-                  style={{
-                    background: active ? 'var(--accent-muted)' : 'var(--bg-overlay)',
-                    color: active ? 'var(--accent)' : 'var(--text-tertiary)',
-                  }}
-                  title={m.title}
-                >
-                  <m.Icon size={14} />
-                  <span className="hidden sm:inline">{m.label}</span>
-                </button>
-              )
-            })}
-          </div>
+          {routeMode !== 'auto' && (
+            <div className="flex gap-1 mb-3">
+              {BOUNDARY_MODES.map((m) => {
+                const active = boundaryMode === m.id
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => setBoundaryMode(m.id)}
+                    className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs rounded transition-colors"
+                    style={{
+                      background: active ? 'var(--accent-muted)' : 'var(--bg-overlay)',
+                      color: active ? 'var(--accent)' : 'var(--text-tertiary)',
+                    }}
+                    title={m.title}
+                  >
+                    <m.Icon size={14} />
+                    <span className="hidden sm:inline">{m.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           <ManeuverList />
         </div>

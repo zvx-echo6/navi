@@ -8,7 +8,7 @@ import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse, requestOffroute } from '../api'
 import { getConfig, hasFeature } from '../config'
-import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Star, Ruler, X, Trash2 } from 'lucide-react'
+import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Star, Ruler, X, Trash2, Plus } from 'lucide-react'
 import RadialMenu from './RadialMenu'
 import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
@@ -1669,21 +1669,10 @@ const MapView = forwardRef(function MapView(_, ref) {
           lon: radialMenu.lon,
           name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
         }
-        const { routeStart, setRouteEnd, setRouteLoading, setRouteResult, setRouteError, routeMode, boundaryMode } = useStore.getState()
+        const { routeStart, setRouteEnd, computeRoute } = useStore.getState()
         setRouteEnd(place)
         if (routeStart) {
-          setRouteLoading(true)
-          requestOffroute(routeStart, place, routeMode, boundaryMode)
-            .then((data) => {
-              if (data.status === "ok" && data.route) {
-                setRouteResult(data)
-                updateRouteDisplay(mapInstance.current, data.route)
-              } else {
-                setRouteError(data.error || "No route found")
-              }
-            })
-            .catch((e) => setRouteError(e.message))
-            .finally(() => setRouteLoading(false))
+          computeRoute()
         } else {
           toast("Set starting point first")
         }
@@ -1700,11 +1689,41 @@ const MapView = forwardRef(function MapView(_, ref) {
           lon: radialMenu.lon,
           name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
         }
-        const { clearRoute, setRouteStart } = useStore.getState()
+        const { clearRoute, setRouteStart, routeEnd, computeRoute } = useStore.getState()
         clearRoute()
         clearRouteDisplay(mapInstance.current)
         setRouteStart(place)
-        toast("Now tap destination")
+        // If we already have a destination, compute route immediately
+        if (routeEnd) {
+          computeRoute()
+        } else {
+          toast("Now tap destination")
+        }
+      },
+    },
+    {
+      id: "add-stop",
+      label: "Add stop",
+      icon: Plus,
+      onSelect: () => {
+        setRadialMenu((m) => ({ ...m, open: false }))
+        const { stops, addStop } = useStore.getState()
+        const place = {
+          lat: radialMenu.lat,
+          lon: radialMenu.lon,
+          name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
+          source: "radial_menu",
+          matchCode: null,
+        }
+        if (stops.length === 0) {
+          addStop(place)
+          useStore.setState({ gpsOrigin: false })
+        } else {
+          const success = addStop(place)
+          if (!success) {
+            toast("Maximum 10 stops reached")
+          }
+        }
       },
     },
     {
@@ -2389,6 +2408,12 @@ const MapView = forwardRef(function MapView(_, ref) {
       }
       updateBoundaryRef.current = updateBoundaryFn
       useStore.getState().setUpdateBoundary(updateBoundaryFn)
+
+      // Register route display callbacks for store.computeRoute()
+      useStore.getState().setRouteDisplayCallbacks(
+        (routeGeojson) => updateRouteDisplay(map, routeGeojson),
+        () => clearRouteDisplay(map)
+      )
 
       // POI/label hover affordance — cursor pointer + highlight
       const interactiveLayers = ['pois', 'places_locality', 'places_region', 'places_country', 'places_subplace']
