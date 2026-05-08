@@ -1441,6 +1441,8 @@ const MapView = forwardRef(function MapView(_, ref) {
   const pickingLocationFor = useStore((s) => s.pickingLocationFor)
   const setEditingContact = useStore((s) => s.setEditingContact)
   const clearPickingLocationFor = useStore((s) => s.clearPickingLocationFor)
+  const directionsMode = useStore((s) => s.directionsMode)
+  const activeDirectionsField = useStore((s) => s.activeDirectionsField)
 
   // Zoom level indicator state
   const [zoomLevel, setZoomLevel] = useState(10)
@@ -1999,7 +2001,37 @@ const MapView = forwardRef(function MapView(_, ref) {
         return
       }
 
-
+      // Handle directions mode — click fills the active field
+      const { directionsMode, activeDirectionsField, setRouteStart, setRouteEnd, setActiveDirectionsField } = useStore.getState()
+      if (directionsMode && activeDirectionsField) {
+        const { lng, lat } = e.lngLat
+        // Reverse geocode for name
+        fetchReverse(lat, lng).then((place) => {
+          const name = place?.name || lat.toFixed(5) + ", " + lng.toFixed(5)
+          const location = { lat, lon: lng, name, source: "map_click" }
+          if (activeDirectionsField === "origin") {
+            setRouteStart(location)
+            setActiveDirectionsField("destination")
+          } else if (activeDirectionsField === "destination") {
+            setRouteEnd(location)
+            setActiveDirectionsField(null)
+          } else if (activeDirectionsField.startsWith("stop-")) {
+            // Handle intermediate stops - would need more logic
+            setActiveDirectionsField(null)
+          }
+        }).catch(() => {
+          const name = lat.toFixed(5) + ", " + lng.toFixed(5)
+          const location = { lat, lon: lng, name, source: "map_click" }
+          if (activeDirectionsField === "origin") {
+            setRouteStart(location)
+            setActiveDirectionsField("destination")
+          } else if (activeDirectionsField === "destination") {
+            setRouteEnd(location)
+            setActiveDirectionsField(null)
+          }
+        })
+        return
+      }
 
       const store = useStore.getState()
       const marker = store.clickMarker
@@ -2693,6 +2725,22 @@ const MapView = forwardRef(function MapView(_, ref) {
       }
     }
   }, [pickingLocationFor])
+
+  // Handle directions mode cursor
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map) return
+    if (directionsMode && activeDirectionsField) {
+      map.getCanvas().style.cursor = 'crosshair'
+    } else if (!measuringRef.current.active && !pickingLocationFor) {
+      map.getCanvas().style.cursor = ''
+    }
+    return () => {
+      if (map && !measuringRef.current.active && !pickingLocationFor) {
+        map.getCanvas().style.cursor = ''
+      }
+    }
+  }, [directionsMode, activeDirectionsField])
 
   // ESC key handler for location pick mode
   useEffect(() => {

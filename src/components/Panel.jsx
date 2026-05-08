@@ -7,6 +7,7 @@ import SearchBar from './SearchBar'
 import ManeuverList from './ManeuverList'
 import ContactList from './ContactList'
 import { PlaceCard } from './PlaceCard'
+import DirectionsPanel from './DirectionsPanel'
 
 const TRAVEL_MODES = [
   { id: 'auto', label: 'Drive', Icon: Car },
@@ -39,6 +40,8 @@ export default function Panel({ onClearRoute }) {
   const activeTab = useStore((s) => s.activeTab)
   const auth = useStore((s) => s.auth)
   const setActiveTab = useStore((s) => s.setActiveTab)
+  const directionsMode = useStore((s) => s.directionsMode)
+  const setDirectionsMode = useStore((s) => s.setDirectionsMode)
 
   const panelState = usePanelState()
 
@@ -86,7 +89,12 @@ export default function Panel({ onClearRoute }) {
   const showRouteSection = hasRoutePoints || routeResult || routeLoading
   const showEmptyState = panelState === 'IDLE' && !hasRoutePoints
 
-  const routesContent = (
+  const routesContent = directionsMode ? (
+    <DirectionsPanel onClose={() => {
+      setDirectionsMode(false)
+      onClearRoute?.()
+    }} />
+  ) : (
     <>
       <SearchBar />
 
