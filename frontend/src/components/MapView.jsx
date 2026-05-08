@@ -2199,12 +2199,16 @@ const MapView = forwardRef(function MapView(_, ref) {
           const props = labelFeature.properties
           const geom = labelFeature.geometry
 
-          // Get feature coordinates (Point geometry)
-          let featureLat = lat
-          let featureLon = lng
+          // CRITICAL: Always use CLICK coordinates for routing (lat, lng from e.lngLat)
+          // Feature coordinates are only for display/fetching details
+          let featureLat = lat    // Click coordinate - used for routing
+          let featureLon = lng    // Click coordinate - used for routing
+          let displayLat = lat    // May be updated to feature coords for display
+          let displayLon = lng
           if (geom && geom.type === 'Point' && geom.coordinates) {
-            featureLon = geom.coordinates[0]
-            featureLat = geom.coordinates[1]
+            // Store feature's canonical coords separately - NOT for routing
+            displayLon = geom.coordinates[0]
+            displayLat = geom.coordinates[1]
           }
 
           // FIX A: For park-type features, also query polygon layers to get boundary geometry
