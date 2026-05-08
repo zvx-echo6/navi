@@ -12,27 +12,6 @@ export const useStore = create((set, get) => ({
   setSearchLoading: (loading) => set({ searchLoading: loading }),
   setAbortController: (ctrl) => set({ abortController: ctrl }),
 
-  // ── Stop list ──
-  stops: [],
-  // Each stop: { id, lat, lon, name, source, matchCode, isOrigin }
-
-  addStop: (stop) => {
-    const { stops } = get()
-    if (stops.length >= 10) return false
-    set({ stops: [...stops, { ...stop, id: crypto.randomUUID() }] })
-    return true
-  },
-
-  removeStop: (id) => {
-    set({ stops: get().stops.filter((s) => s.id !== id) })
-  },
-
-  reorderStops: (newStops) => set({ stops: newStops }),
-
-  clearStops: () => set({ stops: [] }),
-
-  setStops: (stops) => set({ stops }),
-
   // ── Geolocation ──
   userLocation: null, // { lat, lon }
   geoPermission: 'prompt', // 'prompt' | 'granted' | 'denied'
@@ -44,63 +23,92 @@ export const useStore = create((set, get) => ({
   mapCenter: null, // { lat, lon, zoom }
   setMapCenter: (center) => set({ mapCenter: center }),
 
-  // ── Mode ──
-  mode: 'auto', // 'auto' | 'pedestrian' | 'bicycle'
-  setMode: (mode) => set({ mode }),
-
-  // ── Route ──
-  route: null, // Valhalla response (trip object)
+  // ── Unified Route State ──
+  // Single routing system - all routes go through /api/offroute
+  routeStart: null, // { lat, lon, name }
+  routeEnd: null, // { lat, lon, name }
+  routeMode: "foot", // foot | mtb | atv | vehicle
+  boundaryMode: "strict", // strict | pragmatic | emergency
+  routeResult: null, // Response from /api/offroute
   routeLoading: false,
   routeError: null,
 
-  setRoute: (route) => set({ route, routeError: null }),
+  setRouteStart: (place) => set({ routeStart: place, routeResult: null, routeError: null }),
+  setRouteEnd: (place) => set({ routeEnd: place }),
+  setRouteMode: (mode) => set({ routeMode: mode }),
+  setBoundaryMode: (mode) => set({ boundaryMode: mode }),
+  setRouteResult: (result) => set({ routeResult: result, routeError: null }),
   setRouteLoading: (loading) => set({ routeLoading: loading }),
-  setRouteError: (err) => set({ routeError: err, route: null }),
-  clearRoute: () => set({ route: null, routeError: null }),
+  setRouteError: (err) => set({ routeError: err, routeResult: null }),
+  clearRoute: () => set({
+    routeStart: null,
+    routeEnd: null,
+    routeResult: null,
+    routeError: null
+  }),
 
-  // ── Place detail ──
-  selectedPlace: null, // { lat, lon, name, address, type, source, matchCode, raw, mode?, featureId?, featureLayer?, wikidata? }
-  clickMarker: null, // { lat, lon, circleRadiusPx } — visual marker for two-click selection
-  gpsOrigin: true, // whether GPS should be used as origin when available
-  pendingDestination: null, // place waiting for a starting point (GPS-denied Directions flow)
+  // ── Legacy compatibility (for components not yet migrated) ──
+  stops: [],
+  gpsOrigin: false,
+  pendingDestination: null,
+  route: null,
 
-  setSelectedPlace: (place) => set({ selectedPlace: place }),
-
-  // Boundary rendering function - set by MapView, called by PlaceCard
-  updateBoundary: null,
-  setUpdateBoundary: (fn) => set({ updateBoundary: fn }),
-  clearSelectedPlace: () => set({ selectedPlace: null, clickMarker: null }),
-  setClickMarker: (marker) => set({ clickMarker: marker }),
-  clearClickMarker: () => set({ clickMarker: null }),
+  addStop: (stop) => {
+    // Legacy: just set as route end point
+    const { routeStart, setRouteEnd } = get()
+    const place = { lat: stop.lat, lon: stop.lon, name: stop.name }
+    if (!routeStart) {
+      set({ routeStart: place, stops: [{ ...stop, id: crypto.randomUUID() }] })
+    } else {
+      setRouteEnd(place)
+      set({ stops: [...get().stops, { ...stop, id: crypto.randomUUID() }] })
+    }
+    return true
+  },
+  removeStop: (id) => {
+    const { stops } = get()
+    const newStops = stops.filter((s) => s.id !== id)
+    set({ stops: newStops })
+    if (newStops.length === 0) {
+      get().clearRoute()
+    }
+  },
+  clearStops: () => set({ stops: [], routeStart: null, routeEnd: null }),
+  setStops: (stops) => set({ stops }),
+  reorderStops: (newStops) => set({ stops: newStops }),
   setGpsOrigin: (val) => set({ gpsOrigin: val }),
   setPendingDestination: (place) => set({ pendingDestination: place }),
   clearPendingDestination: () => set({ pendingDestination: null }),
 
   startDirections: (place) => {
-    const { geoPermission, stops, addStop, clearStops } = get()
-    if (geoPermission === 'granted') {
-      clearStops()
-      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
-      set({ gpsOrigin: true, selectedPlace: null })
-    } else if (stops.length > 0) {
-      const origin = stops[0]
-      clearStops()
-      addStop({ lat: origin.lat, lon: origin.lon, name: origin.name, source: origin.source, matchCode: origin.matchCode })
-      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
-      set({ selectedPlace: null })
-    } else {
-      // GPS denied, no stops: set pendingDestination only; origin-picker will add both
-      set({ pendingDestination: place, selectedPlace: null })
-    }
+    // Legacy: set as destination
+    const { routeStart, setRouteEnd, clearRoute } = get()
+    clearRoute()
+    set({
+      routeEnd: { lat: place.lat, lon: place.lon, name: place.name },
+      stops: [{ ...place, id: crypto.randomUUID() }],
+      selectedPlace: null
+    })
   },
 
+  // ── Place detail ──
+  selectedPlace: null,
+  clickMarker: null,
+
+  setSelectedPlace: (place) => set({ selectedPlace: place }),
+  updateBoundary: null,
+  setUpdateBoundary: (fn) => set({ updateBoundary: fn }),
+  clearSelectedPlace: () => set({ selectedPlace: null, clickMarker: null }),
+  setClickMarker: (marker) => set({ clickMarker: marker }),
+  clearClickMarker: () => set({ clickMarker: null }),
+
   // ── UI state ──
-  sheetState: 'half', // 'collapsed' | 'half' | 'full'
+  sheetState: 'half',
   panelOpen: true,
   autocompleteOpen: false,
-  theme: 'dark', // 'dark' | 'light' (resolved value — what's actually applied)
-  themeOverride: null, // null | 'dark' | 'light' (manual override, persisted)
-  viewMode: (typeof localStorage !== 'undefined' && localStorage.getItem('navi-view-mode')) || 'map', // 'map' | 'satellite' | 'hybrid'
+  theme: 'dark',
+  themeOverride: null,
+  viewMode: (typeof localStorage !== 'undefined' && localStorage.getItem('navi-view-mode')) || 'map',
 
   setSheetState: (s) => set({ sheetState: s }),
   setViewMode: (mode) => {
@@ -118,6 +126,7 @@ export const useStore = create((set, get) => ({
       localStorage.removeItem('navi-theme-override')
     }
   },
+
   // ── Auth state ──
   auth: { authenticated: false, username: null, loaded: false },
   setAuth: (auth) => set({ auth: { ...auth, loaded: true } }),
@@ -125,9 +134,9 @@ export const useStore = create((set, get) => ({
   // ── Contacts ──
   contacts: [],
   contactsLoaded: false,
-  activeTab: 'routes', // 'routes' | 'contacts'
-  editingContact: null, // null=closed, {}=new, {id:N}=edit
-  pickingLocationFor: null, // form data while user picks location on map
+  activeTab: 'routes',
+  editingContact: null,
+  pickingLocationFor: null,
 
   setContacts: (c) => set({ contacts: c, contactsLoaded: true }),
   setActiveTab: (tab) => set({ activeTab: tab }),
@@ -138,18 +147,17 @@ export const useStore = create((set, get) => ({
 }))
 
 // ── Panel state selector ──
-// Returns string state, prioritizing preview to allow it alongside any route state
 export const usePanelState = () => {
   return useStore((s) => {
     const hasPreview = !!s.selectedPlace
-    const hasRoute = !!s.route
-    const hasStops = s.stops.length >= 1
+    const hasRoute = !!s.routeResult
+    const hasRoutePoints = !!s.routeStart || !!s.routeEnd
 
     if (hasPreview && hasRoute) return "PREVIEW_CALCULATED"
-    if (hasPreview && hasStops) return "PREVIEW_ROUTING"
+    if (hasPreview && hasRoutePoints) return "PREVIEW_ROUTING"
     if (hasPreview) return "PREVIEW"
     if (hasRoute) return "ROUTE_CALCULATED"
-    if (hasStops) return "ROUTING"
+    if (hasRoutePoints) return "ROUTING"
     return "IDLE"
   })
 }
