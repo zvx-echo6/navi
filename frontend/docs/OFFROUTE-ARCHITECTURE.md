@@ -394,3 +394,34 @@ This system may guide people through dangerous terrain. Design constraints:
 - GRASS GIS. `r.walk` manual. grass.osgeo.org.
 - Hoover, B. et al. (2019). CostMAP: An open-source software package for developing cost surfaces. LANL.
 - Mapterhorn project. mapterhorn.com. BSD-3.
+
+
+---
+
+## 11. On-Network Traffic Intelligence
+
+Two features that affect Valhalla segments (2–4) of the offroute chain, not the wilderness pathfinder (segment 1):
+
+### Traffic-Aware Routing
+
+- Valhalla supports time-dependent costing via traffic speed tiles
+- TomTom traffic tiles already integrated in Navi at `/api/traffic/*` (currently visual overlay only)
+- **Integration path:** configure Valhalla `traffic_tile_dir` to consume TomTom speed data so route calculations account for live congestion
+- **Effect on offroute:** segments 2–4 (trail-to-road, road-to-road, road-to-home) would route around congested corridors
+- Does NOT affect segment 1 (wilderness pathfinder)
+
+### Idaho 511 Incident Feed
+
+- Idaho 511 API provides real-time construction zones, accidents, and road closures
+- Two integration points:
+  1. **Visual layer** — display incidents on Navi map as icons/overlays
+  2. **Routing barriers** — feed active closures to Valhalla as `avoid_locations` or edge exclusions so routes avoid closed roads
+- **Implementation:** polling daemon (5–10 min interval), stores active incidents in `navi.db`, expires automatically when cleared
+- Affects both standalone Valhalla routing and offroute segments 2–4
+- **Stretch goal:** ingest other state 511 feeds for cross-state trips
+
+### Sequencing
+
+- Both features are post-offroute-core (after Phase O3)
+- Can be built in parallel — traffic routing is Valhalla config, 511 is a new ingestion daemon + map layer
+- Neither blocks wilderness pathfinder development
