@@ -173,23 +173,38 @@ export const useStore = create((set, get) => ({
   setPendingDestination: (place) => set({ pendingDestination: place }),
   clearPendingDestination: () => set({ pendingDestination: null }),
 
-  // Master startDirections - restored verbatim
+  // Master startDirections - enters directions mode with destination pre-filled
   startDirections: (place) => {
-    const { geoPermission, stops, addStop, clearStops } = get()
-    if (geoPermission === 'granted') {
-      clearStops()
-      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
-      set({ gpsOrigin: true, selectedPlace: null })
-    } else if (stops.length > 0) {
-      const origin = stops[0]
-      clearStops()
-      addStop({ lat: origin.lat, lon: origin.lon, name: origin.name, source: origin.source, matchCode: origin.matchCode })
-      addStop({ lat: place.lat, lon: place.lon, name: place.name, source: place.source, matchCode: place.matchCode })
-      set({ selectedPlace: null })
-    } else {
-      // GPS denied, no stops: set pendingDestination only; origin-picker will add both
-      set({ pendingDestination: place, selectedPlace: null })
+    const { geoPermission, userLocation, clearRoute } = get()
+    clearRoute()
+
+    // Set destination from the clicked place
+    const destination = {
+      lat: place.lat,
+      lon: place.lon,
+      name: place.name,
+      source: place.source,
+      matchCode: place.matchCode,
     }
+
+    // Set origin from GPS if available
+    let origin = null
+    if (geoPermission === 'granted' && userLocation) {
+      origin = {
+        lat: userLocation.lat,
+        lon: userLocation.lon,
+        name: 'Your location',
+        source: 'gps',
+      }
+    }
+
+    set({
+      routeEnd: destination,
+      routeStart: origin,
+      directionsMode: true,
+      activeDirectionsField: origin ? null : 'origin', // Focus origin if empty
+      selectedPlace: null,
+    })
   },
 
   // Legacy route setter (for 3+ stop Valhalla optimization)
@@ -213,6 +228,8 @@ export const useStore = create((set, get) => ({
   sheetState: 'half', // 'collapsed' | 'half' | 'full'
   panelOpen: true,
   autocompleteOpen: false,
+  directionsMode: false, // true when directions panel is active
+  activeDirectionsField: null, // 'origin' | 'destination' | 'stop-N' | null (for map click targeting)
   theme: 'dark', // 'dark' | 'light' (resolved value — what's actually applied)
   themeOverride: null, // null | 'dark' | 'light' (manual override, persisted)
   viewMode: (typeof localStorage !== 'undefined' && localStorage.getItem('navi-view-mode')) || 'map', // 'map' | 'satellite' | 'hybrid'
@@ -224,6 +241,8 @@ export const useStore = create((set, get) => ({
   },
   setPanelOpen: (open) => set({ panelOpen: open }),
   setAutocompleteOpen: (open) => set({ autocompleteOpen: open }),
+  setDirectionsMode: (mode) => set({ directionsMode: mode, activeDirectionsField: mode ? 'origin' : null }),
+  setActiveDirectionsField: (field) => set({ activeDirectionsField: field }),
   setTheme: (theme) => set({ theme }),
   setThemeOverride: (override) => {
     set({ themeOverride: override })
