@@ -6,6 +6,30 @@ import { buildAddress } from '../utils/place'
 import { searchGeocode } from '../api'
 import { hasFeature } from '../config'
 
+
+/** Parse coordinate input like "42.35, -114.30" or "42.35 -114.30" */
+function parseCoordinates(input) {
+  if (!input) return null
+  const trimmed = input.trim()
+  
+  // Pattern: lat, lon or lat lon (with optional comma)
+  // Supports: "42.35, -114.30", "42.35 -114.30", "42.35,-114.30"
+  const pattern = /^(-?\d+\.?\d*)\s*[,\s]\s*(-?\d+\.?\d*)$/
+  const match = trimmed.match(pattern)
+  
+  if (!match) return null
+  
+  const lat = parseFloat(match[1])
+  const lon = parseFloat(match[2])
+  
+  // Validate ranges
+  if (isNaN(lat) || isNaN(lon)) return null
+  if (lat < -90 || lat > 90) return null
+  if (lon < -180 || lon > 180) return null
+  
+  return { lat, lon }
+}
+
 /** Get category icon based on result type/source */
 function CategoryIcon({ result }) {
   const type = result.type || ''
@@ -67,6 +91,25 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
       if (!q.trim()) {
         setResults([])
         setAutocompleteOpen(false)
+        setSearchLoading(false)
+        return
+      }
+
+      // Check for coordinate input first
+      const coords = parseCoordinates(q)
+      if (coords) {
+        const coordResult = {
+          lat: coords.lat,
+          lon: coords.lon,
+          name: coords.lat.toFixed(5) + ", " + coords.lon.toFixed(5),
+          address: "Coordinates",
+          type: "coordinates",
+          source: "coordinates",
+          match_code: null,
+          raw: {},
+        }
+        setResults([coordResult])
+        setAutocompleteOpen(true)
         setSearchLoading(false)
         return
       }
