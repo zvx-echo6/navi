@@ -1,21 +1,21 @@
 import {
   MoveRight, MoveUpRight, MoveDownRight, CornerUpRight, CornerUpLeft,
   MoveLeft, MoveUpLeft, MoveDownLeft, CircleDot, RotateCw,
-  GitMerge, CornerRightDown, CornerRightUp, Navigation
+  GitMerge, CornerRightDown, CornerRightUp, Navigation, Mountain, Map, AlertTriangle
 } from 'lucide-react'
 import { useStore } from '../store'
 
-function formatTime(seconds) {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)} min`
-  const h = Math.floor(seconds / 3600)
-  const m = Math.round((seconds % 3600) / 60)
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
+function formatDistKm(km) {
+  const miles = km * 0.621371
+  if (miles < 0.1) return Math.round(miles * 5280) + ' ft'
+  return miles.toFixed(1) + ' mi'
 }
 
-function formatDist(miles) {
-  if (miles < 0.1) return `${Math.round(miles * 5280)} ft`
-  return `${miles.toFixed(1)} mi`
+function formatTimeMin(minutes) {
+  if (minutes < 60) return Math.round(minutes) + ' min'
+  const h = Math.floor(minutes / 60)
+  const m = Math.round(minutes % 60)
+  return m > 0 ? h + 'h ' + m + 'm' : h + 'h'
 }
 
 function ManeuverIcon({ type }) {
@@ -40,8 +40,8 @@ function ManeuverIcon({ type }) {
   }
 }
 
-export default function ManeuverList({ onManeuverClick }) {
-  const route = useStore((s) => s.route)
+export default function ManeuverList() {
+  const routeResult = useStore((s) => s.routeResult)
   const routeLoading = useStore((s) => s.routeLoading)
   const routeError = useStore((s) => s.routeError)
 
@@ -74,67 +74,91 @@ export default function ManeuverList({ onManeuverClick }) {
     )
   }
 
-  if (!route || !route.legs) return null
+  if (!routeResult?.summary) return null
 
-  const totalTime = route.summary?.time || 0
-  const totalDist = route.summary?.length || 0
-
-  const allManeuvers = []
-  let timeRemaining = totalTime
-
-  for (let legIdx = 0; legIdx < route.legs.length; legIdx++) {
-    const leg = route.legs[legIdx]
-    for (const man of leg.maneuvers || []) {
-      allManeuvers.push({ ...man, _legIndex: legIdx, timeRemaining })
-      timeRemaining -= man.time || 0
-    }
-  }
+  const summary = routeResult.summary
+  const networkFeature = routeResult.route?.features?.find(f => f.properties?.segment_type === 'network')
+  const maneuvers = networkFeature?.properties?.maneuvers || []
 
   return (
     <div className="flex flex-col">
-      {/* Route summary */}
+      {/* Total summary */}
       <div
         className="flex items-center justify-between px-3 py-2 rounded mb-2"
         style={{ background: 'var(--bg-overlay)', border: '1px solid var(--border-subtle)' }}
       >
         <span className="font-mono text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-          {formatDist(totalDist)}
+          {formatDistKm(summary.total_distance_km)}
         </span>
         <span className="font-mono text-sm" style={{ color: 'var(--text-secondary)' }}>
-          {formatTime(totalTime)}
+          {formatTimeMin(summary.total_effort_minutes)}
         </span>
       </div>
 
-      {/* Maneuver steps */}
-      <div className="flex flex-col max-h-[50vh] overflow-y-auto">
-        {allManeuvers.map((man, i) => (
-          <button
-            key={i}
-            onClick={() => {
-              if (man.begin_shape_index != null && onManeuverClick) onManeuverClick(man)
-            }}
-            className="flex items-start gap-2 px-2 py-2 text-left rounded transition-colors duration-75"
-            style={{ '--hover-bg': 'var(--bg-overlay)' }}
-            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-overlay)'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-          >
-            <span className="w-5 shrink-0 mt-0.5" style={{ color: 'var(--accent)' }}>
-              <ManeuverIcon type={man.type} />
+      {/* Segment breakdown */}
+      <div className="flex flex-col gap-1 px-2 mb-2">
+        {summary.wilderness_distance_km > 0 && (
+          <div className="flex items-center gap-2 text-sm">
+            <Mountain size={14} style={{ color: '#f97316' }} />
+            <span style={{ color: 'var(--text-secondary)' }}>Wilderness</span>
+            <span className="ml-auto font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              {formatDistKm(summary.wilderness_distance_km)} / {formatTimeMin(summary.wilderness_effort_minutes)}
             </span>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm leading-tight" style={{ color: 'var(--text-primary)' }}>
-                {man.instruction || man.verbal_pre_transition_instruction || 'Continue'}
-              </p>
-              <p className="font-mono text-[11px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
-                {formatDist(man.length || 0)}
-                {man.timeRemaining > 0 && (
-                  <span className="ml-2">{formatTime(man.timeRemaining)} left</span>
-                )}
-              </p>
-            </div>
-          </button>
-        ))}
+          </div>
+        )}
+        {summary.network_distance_km > 0 && (
+          <div className="flex items-center gap-2 text-sm">
+            <Map size={14} style={{ color: '#3b82f6' }} />
+            <span style={{ color: 'var(--text-secondary)' }}>Road/Trail</span>
+            <span className="ml-auto font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              {formatDistKm(summary.network_distance_km)} / {formatTimeMin(summary.network_duration_minutes)}
+            </span>
+          </div>
+        )}
       </div>
+
+      {/* Warnings */}
+      {(summary.barrier_crossings > 0 || summary.mvum_closed_crossings > 0) && (
+        <div className="px-2 mb-2 flex flex-col gap-1">
+          {summary.barrier_crossings > 0 && (
+            <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--status-warning)' }}>
+              <AlertTriangle size={12} />
+              <span>{summary.barrier_crossings} barrier crossing{summary.barrier_crossings > 1 ? 's' : ''}</span>
+            </div>
+          )}
+          {summary.mvum_closed_crossings > 0 && (
+            <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--status-warning)' }}>
+              <AlertTriangle size={12} />
+              <span>{summary.mvum_closed_crossings} MVUM closure{summary.mvum_closed_crossings > 1 ? 's' : ''}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Turn-by-turn directions */}
+      {maneuvers.length > 0 && (
+        <div className="flex flex-col max-h-[40vh] overflow-y-auto">
+          <div className="text-xs px-2 mb-1" style={{ color: 'var(--text-tertiary)' }}>Directions</div>
+          {maneuvers.map((man, i) => (
+            <div
+              key={i}
+              className="flex items-start gap-2 px-2 py-2 text-left"
+            >
+              <span className="w-5 shrink-0 mt-0.5" style={{ color: 'var(--accent)' }}>
+                <ManeuverIcon type={man.type} />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm leading-tight" style={{ color: 'var(--text-primary)' }}>
+                  {man.instruction}
+                </p>
+                <p className="font-mono text-[11px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                  {formatDistKm(man.distance_km)}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

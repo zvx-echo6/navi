@@ -1,37 +1,40 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
-import { LogIn, LogOut } from 'lucide-react'
+import { LogIn, LogOut, Footprints, Bike, Car, Shield, AlertTriangle, Zap, X, MapPin } from 'lucide-react'
 import ThemePicker from './ThemePicker'
 import { useStore, usePanelState } from '../store'
 import { hasFeature } from '../config'
 import SearchBar from './SearchBar'
-import StopList from './StopList'
-import ModeSelector from './ModeSelector'
 import ManeuverList from './ManeuverList'
 import ContactList from './ContactList'
 import { PlaceCard } from './PlaceCard'
-import { requestOptimizedRoute } from '../api'
 
-export default function Panel({ onManeuverClick }) {
+const TRAVEL_MODES = [
+  { id: 'foot', label: 'Foot', Icon: Footprints },
+  { id: 'mtb', label: 'MTB', Icon: Bike },
+  { id: 'atv', label: 'ATV', Icon: Car },
+  { id: 'vehicle', label: '4x4', Icon: Car },
+]
+
+const BOUNDARY_MODES = [
+  { id: 'strict', label: 'Strict', Icon: Shield, title: 'Avoid barriers' },
+  { id: 'pragmatic', label: 'Cross', Icon: AlertTriangle, title: 'Cross with penalty' },
+  { id: 'emergency', label: 'Ignore', Icon: Zap, title: 'Ignore barriers' },
+]
+
+export default function Panel({ onClearRoute }) {
   const selectedPlace = useStore((s) => s.selectedPlace)
-  const pendingDestination = useStore((s) => s.pendingDestination)
   const clearSelectedPlace = useStore((s) => s.clearSelectedPlace)
-  const clearPendingDestination = useStore((s) => s.clearPendingDestination)
-  const stops = useStore((s) => s.stops)
-  const mode = useStore((s) => s.mode)
-  const route = useStore((s) => s.route)
+  const routeStart = useStore((s) => s.routeStart)
+  const routeEnd = useStore((s) => s.routeEnd)
+  const routeMode = useStore((s) => s.routeMode)
+  const boundaryMode = useStore((s) => s.boundaryMode)
+  const routeResult = useStore((s) => s.routeResult)
   const routeLoading = useStore((s) => s.routeLoading)
-  const routeError = useStore((s) => s.routeError)
-  const setStops = useStore((s) => s.setStops)
-  const setRoute = useStore((s) => s.setRoute)
-  const setRouteError = useStore((s) => s.setRouteError)
-  const setRouteLoading = useStore((s) => s.setRouteLoading)
+  const setRouteMode = useStore((s) => s.setRouteMode)
+  const setBoundaryMode = useStore((s) => s.setBoundaryMode)
+  const clearRoute = useStore((s) => s.clearRoute)
   const sheetState = useStore((s) => s.sheetState)
   const setSheetState = useStore((s) => s.setSheetState)
-  const theme = useStore((s) => s.theme)
-  const themeOverride = useStore((s) => s.themeOverride)
-  const setThemeOverride = useStore((s) => s.setThemeOverride)
-  const gpsOrigin = useStore((s) => s.gpsOrigin)
-  const geoPermission = useStore((s) => s.geoPermission)
   const activeTab = useStore((s) => s.activeTab)
   const auth = useStore((s) => s.auth)
   const setActiveTab = useStore((s) => s.setActiveTab)
@@ -39,15 +42,12 @@ export default function Panel({ onManeuverClick }) {
   const panelState = usePanelState()
 
   const [isMobile, setIsMobile] = useState(false)
-  const [optimizing, setOptimizing] = useState(false)
   const sheetRef = useRef(null)
   const dragStartY = useRef(0)
   const dragStartState = useRef('half')
 
-  // Show contacts tab only if feature enabled AND user is authenticated
   const showContacts = hasFeature('has_contacts') && auth.authenticated
 
-  // Responsive detection
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
     check()
@@ -55,61 +55,9 @@ export default function Panel({ onManeuverClick }) {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // Auth handlers
   const handleLogin = () => { window.location.href = '/outpost.goauthentik.io/start?rd=%2F' }
   const handleLogout = () => { window.location.href = 'https://auth.echo6.co/if/flow/default-invalidation-flow/?next=https://navi.echo6.co/' }
 
-  // Optimize stops
-  const hasGpsOrigin = gpsOrigin && geoPermission === 'granted'
-  const effectiveCount = stops.length + (hasGpsOrigin ? 1 : 0)
-
-  const handleOptimize = useCallback(async () => {
-    if (effectiveCount < 3 || optimizing) return
-    setOptimizing(true)
-    try {
-      const { userLocation } = useStore.getState()
-      let locations = stops.map((s) => ({ lat: s.lat, lon: s.lon }))
-      if (hasGpsOrigin && userLocation) {
-        locations = [{ lat: userLocation.lat, lon: userLocation.lon }, ...locations]
-      }
-      const data = await requestOptimizedRoute(locations, mode)
-      if (data.trip) {
-        const wpOrder = hasGpsOrigin && userLocation
-          ? (data.trip.locations || []).slice(1)
-          : data.trip.locations
-        if (wpOrder && wpOrder.length === stops.length) {
-          const reordered = wpOrder.map((wp) => {
-            let closest = stops[0]
-            let minDist = Infinity
-            for (const s of stops) {
-              const d = Math.abs(s.lat - wp.lat) + Math.abs(s.lon - wp.lon)
-              if (d < minDist) {
-                minDist = d
-                closest = s
-              }
-            }
-            return closest
-          })
-          const seen = new Set()
-          const unique = reordered.filter((s) => {
-            if (seen.has(s.id)) return false
-            seen.add(s.id)
-            return true
-          })
-          if (unique.length === stops.length) {
-            setStops(unique)
-          }
-        }
-        setRoute(data.trip)
-      }
-    } catch (e) {
-      setRouteError(e.message)
-    } finally {
-      setOptimizing(false)
-    }
-  }, [stops, mode, optimizing, effectiveCount, hasGpsOrigin, setStops, setRoute, setRouteError])
-
-  // Mobile sheet drag handling
   const handleTouchStart = useCallback((e) => {
     dragStartY.current = e.touches[0].clientY
     dragStartState.current = sheetState
@@ -127,20 +75,20 @@ export default function Panel({ onManeuverClick }) {
     }
   }, [setSheetState])
 
-  const showOptimize = effectiveCount >= 3
+  const handleClearRoute = () => {
+    clearRoute()
+    onClearRoute?.()
+  }
 
-  // Determine what to show based on panel state
   const showPreviewCard = panelState.startsWith('PREVIEW')
-  const showRouteSection = ['ROUTING', 'ROUTE_CALCULATED', 'PREVIEW_ROUTING', 'PREVIEW_CALCULATED'].includes(panelState) || !!pendingDestination
-  const showManeuvers = panelState === 'ROUTE_CALCULATED' || panelState === 'PREVIEW_CALCULATED'
-  const showEmptyState = panelState === 'IDLE' && !pendingDestination
+  const hasRoutePoints = routeStart || routeEnd
+  const showRouteSection = hasRoutePoints || routeResult || routeLoading
+  const showEmptyState = panelState === 'IDLE' && !hasRoutePoints
 
-  // Routes tab content - now state-driven
   const routesContent = (
     <>
       <SearchBar />
 
-      {/* Preview card when place is selected */}
       {showPreviewCard && selectedPlace && (
         <div className="mt-3">
           <PlaceCard
@@ -152,44 +100,82 @@ export default function Panel({ onManeuverClick }) {
         </div>
       )}
 
-      {/* Route section with stops */}
       {showRouteSection && (
-        <>
-          <div className="mt-3">
-            <StopList />
-          </div>
-
-          <div className="mt-3 flex flex-col gap-2">
-            <ModeSelector />
-            {showOptimize && (
-              <button
-                onClick={handleOptimize}
-                disabled={optimizing || routeLoading}
-                className="navi-btn-secondary w-full"
-              >
-                {optimizing ? 'Optimizing...' : 'Optimize stop order'}
-              </button>
-            )}
-            {pendingDestination && stops.length === 0 && (
-              <button
-                onClick={clearPendingDestination}
-                className="navi-btn-secondary w-full"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* Maneuvers when route is calculated */}
-      {showManeuvers && (route || routeLoading || routeError) && (
         <div className="mt-3">
-          <ManeuverList onManeuverClick={onManeuverClick} />
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+              Route
+            </span>
+            <button
+              onClick={handleClearRoute}
+              className="p-1 rounded hover:bg-[var(--bg-overlay)]"
+              title="Clear route"
+            >
+              <X size={14} style={{ color: 'var(--text-tertiary)' }} />
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-1 mb-3 text-xs">
+            <div className="flex items-center gap-2">
+              <MapPin size={12} style={{ color: '#22c55e' }} />
+              <span style={{ color: routeStart ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+                {routeStart?.name || 'Right-click to set start'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <MapPin size={12} style={{ color: '#ef4444' }} />
+              <span style={{ color: routeEnd ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+                {routeEnd?.name || 'Right-click to set destination'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex gap-1 mb-2">
+            {TRAVEL_MODES.map((m) => {
+              const active = routeMode === m.id
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => setRouteMode(m.id)}
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs rounded transition-colors"
+                  style={{
+                    background: active ? 'var(--accent-muted)' : 'var(--bg-overlay)',
+                    color: active ? 'var(--accent)' : 'var(--text-tertiary)',
+                  }}
+                  title={m.label}
+                >
+                  <m.Icon size={14} />
+                  <span className="hidden sm:inline">{m.label}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="flex gap-1 mb-3">
+            {BOUNDARY_MODES.map((m) => {
+              const active = boundaryMode === m.id
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => setBoundaryMode(m.id)}
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs rounded transition-colors"
+                  style={{
+                    background: active ? 'var(--accent-muted)' : 'var(--bg-overlay)',
+                    color: active ? 'var(--accent)' : 'var(--text-tertiary)',
+                  }}
+                  title={m.title}
+                >
+                  <m.Icon size={14} />
+                  <span className="hidden sm:inline">{m.label}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          <ManeuverList />
         </div>
       )}
 
-      {/* Empty state */}
       {showEmptyState && (
         <div className="mt-6 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
           <p>Search or tap the map to explore</p>
@@ -203,13 +189,13 @@ export default function Panel({ onManeuverClick }) {
       {showContacts && (
         <div className="navi-tab-bar mb-3">
           <button
-            className={`navi-tab ${activeTab === 'routes' ? 'navi-tab-active' : ''}`}
+            className={"navi-tab " + (activeTab === 'routes' ? 'navi-tab-active' : '')}
             onClick={() => setActiveTab('routes')}
           >
             Routes
           </button>
           <button
-            className={`navi-tab ${activeTab === 'contacts' ? 'navi-tab-active' : ''}`}
+            className={"navi-tab " + (activeTab === 'contacts' ? 'navi-tab-active' : '')}
             onClick={() => setActiveTab('contacts')}
           >
             Contacts
@@ -231,7 +217,7 @@ export default function Panel({ onManeuverClick }) {
               onClick={handleLogout}
               className="flex items-center gap-1 px-2 py-1 rounded text-xs"
               style={{ color: 'var(--text-tertiary)' }}
-              title={`Logged in as ${auth.username}. Click to log out.`}
+              title={"Logged in as " + auth.username + ". Click to log out."}
             >
               <span className="hidden sm:inline">{auth.username}</span>
               <LogOut size={14} />
@@ -253,7 +239,6 @@ export default function Panel({ onManeuverClick }) {
     </div>
   )
 
-  // Desktop: side panel (now 360px to accommodate PlaceCard)
   if (!isMobile) {
     return (
       <div
@@ -270,7 +255,6 @@ export default function Panel({ onManeuverClick }) {
     )
   }
 
-  // Mobile: bottom sheet
   const sheetHeights = {
     collapsed: 'h-12',
     half: 'h-[45vh]',
@@ -280,13 +264,12 @@ export default function Panel({ onManeuverClick }) {
   return (
     <div
       ref={sheetRef}
-      className={`absolute bottom-0 left-0 right-0 z-10 rounded-t-2xl transition-all duration-200 ${sheetHeights[sheetState]}`}
+      className={"absolute bottom-0 left-0 right-0 z-10 rounded-t-2xl transition-all duration-200 " + sheetHeights[sheetState]}
       style={{
         background: 'var(--bg-raised)',
         borderTop: '1px solid var(--border)',
       }}
     >
-      {/* Drag handle */}
       <div
         className="flex justify-center py-2 cursor-grab"
         onTouchStart={handleTouchStart}
