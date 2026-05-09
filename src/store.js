@@ -72,6 +72,10 @@ export const useStore = create((set, get) => ({
   // This is the SINGLE routing function for everything
   computeRoute: async () => {
     const { routeStart, routeEnd, routeMode, boundaryMode, _updateRouteDisplay } = get()
+    console.log('[TRACE-ROUTE] computeRoute called with:', {
+      startLat: routeStart?.lat, startLon: routeStart?.lon, startName: routeStart?.name,
+      endLat: routeEnd?.lat, endLon: routeEnd?.lon, endName: routeEnd?.name
+    })
 
     // Need both endpoints to route
     if (!routeStart || !routeEnd) return
@@ -175,6 +179,7 @@ export const useStore = create((set, get) => ({
 
   // Master startDirections - enters directions mode with destination pre-filled
   startDirections: (place) => {
+    console.log('[TRACE-STORE] startDirections received place:', { lat: place?.lat, lon: place?.lon, name: place?.name })
     const { geoPermission, userLocation, clearRoute } = get()
     clearRoute()
 
@@ -229,7 +234,8 @@ export const useStore = create((set, get) => ({
   panelOpen: true,
   autocompleteOpen: false,
   directionsMode: false, // true when directions panel is active
-  activeDirectionsField: null, // 'origin' | 'destination' | 'stop-N' | null (for map click targeting)
+  activeDirectionsField: null, // 'origin' | 'destination' | 'stop-N' | null (for input focus styling)
+  pickingRouteField: null, // 'origin' | 'destination' | null (explicit pick-from-map mode)
   theme: 'dark', // 'dark' | 'light' (resolved value — what's actually applied)
   themeOverride: null, // null | 'dark' | 'light' (manual override, persisted)
   viewMode: (typeof localStorage !== 'undefined' && localStorage.getItem('navi-view-mode')) || 'map', // 'map' | 'satellite' | 'hybrid'
@@ -243,6 +249,8 @@ export const useStore = create((set, get) => ({
   setAutocompleteOpen: (open) => set({ autocompleteOpen: open }),
   setDirectionsMode: (mode) => set({ directionsMode: mode, activeDirectionsField: mode ? 'origin' : null }),
   setActiveDirectionsField: (field) => set({ activeDirectionsField: field }),
+  setPickingRouteField: (field) => set({ pickingRouteField: field }),
+  clearPickingRouteField: () => set({ pickingRouteField: null }),
   setTheme: (theme) => set({ theme }),
   setThemeOverride: (override) => {
     set({ themeOverride: override })

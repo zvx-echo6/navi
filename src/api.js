@@ -342,6 +342,7 @@ export async function requestOffroute(start, end, mode = "foot", boundaryMode = 
     mode,
     boundary_mode: boundaryMode,
   }
+  console.log('[TRACE-API] requestOffroute body:', JSON.stringify(body))
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 120000) // 2 min timeout for complex routes

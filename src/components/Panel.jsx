@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
-import { LogIn, LogOut, Footprints, Bike, Car, Shield, AlertTriangle, Zap, X, MapPin } from 'lucide-react'
+import { LogIn, LogOut, Footprints, Bike, Car, Shield, AlertTriangle, Zap, X, MapPin, Target } from 'lucide-react'
 import ThemePicker from './ThemePicker'
 import { useStore, usePanelState } from '../store'
 import { hasFeature } from '../config'
@@ -8,6 +8,7 @@ import ManeuverList from './ManeuverList'
 import ContactList from './ContactList'
 import { PlaceCard } from './PlaceCard'
 import DirectionsPanel from './DirectionsPanel'
+import PlaceDetail from './PlaceDetail'
 
 const TRAVEL_MODES = [
   { id: 'auto', label: 'Drive', Icon: Car },
@@ -34,6 +35,8 @@ export default function Panel({ onClearRoute }) {
   const routeLoading = useStore((s) => s.routeLoading)
   const setRouteMode = useStore((s) => s.setRouteMode)
   const setBoundaryMode = useStore((s) => s.setBoundaryMode)
+  const pickingRouteField = useStore((s) => s.pickingRouteField)
+  const setPickingRouteField = useStore((s) => s.setPickingRouteField)
   const clearRoute = useStore((s) => s.clearRoute)
   const sheetState = useStore((s) => s.sheetState)
   const setSheetState = useStore((s) => s.setSheetState)
@@ -89,29 +92,20 @@ export default function Panel({ onClearRoute }) {
   const showRouteSection = hasRoutePoints || routeResult || routeLoading
   const showEmptyState = panelState === 'IDLE' && !hasRoutePoints
 
+  // Show side panel place card when building route (either mode) and place is selected
+  const showSidePlaceCard = (directionsMode || showRouteSection) && selectedPlace
+
   const routesContent = directionsMode ? (
-    <>
-      <DirectionsPanel onClose={() => {
-        setDirectionsMode(false)
-        onClearRoute?.()
-      }} />
-      {/* Show place card below directions when clicking map during routing */}
-      {selectedPlace && (
-        <div className="mt-3 border-t pt-3" style={{ borderColor: "var(--border)" }}>
-          <PlaceCard
-            place={selectedPlace}
-            variant="preview"
-            expanded={true}
-            onClose={clearSelectedPlace}
-          />
-        </div>
-      )}
-    </>
+    // Directions mode: just the directions panel, place card is shown in side panel
+    <DirectionsPanel onClose={() => {
+      setDirectionsMode(false)
+      onClearRoute?.()
+    }} />
   ) : (
     <>
       <SearchBar />
 
-      {showPreviewCard && selectedPlace && (
+      {showPreviewCard && selectedPlace && !showRouteSection && (
         <div className="mt-3">
           <PlaceCard
             place={selectedPlace}
@@ -140,15 +134,31 @@ export default function Panel({ onClearRoute }) {
           <div className="flex flex-col gap-1 mb-3 text-xs">
             <div className="flex items-center gap-2">
               <MapPin size={12} style={{ color: '#22c55e' }} />
-              <span style={{ color: routeStart ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
-                {routeStart?.name || 'Right-click to set start'}
+              <span className="flex-1" style={{ color: routeStart ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+                {routeStart?.name || 'Click pin to pick start'}
               </span>
+              <button
+                onClick={() => setPickingRouteField('origin')}
+                className="p-1 rounded hover:bg-[var(--bg-overlay)] transition-colors"
+                style={{ color: pickingRouteField === 'origin' ? 'var(--accent)' : 'var(--text-tertiary)' }}
+                title="Pick start from map"
+              >
+                <Target size={14} />
+              </button>
             </div>
             <div className="flex items-center gap-2">
               <MapPin size={12} style={{ color: '#ef4444' }} />
-              <span style={{ color: routeEnd ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
-                {routeEnd?.name || 'Right-click to set destination'}
+              <span className="flex-1" style={{ color: routeEnd ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+                {routeEnd?.name || 'Click pin to pick destination'}
               </span>
+              <button
+                onClick={() => setPickingRouteField('destination')}
+                className="p-1 rounded hover:bg-[var(--bg-overlay)] transition-colors"
+                style={{ color: pickingRouteField === 'destination' ? 'var(--accent)' : 'var(--text-tertiary)' }}
+                title="Pick destination from map"
+              >
+                <Target size={14} />
+              </button>
             </div>
           </div>
 
@@ -263,19 +273,85 @@ export default function Panel({ onClearRoute }) {
     </div>
   )
 
+  // Side panel for place card during directions mode (desktop only)
+  const sidePlaceCardPanel = showSidePlaceCard && !isMobile && (
+    <div
+      className="absolute top-0 z-10 h-full overflow-y-auto p-4 flex flex-col"
+      style={{
+        left: '400px',
+        width: '300px',
+        background: 'var(--bg-raised)',
+        borderRight: '1px solid var(--border)',
+        boxShadow: 'inset 4px 0 8px -4px rgba(0,0,0,0.15)',
+      }}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+          {selectedPlace?.name || 'Place Info'}
+        </span>
+        <button
+          onClick={clearSelectedPlace}
+          className="p-1.5 rounded-lg hover:bg-[var(--bg-overlay)] transition-colors"
+          title="Close"
+        >
+          <X size={16} style={{ color: 'var(--text-tertiary)' }} />
+        </button>
+      </div>
+      {/* Use PlaceCard in compact preview mode */}
+      <PlaceCard
+        place={selectedPlace}
+        variant="preview"
+        expanded={true}
+        onClose={clearSelectedPlace}
+      />
+    </div>
+  )
+
+  // Mobile overlay for place card during directions mode
+  const mobilePlaceCardOverlay = showSidePlaceCard && isMobile && (
+    <div
+      className="absolute inset-0 z-20 flex flex-col rounded-t-2xl"
+      style={{ background: 'var(--bg-raised)' }}
+    >
+      <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: 'var(--border)' }}>
+        <span className="text-sm font-medium truncate pr-2" style={{ color: 'var(--text-primary)' }}>
+          {selectedPlace?.name || 'Place Info'}
+        </span>
+        <button
+          onClick={clearSelectedPlace}
+          className="p-1.5 rounded-lg hover:bg-[var(--bg-overlay)] transition-colors shrink-0"
+          title="Close"
+        >
+          <X size={16} style={{ color: 'var(--text-tertiary)' }} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        <PlaceCard
+          place={selectedPlace}
+          variant="preview"
+          expanded={true}
+          onClose={clearSelectedPlace}
+        />
+      </div>
+    </div>
+  )
+
   if (!isMobile) {
     return (
-      <div
-        className="absolute top-0 left-0 z-10 h-full overflow-y-auto p-4 flex flex-col"
-        style={{
-          width: '400px',
-          background: 'var(--bg-raised)',
-          borderRight: '1px solid var(--border)',
-        }}
-      >
-        {header}
-        {content}
-      </div>
+      <>
+        <div
+          className="absolute top-0 left-0 z-10 h-full overflow-y-auto p-4 flex flex-col"
+          style={{
+            width: '400px',
+            background: 'var(--bg-raised)',
+            borderRight: '1px solid var(--border)',
+          }}
+        >
+          {header}
+          {content}
+        </div>
+        {sidePlaceCardPanel}
+      </>
     )
   }
 
@@ -308,9 +384,10 @@ export default function Panel({ onClearRoute }) {
       </div>
 
       {sheetState !== 'collapsed' && (
-        <div className="px-4 pb-4 overflow-y-auto overflow-x-hidden h-[calc(100%-2rem)]" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+        <div className="px-4 pb-4 overflow-y-auto overflow-x-hidden h-[calc(100%-2rem)] relative" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
           {header}
           {content}
+          {mobilePlaceCardOverlay}
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from "react"
-import { MapPin, Crosshair, X, Navigation2, User, Star, Coffee, Fuel, ShoppingBag, Hotel, Building2 } from "lucide-react"
+import { MapPin, Crosshair, X, Navigation2, User, Star, Coffee, Fuel, ShoppingBag, Hotel, Building2, Target } from "lucide-react"
+import toast from "react-hot-toast"
 import { useStore } from "../store"
 import { searchGeocode } from "../api"
 import { buildAddress } from "../utils/place"
@@ -53,6 +54,8 @@ export default function LocationInput({
   const contacts = useStore((s) => s.contacts)
   const activeDirectionsField = useStore((s) => s.activeDirectionsField)
   const setActiveDirectionsField = useStore((s) => s.setActiveDirectionsField)
+  const pickingRouteField = useStore((s) => s.pickingRouteField)
+  const setPickingRouteField = useStore((s) => s.setPickingRouteField)
 
   // Sync display value when external value changes
   useEffect(() => {
@@ -200,10 +203,18 @@ export default function LocationInput({
   }
 
   const handleFocus = () => {
-    setActiveDirectionsField(fieldId)
+    setActiveDirectionsField(fieldId)  // For styling only, not map clicks
     if (results.length > 0) setOpen(true)
     onFocus?.()
   }
+
+  const handlePickFromMap = () => {
+    setPickingRouteField(fieldId)
+    toast("Click map to set location", { icon: "🎯", duration: 3000 })
+    inputRef.current?.blur()  // Unfocus input so user focuses on map
+  }
+
+  const isPicking = pickingRouteField === fieldId
 
   const handleBlur = () => {
     // Delay to allow click on dropdown
@@ -241,6 +252,15 @@ export default function LocationInput({
           className="flex-1 bg-transparent text-sm outline-none"
           style={{ color: "var(--text-primary)" }}
         />
+        {/* Pick from map button */}
+        <button
+          onClick={handlePickFromMap}
+          className="p-1 rounded hover:bg-[var(--bg-overlay)] transition-colors"
+          style={{ color: isPicking ? "var(--accent)" : "var(--text-tertiary)" }}
+          title="Pick location from map"
+        >
+          <Target size={14} />
+        </button>
         {loading ? (
           <div
             className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
