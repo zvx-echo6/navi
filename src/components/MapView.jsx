@@ -1721,22 +1721,20 @@ const MapView = forwardRef(function MapView(_, ref) {
       icon: Plus,
       onSelect: () => {
         setRadialMenu((m) => ({ ...m, open: false }))
-        const { stops, addStop } = useStore.getState()
+        const { addIntermediateStop, computeRoute, routeStart, routeEnd } = useStore.getState()
         const place = {
           lat: radialMenu.lat,
           lon: radialMenu.lon,
           name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
-          source: "radial_menu",
-          matchCode: null,
         }
-        if (stops.length === 0) {
-          addStop(place)
-          useStore.setState({ gpsOrigin: false })
-        } else {
-          const success = addStop(place)
-          if (!success) {
-            toast("Maximum 10 stops reached")
+        const success = addIntermediateStop(place)
+        if (success) {
+          // If we have both origin and destination, recalculate route
+          if (routeStart && routeEnd) {
+            computeRoute()
           }
+        } else {
+          toast("Maximum 8 intermediate stops reached")
         }
       },
     },

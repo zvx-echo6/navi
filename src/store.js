@@ -73,14 +73,17 @@ export const useStore = create((set, get) => ({
   // ── INTERMEDIATE STOPS MANAGEMENT ──
   // stops[] contains ONLY intermediate waypoints, not origin/destination
 
-  addIntermediateStop: () => {
+  // Add intermediate stop - can be called with or without place
+  // With place: creates pre-filled stop (from radial menu)
+  // Without place: creates empty placeholder (from Add Stop button)
+  addIntermediateStop: (place) => {
     const { stops } = get()
     if (stops.length >= 8) return false // Max 8 intermediate stops
     const newStop = {
       id: crypto.randomUUID(),
-      lat: null,
-      lon: null,
-      name: "",
+      lat: place?.lat ?? null,
+      lon: place?.lon ?? null,
+      name: place?.name ?? "",
     }
     set({ stops: [...stops, newStop] })
     return true
