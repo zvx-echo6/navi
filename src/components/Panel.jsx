@@ -90,10 +90,23 @@ export default function Panel({ onClearRoute }) {
   const showEmptyState = panelState === 'IDLE' && !hasRoutePoints
 
   const routesContent = directionsMode ? (
-    <DirectionsPanel onClose={() => {
-      setDirectionsMode(false)
-      onClearRoute?.()
-    }} />
+    <>
+      <DirectionsPanel onClose={() => {
+        setDirectionsMode(false)
+        onClearRoute?.()
+      }} />
+      {/* Show place card below directions when clicking map during routing */}
+      {selectedPlace && (
+        <div className="mt-3 border-t pt-3" style={{ borderColor: "var(--border)" }}>
+          <PlaceCard
+            place={selectedPlace}
+            variant="preview"
+            expanded={true}
+            onClose={clearSelectedPlace}
+          />
+        </div>
+      )}
+    </>
   ) : (
     <>
       <SearchBar />

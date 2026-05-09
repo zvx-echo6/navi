@@ -74,13 +74,15 @@ export default function DirectionsPanel({ onClose }) {
   }
 
   const handleAddStop = () => {
-    // Insert a stop between origin and destination
-    // For now, this adds to the stops array
-    // The UI will show intermediate stops
+    // For now, show a message - multi-stop UI is complex
+    // TODO: Implement full multi-stop UI
   }
 
+  // Check if route has wilderness segments
+  const hasWilderness = routeResult?.summary?.wilderness_distance_km > 0
+
   // Multi-stop support: show intermediate stops from the stops array
-  const intermediateStops = stops.slice(1, -1) // Everything except first and last
+  const intermediateStops = stops.slice(1, -1)
 
   return (
     <div className="flex flex-col gap-3">
@@ -154,7 +156,7 @@ export default function DirectionsPanel({ onClose }) {
           autoFocus={routeStart && !routeEnd}
         />
 
-        {/* Add stop button */}
+        {/* Add stop button - only show when route exists */}
         {routeStart && routeEnd && stops.length < 10 && (
           <button
             onClick={handleAddStop}
@@ -230,7 +232,7 @@ export default function DirectionsPanel({ onClose }) {
         </div>
       )}
 
-      {/* Error message */}
+      {/* Error message - friendly text, no "offroute" */}
       {routeError && (
         <div
           className="px-3 py-2 rounded-lg text-sm"
@@ -239,7 +241,41 @@ export default function DirectionsPanel({ onClose }) {
             color: "var(--error, #ef4444)",
           }}
         >
-          {routeError}
+          {routeError.includes("No route") || routeError.includes("not found")
+            ? "No route found. Try a different start point or mode."
+            : routeError.includes("entry point")
+            ? "No roads found nearby — try Foot mode for trails."
+            : routeError}
+        </div>
+      )}
+
+      {/* Route legend - only shown when route has wilderness segment */}
+      {routeResult && hasWilderness && !routeLoading && (
+        <div
+          className="flex items-center gap-4 px-3 py-2 rounded-lg text-xs"
+          style={{ background: "var(--bg-overlay)" }}
+        >
+          <div className="flex items-center gap-1.5">
+            <svg width="24" height="2" style={{ overflow: "visible" }}>
+              <line
+                x1="0" y1="1" x2="24" y2="1"
+                stroke="#f97316"
+                strokeWidth="3"
+                strokeDasharray="4,3"
+              />
+            </svg>
+            <span style={{ color: "var(--text-secondary)" }}>Wilderness (on foot)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <svg width="24" height="2" style={{ overflow: "visible" }}>
+              <line
+                x1="0" y1="1" x2="24" y2="1"
+                stroke="#3b82f6"
+                strokeWidth="3"
+              />
+            </svg>
+            <span style={{ color: "var(--text-secondary)" }}>Road/Trail</span>
+          </div>
         </div>
       )}
 
