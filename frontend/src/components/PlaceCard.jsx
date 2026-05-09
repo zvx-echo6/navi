@@ -476,6 +476,7 @@ export function PlaceCard({ place, variant = "preview", expanded = true, onToggl
   const savedContact = contacts.find((c) => c.lat === place.lat && c.lon === place.lon)
 
   const handleDirections = () => {
+    console.log('[TRACE-DIRECTIONS] PlaceCard handleDirections, place:', { lat: place?.lat, lon: place?.lon, name: place?.name })
     // No toast - empty origin slot is the visual prompt
     startDirections(place)
   }

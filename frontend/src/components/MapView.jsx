@@ -6,9 +6,9 @@ import { layers, namedTheme } from 'protomaps-themes-base'
 import { getTheme, getThemeSprite, getOverlayConfig } from '../themes/registry'
 import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
-import { fetchReverse } from '../api'
+import { fetchReverse, requestOffroute } from '../api'
 import { getConfig, hasFeature } from '../config'
-import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Plus, Star, Ruler, X } from 'lucide-react'
+import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Star, Ruler, X, Trash2, Plus } from 'lucide-react'
 import RadialMenu from './RadialMenu'
 import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
@@ -27,6 +27,10 @@ const BOUNDARY_SOURCE = 'boundary-source'
 const BOUNDARY_LAYER = 'boundary-layer'
 const STATE_BOUNDARIES_LAYER = 'state-boundaries-z4-z7'
 const ROUTE_LAYER_PREFIX = 'route-layer-'
+const OFFROUTE_SOURCE = 'offroute-source'
+const OFFROUTE_WILDERNESS_LAYER = 'offroute-wilderness'
+const OFFROUTE_NETWORK_LAYER = 'offroute-network'
+const OFFROUTE_MARKERS_LAYER = 'offroute-markers'
 const HILLSHADE_SOURCE = 'hillshade-dem'
 const HILLSHADE_LAYER = 'hillshade-layer'
 const TRAFFIC_SOURCE = 'traffic-tiles'
@@ -1122,6 +1126,7 @@ function isProtectedLayer(id) {
   return id.startsWith('public-lands') ||
          id.startsWith('boundary') ||
          id.startsWith('route') ||
+         id.startsWith('offroute') ||
          id.startsWith('measure') ||
          id.startsWith('contour') ||
          id.startsWith('usfs') ||
@@ -1327,6 +1332,83 @@ function removeStateBoundaries(map) {
   }
 }
 
+
+/** Clear offroute display layers */
+function clearRouteDisplay(map) {
+  if (!map) return
+  if (map.getLayer(OFFROUTE_WILDERNESS_LAYER)) map.removeLayer(OFFROUTE_WILDERNESS_LAYER)
+  if (map.getLayer(OFFROUTE_NETWORK_LAYER)) map.removeLayer(OFFROUTE_NETWORK_LAYER)
+  if (map.getLayer(OFFROUTE_MARKERS_LAYER)) map.removeLayer(OFFROUTE_MARKERS_LAYER)
+  if (map.getSource(OFFROUTE_SOURCE)) map.removeSource(OFFROUTE_SOURCE)
+}
+
+/** Update offroute display with route GeoJSON */
+function updateRouteDisplay(map, routeGeojson) {
+  if (!map || !routeGeojson) return
+  
+  // Clear existing layers
+  clearRouteDisplay(map)
+  
+  // Add source with route features
+  map.addSource(OFFROUTE_SOURCE, {
+    type: "geojson",
+    data: routeGeojson,
+  })
+  
+  // Find first symbol layer for proper z-ordering
+  let beforeId = undefined
+  for (const layer of map.getStyle().layers) {
+    if (layer.type === "symbol") {
+      beforeId = layer.id
+      break
+    }
+  }
+  
+  // Wilderness segment - dashed orange line
+  map.addLayer({
+    id: OFFROUTE_WILDERNESS_LAYER,
+    type: "line",
+    source: OFFROUTE_SOURCE,
+    filter: ["==", ["get", "segment_type"], "wilderness"],
+    layout: { "line-join": "round", "line-cap": "round" },
+    paint: {
+      "line-color": "#f97316", // orange-500
+      "line-width": 4,
+      "line-opacity": 0.9,
+      "line-dasharray": [8, 4],
+    },
+  }, beforeId)
+  
+  // Network segment - solid blue line
+  map.addLayer({
+    id: OFFROUTE_NETWORK_LAYER,
+    type: "line",
+    source: OFFROUTE_SOURCE,
+    filter: ["==", ["get", "segment_type"], "network"],
+    layout: { "line-join": "round", "line-cap": "round" },
+    paint: {
+      "line-color": "#3b82f6", // blue-500
+      "line-width": 5,
+      "line-opacity": 0.85,
+    },
+  }, beforeId)
+  
+  // Fit bounds to route
+  const features = routeGeojson.features || []
+  const allCoords = features
+    .filter(f => f.geometry?.coordinates)
+    .flatMap(f => f.geometry.coordinates)
+  
+  if (allCoords.length > 0) {
+    const bounds = allCoords.reduce(
+      (b, c) => b.extend(c),
+      new maplibregl.LngLatBounds(allCoords[0], allCoords[0])
+    )
+    const leftPad = 420
+    map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: leftPad, right: 60 } })
+  }
+}
+
 const MapView = forwardRef(function MapView(_, ref) {
   const mapRef = useRef(null)
   const mapInstance = useRef(null)
@@ -1348,20 +1430,20 @@ const MapView = forwardRef(function MapView(_, ref) {
   const measuringRef = useRef({ active: false, points: [] })
   const measureLabelsRef = useRef([]) // HTML label elements
 
-  const stops = useStore((s) => s.stops)
-  const route = useStore((s) => s.route)
   const theme = useStore((s) => s.theme)
   const selectedPlace = useStore((s) => s.selectedPlace)
   const clickMarker = useStore((s) => s.clickMarker)
   const setClickMarker = useStore((s) => s.setClickMarker)
   const clearClickMarker = useStore((s) => s.clearClickMarker)
-  const gpsOrigin = useStore((s) => s.gpsOrigin)
   const geoPermission = useStore((s) => s.geoPermission)
   const setSheetState = useStore((s) => s.setSheetState)
   const setMapCenter = useStore((s) => s.setMapCenter)
   const pickingLocationFor = useStore((s) => s.pickingLocationFor)
   const setEditingContact = useStore((s) => s.setEditingContact)
   const clearPickingLocationFor = useStore((s) => s.clearPickingLocationFor)
+  const directionsMode = useStore((s) => s.directionsMode)
+  const activeDirectionsField = useStore((s) => s.activeDirectionsField)
+  const pickingRouteField = useStore((s) => s.pickingRouteField)
 
   // Zoom level indicator state
   const [zoomLevel, setZoomLevel] = useState(10)
@@ -1580,7 +1662,7 @@ const MapView = forwardRef(function MapView(_, ref) {
 
   const radialWedges = [
     {
-      id: "directions-to",
+      id: "to-here",
       label: "To here",
       icon: ArrowDownLeft,
       onSelect: () => {
@@ -1589,29 +1671,48 @@ const MapView = forwardRef(function MapView(_, ref) {
           lat: radialMenu.lat,
           lon: radialMenu.lon,
           name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
-          source: "radial_menu",
-          matchCode: null,
         }
-        useStore.getState().startDirections(place)
+        const { routeStart, setRouteStart, setRouteEnd, computeRoute, setDirectionsMode, geoPermission, userLocation } = useStore.getState()
+        
+        setRouteEnd(place)
+        setDirectionsMode(true)
+        
+        if (routeStart) {
+          computeRoute()
+        } else if (geoPermission === "granted" && userLocation) {
+          // Use GPS as origin fallback
+          setRouteStart({
+            lat: userLocation.lat,
+            lon: userLocation.lon,
+            name: "Your location",
+            source: "gps",
+          })
+          computeRoute()
+        }
+        // If no origin and no GPS, directions panel opens and origin field auto-focuses
       },
     },
     {
-      id: "directions-from",
+      id: "from-here",
       label: "From here",
       icon: ArrowUpRight,
       onSelect: () => {
         setRadialMenu((m) => ({ ...m, open: false }))
-        const { clearStops, addStop } = useStore.getState()
-        clearStops()
         const place = {
           lat: radialMenu.lat,
           lon: radialMenu.lon,
           name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
-          source: "radial_menu",
-          matchCode: null,
         }
-        addStop(place)
-        useStore.setState({ gpsOrigin: false })
+        const { clearRoute, setRouteStart, routeEnd, computeRoute, setDirectionsMode } = useStore.getState()
+        clearRoute()
+        clearRouteDisplay(mapInstance.current)
+        setRouteStart(place)
+        setDirectionsMode(true)
+        
+        if (routeEnd) {
+          computeRoute()
+        }
+        // If no destination, directions panel opens and destination field auto-focuses
       },
     },
     {
@@ -1620,23 +1721,31 @@ const MapView = forwardRef(function MapView(_, ref) {
       icon: Plus,
       onSelect: () => {
         setRadialMenu((m) => ({ ...m, open: false }))
-        const { stops, addStop, clearStops } = useStore.getState()
+        const { addIntermediateStop, computeRoute, routeStart, routeEnd } = useStore.getState()
         const place = {
           lat: radialMenu.lat,
           lon: radialMenu.lon,
           name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
-          source: "radial_menu",
-          matchCode: null,
         }
-        if (stops.length === 0) {
-          addStop(place)
-          useStore.setState({ gpsOrigin: false })
-        } else {
-          const success = addStop(place)
-          if (!success) {
-            toast("Maximum 10 stops reached")
+        const success = addIntermediateStop(place)
+        if (success) {
+          // If we have both origin and destination, recalculate route
+          if (routeStart && routeEnd) {
+            computeRoute()
           }
+        } else {
+          toast("Maximum 8 intermediate stops reached")
         }
+      },
+    },
+    {
+      id: "clear-route",
+      label: "Clear",
+      icon: Trash2,
+      onSelect: () => {
+        setRadialMenu((m) => ({ ...m, open: false }))
+        useStore.getState().clearRoute()
+        clearRouteDisplay(mapInstance.current)
       },
     },
     {
@@ -1805,6 +1914,14 @@ const MapView = forwardRef(function MapView(_, ref) {
       updateSatellitePaint(map, currentThemeRef.current)
     },
 
+    // Clear offroute route from map
+    clearRoute() {
+      const map = mapInstance.current
+      if (!map) return
+      clearRouteDisplay(map)
+      useStore.getState().clearRoute()
+    },
+
   }))
 
   // Initialize map
@@ -1894,7 +2011,33 @@ const MapView = forwardRef(function MapView(_, ref) {
         return
       }
 
-
+      // Handle explicit pick-from-map mode for route inputs
+      const { pickingRouteField, setRouteStart, setRouteEnd, clearPickingRouteField } = useStore.getState()
+      if (pickingRouteField) {
+        const { lng, lat } = e.lngLat
+        map.getCanvas().style.cursor = ''
+        // Reverse geocode for name
+        fetchReverse(lat, lng).then((place) => {
+          const name = place?.name || lat.toFixed(5) + ", " + lng.toFixed(5)
+          const location = { lat, lon: lng, name, source: "map_click" }
+          if (pickingRouteField === "origin") {
+            setRouteStart(location)
+          } else if (pickingRouteField === "destination") {
+            setRouteEnd(location)
+          }
+          clearPickingRouteField()
+        }).catch(() => {
+          const name = lat.toFixed(5) + ", " + lng.toFixed(5)
+          const location = { lat, lon: lng, name, source: "map_click" }
+          if (pickingRouteField === "origin") {
+            setRouteStart(location)
+          } else if (pickingRouteField === "destination") {
+            setRouteEnd(location)
+          }
+          clearPickingRouteField()
+        })
+        return
+      }
 
       const store = useStore.getState()
       const marker = store.clickMarker
@@ -2062,12 +2205,16 @@ const MapView = forwardRef(function MapView(_, ref) {
           const props = labelFeature.properties
           const geom = labelFeature.geometry
 
-          // Get feature coordinates (Point geometry)
-          let featureLat = lat
-          let featureLon = lng
+          // CRITICAL: Always use CLICK coordinates for routing (lat, lng from e.lngLat)
+          // Feature coordinates are only for display/fetching details
+          let featureLat = lat    // Click coordinate - used for routing
+          let featureLon = lng    // Click coordinate - used for routing
+          let displayLat = lat    // May be updated to feature coords for display
+          let displayLon = lng
           if (geom && geom.type === 'Point' && geom.coordinates) {
-            featureLon = geom.coordinates[0]
-            featureLat = geom.coordinates[1]
+            // Store feature's canonical coords separately - NOT for routing
+            displayLon = geom.coordinates[0]
+            displayLat = geom.coordinates[1]
           }
 
           // FIX A: For park-type features, also query polygon layers to get boundary geometry
@@ -2112,6 +2259,7 @@ const MapView = forwardRef(function MapView(_, ref) {
             updateBoundaryRef.current(polygonGeometry)
           }
 
+          console.log('[TRACE-CLICK] Feature click setSelectedPlace:', { featureLat, featureLon, clickLat: lat, clickLng: lng, name: props.name })
           store.setSelectedPlace({
             lat: featureLat,
             lon: featureLon,
@@ -2143,6 +2291,7 @@ const MapView = forwardRef(function MapView(_, ref) {
             circleRadiusPx: MARKER_RADIUS_PX,
           })
 
+          console.log('[TRACE-CLICK] Reticle click setSelectedPlace:', { lat, lng })
           store.setSelectedPlace({
             lat,
             lon: lng,
@@ -2304,6 +2453,12 @@ const MapView = forwardRef(function MapView(_, ref) {
       updateBoundaryRef.current = updateBoundaryFn
       useStore.getState().setUpdateBoundary(updateBoundaryFn)
 
+      // Register route display callbacks for store.computeRoute()
+      useStore.getState().setRouteDisplayCallbacks(
+        (routeGeojson) => updateRouteDisplay(map, routeGeojson),
+        () => clearRouteDisplay(map)
+      )
+
       // POI/label hover affordance — cursor pointer + highlight
       const interactiveLayers = ['pois', 'places_locality', 'places_region', 'places_country', 'places_subplace']
 
@@ -2464,10 +2619,8 @@ const MapView = forwardRef(function MapView(_, ref) {
       originalPaintValues = {}
 
       // Restore view
-      map.jumpTo({ center, zoom, bearing, pitch })
-      // Re-render route if exists
-      const currentRoute = useStore.getState().route
-      if (currentRoute) updateRoute(map, currentRoute)
+      const currentRoute = useStore.getState().routeResult
+      if (currentRoute?.route) updateRouteDisplay(map, currentRoute.route)
     })
   }, [theme])
 
@@ -2560,168 +2713,6 @@ const MapView = forwardRef(function MapView(_, ref) {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [selectedPlace])
 
-  // Update route polyline when route changes
-  useEffect(() => {
-    const map = mapInstance.current
-    if (!map) return
-    if (!map.isStyleLoaded()) {
-      const handler = () => updateRoute(map, route)
-      map.once('idle', handler)
-      return () => map.off('idle', handler)
-    }
-    updateRoute(map, route)
-  }, [route])
-
-  function updateRoute(map, routeData) {
-    if (!map) return
-
-    // Remove old route layers
-    const style = map.getStyle()
-    if (style) {
-      for (const layer of style.layers) {
-        if (layer.id.startsWith(ROUTE_LAYER_PREFIX)) {
-          map.removeLayer(layer.id)
-        }
-      }
-    }
-
-    if (!routeData || !routeData.legs) {
-      if (map.getSource(ROUTE_SOURCE)) {
-        map.getSource(ROUTE_SOURCE).setData({ type: 'FeatureCollection', features: [] })
-      }
-      return
-    }
-
-    const features = []
-    for (let i = 0; i < routeData.legs.length; i++) {
-      const leg = routeData.legs[i]
-      if (!leg.shape) continue
-      const coords = decodePolyline(leg.shape, 6)
-      features.push({
-        type: 'Feature',
-        properties: { legIndex: i },
-        geometry: { type: 'LineString', coordinates: coords },
-      })
-    }
-
-    const source = map.getSource(ROUTE_SOURCE)
-    if (source) {
-      source.setData({ type: 'FeatureCollection', features })
-    } else {
-      map.addSource(ROUTE_SOURCE, {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features },
-      })
-    }
-
-    // Use CSS variable for route color (read computed value)
-    const routeColor = getComputedStyle(document.documentElement).getPropertyValue('--route-line').trim()
-
-    for (let i = 0; i < features.length; i++) {
-      const layerId = `${ROUTE_LAYER_PREFIX}${i}`
-      if (!map.getLayer(layerId)) {
-        map.addLayer({
-          id: layerId,
-          type: 'line',
-          source: ROUTE_SOURCE,
-          filter: ['==', ['get', 'legIndex'], i],
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': routeColor || '#7a9a6b',
-            'line-width': 5,
-            'line-opacity': 0.85,
-          },
-        })
-      }
-    }
-
-    // Fit bounds to route
-    if (features.length > 0) {
-      const allCoords = features.flatMap((f) => f.geometry.coordinates)
-      const bounds = allCoords.reduce(
-        (b, c) => b.extend(c),
-        new maplibregl.LngLatBounds(allCoords[0], allCoords[0])
-      )
-      // Single-panel: no floating detail
-      const leftPad = 420  // 360px panel + margin
-      map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: leftPad, right: 60 } })
-    }
-  }
-
-  // Update stop markers when stops change
-  useEffect(() => {
-    const map = mapInstance.current
-    if (!map) return
-
-    // Remove old markers
-    for (const m of markersRef.current) m.remove()
-    markersRef.current = []
-    if (popupRef.current) {
-      popupRef.current.remove()
-      popupRef.current = null
-    }
-
-    const hasGpsOrigin = gpsOrigin && geoPermission === 'granted'
-    const indexOffset = hasGpsOrigin ? 1 : 0
-
-    stops.forEach((stop, i) => {
-      const displayIndex = i + indexOffset
-      const effectiveTotal = stops.length + indexOffset
-
-      let pinClass = 'navi-pin navi-pin--intermediate'
-      if (displayIndex === 0) pinClass = 'navi-pin navi-pin--origin'
-      else if (displayIndex === effectiveTotal - 1 && effectiveTotal > 1) pinClass = 'navi-pin navi-pin--destination'
-
-      const label = String.fromCharCode(65 + Math.min(displayIndex, 25))
-
-      const el = document.createElement('div')
-      el.className = pinClass
-      el.textContent = label
-
-      el.addEventListener('click', (e) => {
-        e.stopPropagation()
-        // Flag so the map-level click handler doesn't fire
-        pinClickedRef.current = true
-        if (popupRef.current) popupRef.current.remove()
-        const popup = new maplibregl.Popup({ offset: 20, closeButton: true })
-          .setLngLat([stop.lon, stop.lat])
-          .setHTML(
-            `<div style="font-size:12px;max-width:200px">
-              <strong>${stop.name}</strong>
-              <br/><button id="remove-stop-${stop.id}" style="margin-top:4px;padding:2px 8px;background:var(--status-danger);border:none;border-radius:4px;color:white;cursor:pointer;font-size:11px">Remove</button>
-            </div>`
-          )
-          .addTo(map)
-
-        popup.getElement().querySelector(`#remove-stop-${stop.id}`)?.addEventListener('click', () => {
-          useStore.getState().removeStop(stop.id)
-          popup.remove()
-        })
-        popupRef.current = popup
-      })
-
-      const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([stop.lon, stop.lat])
-        .addTo(map)
-
-      markersRef.current.push(marker)
-    })
-
-    // If stops but no route yet, fit to stops
-    if (stops.length > 0 && !route) {
-      if (stops.length === 1) {
-        map.flyTo({ center: [stops[0].lon, stops[0].lat], zoom: 13 })
-      } else {
-        const bounds = stops.reduce(
-          (b, s) => b.extend([s.lon, s.lat]),
-          new maplibregl.LngLatBounds([stops[0].lon, stops[0].lat], [stops[0].lon, stops[0].lat])
-        )
-        map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: 420, right: 60 } })
-      }
-    }
-  }, [stops, route, gpsOrigin, geoPermission])
-
-
   // ESC key handler for measurement mode
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -2746,6 +2737,22 @@ const MapView = forwardRef(function MapView(_, ref) {
       }
     }
   }, [pickingLocationFor])
+
+  // Handle directions mode cursor
+  useEffect(() => {
+    const map = mapInstance.current
+    if (!map) return
+    if (directionsMode && activeDirectionsField) {
+      map.getCanvas().style.cursor = 'crosshair'
+    } else if (!measuringRef.current.active && !pickingLocationFor) {
+      map.getCanvas().style.cursor = ''
+    }
+    return () => {
+      if (map && !measuringRef.current.active && !pickingLocationFor) {
+        map.getCanvas().style.cursor = ''
+      }
+    }
+  }, [directionsMode, activeDirectionsField])
 
   // ESC key handler for location pick mode
   useEffect(() => {

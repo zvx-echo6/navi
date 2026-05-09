@@ -321,3 +321,70 @@ export async function fetchAuthState() {
     return { authenticated: false, username: null }
   }
 }
+
+// ── Offroute API ──
+
+const OFFROUTE_URL = "/api/offroute"
+const MVUM_URL = "/api/mvum"
+
+/**
+ * Request an offroute route from the pathfinder API.
+ * @param {object} start - { lat, lon }
+ * @param {object} end - { lat, lon }
+ * @param {string} mode - foot | mtb | atv | vehicle
+ * @param {string} boundaryMode - strict | pragmatic | emergency
+ * @returns {Promise<object>} Offroute response with GeoJSON route
+ */
+export async function requestOffroute(start, end, mode = "foot", boundaryMode = "strict") {
+  const body = {
+    start: [start.lat, start.lon],
+    end: [end.lat, end.lon],
+    mode,
+    boundary_mode: boundaryMode,
+  }
+  console.log('[TRACE-API] requestOffroute body:', JSON.stringify(body))
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 120000) // 2 min timeout for complex routes
+
+  try {
+    const resp = await fetch(OFFROUTE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}))
+      throw new Error(errBody.message || 'Could not find a route. Try a different start point or mode.')
+    }
+
+    return resp.json()
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+/**
+ * Fetch MVUM (Motor Vehicle Use Map) info for a location.
+ * @param {number} lat
+ * @param {number} lon
+ * @param {number} radius - Search radius in meters
+ * @returns {Promise<object|null>} MVUM feature info or null
+ */
+export async function fetchMvumInfo(lat, lon, radius = 500) {
+  try {
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lon: String(lon),
+      radius: String(radius),
+    })
+    const resp = await fetch(`${MVUM_URL}?${params}`, { signal: AbortSignal.timeout(5000) })
+    if (!resp.ok) return null
+    const data = await resp.json()
+    return data.feature || null
+  } catch {
+    return null
+  }
+}
