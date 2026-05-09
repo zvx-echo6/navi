@@ -1443,6 +1443,7 @@ const MapView = forwardRef(function MapView(_, ref) {
   const clearPickingLocationFor = useStore((s) => s.clearPickingLocationFor)
   const directionsMode = useStore((s) => s.directionsMode)
   const activeDirectionsField = useStore((s) => s.activeDirectionsField)
+  const pickingRouteField = useStore((s) => s.pickingRouteField)
 
   // Zoom level indicator state
   const [zoomLevel, setZoomLevel] = useState(10)
@@ -2001,34 +2002,30 @@ const MapView = forwardRef(function MapView(_, ref) {
         return
       }
 
-      // Handle directions mode — click fills the active field
-      const { directionsMode, activeDirectionsField, setRouteStart, setRouteEnd, setActiveDirectionsField } = useStore.getState()
-      if (directionsMode && activeDirectionsField) {
+      // Handle explicit pick-from-map mode for route inputs
+      const { pickingRouteField, setRouteStart, setRouteEnd, clearPickingRouteField } = useStore.getState()
+      if (pickingRouteField) {
         const { lng, lat } = e.lngLat
+        map.getCanvas().style.cursor = ''
         // Reverse geocode for name
         fetchReverse(lat, lng).then((place) => {
           const name = place?.name || lat.toFixed(5) + ", " + lng.toFixed(5)
           const location = { lat, lon: lng, name, source: "map_click" }
-          if (activeDirectionsField === "origin") {
+          if (pickingRouteField === "origin") {
             setRouteStart(location)
-            setActiveDirectionsField("destination")
-          } else if (activeDirectionsField === "destination") {
+          } else if (pickingRouteField === "destination") {
             setRouteEnd(location)
-            setActiveDirectionsField(null)
-          } else if (activeDirectionsField.startsWith("stop-")) {
-            // Handle intermediate stops - would need more logic
-            setActiveDirectionsField(null)
           }
+          clearPickingRouteField()
         }).catch(() => {
           const name = lat.toFixed(5) + ", " + lng.toFixed(5)
           const location = { lat, lon: lng, name, source: "map_click" }
-          if (activeDirectionsField === "origin") {
+          if (pickingRouteField === "origin") {
             setRouteStart(location)
-            setActiveDirectionsField("destination")
-          } else if (activeDirectionsField === "destination") {
+          } else if (pickingRouteField === "destination") {
             setRouteEnd(location)
-            setActiveDirectionsField(null)
           }
+          clearPickingRouteField()
         })
         return
       }
@@ -2253,6 +2250,7 @@ const MapView = forwardRef(function MapView(_, ref) {
             updateBoundaryRef.current(polygonGeometry)
           }
 
+          console.log('[TRACE-CLICK] Feature click setSelectedPlace:', { featureLat, featureLon, clickLat: lat, clickLng: lng, name: props.name })
           store.setSelectedPlace({
             lat: featureLat,
             lon: featureLon,
@@ -2284,6 +2282,7 @@ const MapView = forwardRef(function MapView(_, ref) {
             circleRadiusPx: MARKER_RADIUS_PX,
           })
 
+          console.log('[TRACE-CLICK] Reticle click setSelectedPlace:', { lat, lng })
           store.setSelectedPlace({
             lat,
             lon: lng,
