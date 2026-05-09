@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { ArrowUpDown, Plus, X, Footprints, Bike, Car, Shield, AlertTriangle, Zap } from "lucide-react"
+import { ArrowUpDown, Plus, X, Footprints, Bike, Car, Shield, AlertTriangle, Zap, Trash2 } from "lucide-react"
 import { useStore } from "../store"
 import LocationInput from "./LocationInput"
 import ManeuverList from "./ManeuverList"
@@ -37,9 +37,9 @@ export default function DirectionsPanel({ onClose }) {
   const computeRoute = useStore((s) => s.computeRoute)
   const clearRoute = useStore((s) => s.clearRoute)
   const setDirectionsMode = useStore((s) => s.setDirectionsMode)
-  const addStop = useStore((s) => s.addStop)
+  const addIntermediateStop = useStore((s) => s.addIntermediateStop)
+  const updateStop = useStore((s) => s.updateStop)
   const removeStop = useStore((s) => s.removeStop)
-  const reorderStops = useStore((s) => s.reorderStops)
 
   // Auto-fill origin with GPS if available and origin is empty
   useEffect(() => {
@@ -74,50 +74,12 @@ export default function DirectionsPanel({ onClose }) {
   }
 
   const handleAddStop = () => {
-    // Build stops array from current route endpoints if not already populated
-    let newStops = [...stops]
-    
-    // If stops is empty but we have endpoints, initialize from routeStart/routeEnd
-    if (newStops.length === 0) {
-      if (routeStart) {
-        newStops.push({
-          id: crypto.randomUUID(),
-          lat: routeStart.lat,
-          lon: routeStart.lon,
-          name: routeStart.name || "Start",
-        })
-      }
-      if (routeEnd) {
-        newStops.push({
-          id: crypto.randomUUID(),
-          lat: routeEnd.lat,
-          lon: routeEnd.lon,
-          name: routeEnd.name || "Destination",
-        })
-      }
-    }
-    
-    // Create placeholder intermediate stop
-    const newStop = {
-      id: crypto.randomUUID(),
-      lat: null,
-      lon: null,
-      name: "",
-    }
-    
-    // Insert before destination (last position), or at end if no destination
-    const insertIdx = Math.max(0, newStops.length - 1)
-    newStops.splice(insertIdx, 0, newStop)
-    
-    // Update stops array - reorderStops triggers UI update
-    reorderStops(newStops)
+    // Simply add a new empty intermediate stop
+    addIntermediateStop()
   }
 
   // Check if route has wilderness segments
   const hasWilderness = routeResult?.summary?.wilderness_distance_km > 0
-
-  // Multi-stop support: show intermediate stops from the stops array
-  const intermediateStops = stops.slice(1, -1)
 
   return (
     <div className="flex flex-col gap-3">
@@ -147,39 +109,47 @@ export default function DirectionsPanel({ onClose }) {
           autoFocus={!routeStart}
         />
 
-        {/* Swap button - positioned between inputs */}
+        {/* Intermediate stops - rendered between origin and destination */}
+        {stops.map((stop, idx) => (
+          <div key={stop.id} className="relative flex items-center gap-1">
+            <div className="flex-1">
+              <LocationInput
+                value={stop.lat != null ? { lat: stop.lat, lon: stop.lon, name: stop.name } : null}
+                onChange={(place) => {
+                  if (place) {
+                    updateStop(stop.id, place)
+                  }
+                }}
+                placeholder={`Stop ${idx + 1}`}
+                icon="stop"
+                fieldId={`stop-${idx}`}
+                autoFocus={stop.lat == null}
+              />
+            </div>
+            <button
+              onClick={() => removeStop(stop.id)}
+              className="p-1.5 rounded-lg hover:bg-[var(--bg-overlay)] transition-colors shrink-0"
+              title="Remove stop"
+            >
+              <Trash2 size={14} style={{ color: "var(--text-tertiary)" }} />
+            </button>
+          </div>
+        ))}
+
+        {/* Swap button - positioned between origin and destination (or after stops) */}
         <button
           onClick={handleSwap}
-          className="absolute right-2 top-1/2 -translate-y-1/2 z-10 p-1.5 rounded-full transition-colors"
+          className="absolute right-2 z-10 p-1.5 rounded-full transition-colors"
           style={{
             background: "var(--bg-raised)",
             border: "1px solid var(--border)",
+            top: stops.length === 0 ? "50%" : "calc(50% - 8px)",
+            transform: "translateY(-50%)",
           }}
           title="Swap origin and destination"
         >
           <ArrowUpDown size={14} style={{ color: "var(--text-secondary)" }} />
         </button>
-
-        {/* Intermediate stops (for multi-stop routes) */}
-        {intermediateStops.map((stop, idx) => (
-          <div key={stop.id} className="relative">
-            <LocationInput
-              value={{ lat: stop.lat, lon: stop.lon, name: stop.name }}
-              onChange={(place) => {
-                if (place) {
-                  const newStops = [...stops]
-                  newStops[idx + 1] = { ...newStops[idx + 1], ...place }
-                  reorderStops(newStops)
-                } else {
-                  removeStop(stop.id)
-                }
-              }}
-              placeholder="Stop"
-              icon="stop"
-              fieldId={`stop-${idx}`}
-            />
-          </div>
-        ))}
 
         {/* Destination */}
         <LocationInput
@@ -192,7 +162,7 @@ export default function DirectionsPanel({ onClose }) {
         />
 
         {/* Add stop button - only show when route exists */}
-        {routeStart && routeEnd && stops.length < 10 && (
+        {routeStart && routeEnd && stops.length < 8 && (
           <button
             onClick={handleAddStop}
             className="flex items-center justify-center gap-1.5 py-1.5 text-xs rounded-lg transition-colors"
