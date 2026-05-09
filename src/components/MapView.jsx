@@ -1672,13 +1672,24 @@ const MapView = forwardRef(function MapView(_, ref) {
           lon: radialMenu.lon,
           name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
         }
-        const { routeStart, setRouteEnd, computeRoute } = useStore.getState()
+        const { routeStart, setRouteStart, setRouteEnd, computeRoute, setDirectionsMode, geoPermission, userLocation } = useStore.getState()
+        
         setRouteEnd(place)
+        setDirectionsMode(true)
+        
         if (routeStart) {
           computeRoute()
-        } else {
-          toast("Set starting point first")
+        } else if (geoPermission === "granted" && userLocation) {
+          // Use GPS as origin fallback
+          setRouteStart({
+            lat: userLocation.lat,
+            lon: userLocation.lon,
+            name: "Your location",
+            source: "gps",
+          })
+          computeRoute()
         }
+        // If no origin and no GPS, directions panel opens and origin field auto-focuses
       },
     },
     {
@@ -1692,16 +1703,16 @@ const MapView = forwardRef(function MapView(_, ref) {
           lon: radialMenu.lon,
           name: radialMenu.centerLabel || radialMenu.lat.toFixed(5) + ", " + radialMenu.lon.toFixed(5),
         }
-        const { clearRoute, setRouteStart, routeEnd, computeRoute } = useStore.getState()
+        const { clearRoute, setRouteStart, routeEnd, computeRoute, setDirectionsMode } = useStore.getState()
         clearRoute()
         clearRouteDisplay(mapInstance.current)
         setRouteStart(place)
-        // If we already have a destination, compute route immediately
+        setDirectionsMode(true)
+        
         if (routeEnd) {
           computeRoute()
-        } else {
-          toast("Now tap destination")
         }
+        // If no destination, directions panel opens and destination field auto-focuses
       },
     },
     {

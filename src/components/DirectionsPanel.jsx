@@ -74,8 +74,43 @@ export default function DirectionsPanel({ onClose }) {
   }
 
   const handleAddStop = () => {
-    // For now, show a message - multi-stop UI is complex
-    // TODO: Implement full multi-stop UI
+    // Build stops array from current route endpoints if not already populated
+    let newStops = [...stops]
+    
+    // If stops is empty but we have endpoints, initialize from routeStart/routeEnd
+    if (newStops.length === 0) {
+      if (routeStart) {
+        newStops.push({
+          id: crypto.randomUUID(),
+          lat: routeStart.lat,
+          lon: routeStart.lon,
+          name: routeStart.name || "Start",
+        })
+      }
+      if (routeEnd) {
+        newStops.push({
+          id: crypto.randomUUID(),
+          lat: routeEnd.lat,
+          lon: routeEnd.lon,
+          name: routeEnd.name || "Destination",
+        })
+      }
+    }
+    
+    // Create placeholder intermediate stop
+    const newStop = {
+      id: crypto.randomUUID(),
+      lat: null,
+      lon: null,
+      name: "",
+    }
+    
+    // Insert before destination (last position), or at end if no destination
+    const insertIdx = Math.max(0, newStops.length - 1)
+    newStops.splice(insertIdx, 0, newStop)
+    
+    // Update stops array - reorderStops triggers UI update
+    reorderStops(newStops)
   }
 
   // Check if route has wilderness segments
