@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { ArrowUpDown, Plus, X, Footprints, Bike, Car, Shield, AlertTriangle, Zap, Trash2 } from "lucide-react"
+import { ArrowUpDown, Plus, X, Footprints, Bike, Car, Shield, AlertTriangle, Zap, Trash2, ChevronUp, ChevronDown } from "lucide-react"
 import { useStore } from "../store"
 import LocationInput from "./LocationInput"
 import ManeuverList from "./ManeuverList"
@@ -40,6 +40,7 @@ export default function DirectionsPanel({ onClose }) {
   const addIntermediateStop = useStore((s) => s.addIntermediateStop)
   const updateStop = useStore((s) => s.updateStop)
   const removeStop = useStore((s) => s.removeStop)
+  const setStops = useStore((s) => s.setStops)
 
   // Auto-fill origin with GPS if available and origin is empty
   useEffect(() => {
@@ -74,8 +75,27 @@ export default function DirectionsPanel({ onClose }) {
   }
 
   const handleAddStop = () => {
-    // Simply add a new empty intermediate stop
     addIntermediateStop()
+  }
+
+  const handleMoveStopUp = (idx) => {
+    if (idx === 0) return
+    const newStops = [...stops]
+    const temp = newStops[idx]
+    newStops[idx] = newStops[idx - 1]
+    newStops[idx - 1] = temp
+    setStops(newStops)
+    computeRoute()
+  }
+
+  const handleMoveStopDown = (idx) => {
+    if (idx >= stops.length - 1) return
+    const newStops = [...stops]
+    const temp = newStops[idx]
+    newStops[idx] = newStops[idx + 1]
+    newStops[idx + 1] = temp
+    setStops(newStops)
+    computeRoute()
   }
 
   // Check if route has wilderness segments
@@ -97,21 +117,37 @@ export default function DirectionsPanel({ onClose }) {
         </button>
       </div>
 
-      {/* Origin/Destination inputs with swap button */}
-      <div className="relative flex flex-col gap-2">
-        {/* Origin */}
-        <LocationInput
-          value={routeStart}
-          onChange={setRouteStart}
-          placeholder={geoPermission === "granted" ? "Your location" : "Choose starting point"}
-          icon="origin"
-          fieldId="origin"
-          autoFocus={!routeStart}
-        />
+      {/* Origin/Destination inputs */}
+      <div className="flex flex-col gap-2">
+        {/* Origin row with swap button on right */}
+        <div className="flex items-center gap-1">
+          <div className="flex-1">
+            <LocationInput
+              value={routeStart}
+              onChange={setRouteStart}
+              placeholder={geoPermission === "granted" ? "Your location" : "Choose starting point"}
+              icon="origin"
+              fieldId="origin"
+              autoFocus={!routeStart}
+            />
+          </div>
+          {/* Swap button - only on origin row, swaps origin and destination */}
+          <button
+            onClick={handleSwap}
+            className="p-1.5 rounded-lg hover:bg-[var(--bg-overlay)] transition-colors shrink-0"
+            style={{
+              background: "var(--bg-overlay)",
+              border: "1px solid var(--border)",
+            }}
+            title="Swap origin and destination"
+          >
+            <ArrowUpDown size={14} style={{ color: "var(--text-secondary)" }} />
+          </button>
+        </div>
 
         {/* Intermediate stops - rendered between origin and destination */}
         {stops.map((stop, idx) => (
-          <div key={stop.id} className="relative flex items-center gap-1">
+          <div key={stop.id} className="flex items-center gap-1">
             <div className="flex-1">
               <LocationInput
                 value={stop.lat != null ? { lat: stop.lat, lon: stop.lon, name: stop.name } : null}
@@ -126,6 +162,26 @@ export default function DirectionsPanel({ onClose }) {
                 autoFocus={stop.lat == null}
               />
             </div>
+            {/* Reorder buttons */}
+            <div className="flex flex-col shrink-0">
+              <button
+                onClick={() => handleMoveStopUp(idx)}
+                disabled={idx === 0}
+                className="p-0.5 rounded hover:bg-[var(--bg-overlay)] transition-colors disabled:opacity-30"
+                title="Move up"
+              >
+                <ChevronUp size={12} style={{ color: "var(--text-tertiary)" }} />
+              </button>
+              <button
+                onClick={() => handleMoveStopDown(idx)}
+                disabled={idx >= stops.length - 1}
+                className="p-0.5 rounded hover:bg-[var(--bg-overlay)] transition-colors disabled:opacity-30"
+                title="Move down"
+              >
+                <ChevronDown size={12} style={{ color: "var(--text-tertiary)" }} />
+              </button>
+            </div>
+            {/* Remove button */}
             <button
               onClick={() => removeStop(stop.id)}
               className="p-1.5 rounded-lg hover:bg-[var(--bg-overlay)] transition-colors shrink-0"
@@ -136,30 +192,21 @@ export default function DirectionsPanel({ onClose }) {
           </div>
         ))}
 
-        {/* Swap button - positioned between origin and destination (or after stops) */}
-        <button
-          onClick={handleSwap}
-          className="absolute right-2 z-10 p-1.5 rounded-full transition-colors"
-          style={{
-            background: "var(--bg-raised)",
-            border: "1px solid var(--border)",
-            top: stops.length === 0 ? "50%" : "calc(50% - 8px)",
-            transform: "translateY(-50%)",
-          }}
-          title="Swap origin and destination"
-        >
-          <ArrowUpDown size={14} style={{ color: "var(--text-secondary)" }} />
-        </button>
-
-        {/* Destination */}
-        <LocationInput
-          value={routeEnd}
-          onChange={setRouteEnd}
-          placeholder="Choose destination"
-          icon="destination"
-          fieldId="destination"
-          autoFocus={routeStart && !routeEnd}
-        />
+        {/* Destination row */}
+        <div className="flex items-center gap-1">
+          <div className="flex-1">
+            <LocationInput
+              value={routeEnd}
+              onChange={setRouteEnd}
+              placeholder="Choose destination"
+              icon="destination"
+              fieldId="destination"
+              autoFocus={routeStart && !routeEnd}
+            />
+          </div>
+          {/* Spacer to align with origin row swap button */}
+          <div className="w-[30px] shrink-0" />
+        </div>
 
         {/* Add stop button - only show when route exists */}
         {routeStart && routeEnd && stops.length < 8 && (
