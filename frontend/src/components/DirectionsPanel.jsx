@@ -1,5 +1,8 @@
-import { useEffect } from "react"
-import { ArrowUpDown, Plus, X, Footprints, Bike, Car, Shield, AlertTriangle, Zap, Trash2, ChevronUp, ChevronDown } from "lucide-react"
+import { useEffect, useMemo } from "react"
+import { ArrowUpDown, Plus, X, Footprints, Bike, Car, Shield, AlertTriangle, Zap, Trash2, GripVertical } from "lucide-react"
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core"
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { useStore } from "../store"
 import LocationInput from "./LocationInput"
 import ManeuverList from "./ManeuverList"
@@ -17,6 +20,40 @@ const BOUNDARY_MODES = [
   { id: "pragmatic", label: "Cross", Icon: AlertTriangle, title: "Cross with penalty" },
   { id: "emergency", label: "Ignore", Icon: Zap, title: "Ignore barriers" },
 ]
+
+// Sortable row component
+function SortableRow({ id, children }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 1000 : 1,
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} className="flex items-center gap-1">
+      {/* Drag handle */}
+      <button
+        {...attributes}
+        {...listeners}
+        className="p-1 rounded cursor-grab active:cursor-grabbing hover:bg-[var(--bg-overlay)] transition-colors shrink-0 touch-none"
+        title="Drag to reorder"
+      >
+        <GripVertical size={14} style={{ color: "var(--text-tertiary)" }} />
+      </button>
+      {children}
+    </div>
+  )
+}
 
 export default function DirectionsPanel({ onClose }) {
   const routeStart = useStore((s) => s.routeStart)
@@ -42,6 +79,36 @@ export default function DirectionsPanel({ onClose }) {
   const removeStop = useStore((s) => s.removeStop)
   const setStops = useStore((s) => s.setStops)
 
+  // DnD sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  // Build unified list for drag-and-drop: origin + stops + destination
+  // Each item has: { id, type, data }
+  const unifiedList = useMemo(() => {
+    const items = []
+    if (routeStart) {
+      items.push({ id: "origin", type: "origin", data: routeStart })
+    }
+    stops.forEach((stop) => {
+      items.push({ id: stop.id, type: "stop", data: stop })
+    })
+    if (routeEnd) {
+      items.push({ id: "destination", type: "destination", data: routeEnd })
+    }
+    return items
+  }, [routeStart, stops, routeEnd])
+
+  const itemIds = useMemo(() => unifiedList.map((item) => item.id), [unifiedList])
+
   // Auto-fill origin with GPS if available and origin is empty
   useEffect(() => {
     if (!routeStart && geoPermission === "granted" && userLocation) {
@@ -61,13 +128,6 @@ export default function DirectionsPanel({ onClose }) {
     }
   }, [routeStart?.lat, routeStart?.lon, routeEnd?.lat, routeEnd?.lon])
 
-  const handleSwap = () => {
-    const tempStart = routeStart
-    const tempEnd = routeEnd
-    setRouteStart(tempEnd)
-    setRouteEnd(tempStart)
-  }
-
   const handleClose = () => {
     clearRoute()
     setDirectionsMode(false)
@@ -78,24 +138,56 @@ export default function DirectionsPanel({ onClose }) {
     addIntermediateStop()
   }
 
-  const handleMoveStopUp = (idx) => {
-    if (idx === 0) return
-    const newStops = [...stops]
-    const temp = newStops[idx]
-    newStops[idx] = newStops[idx - 1]
-    newStops[idx - 1] = temp
-    setStops(newStops)
-    computeRoute()
-  }
+  // Handle drag end - reorder the unified list
+  const handleDragEnd = (event) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
 
-  const handleMoveStopDown = (idx) => {
-    if (idx >= stops.length - 1) return
-    const newStops = [...stops]
-    const temp = newStops[idx]
-    newStops[idx] = newStops[idx + 1]
-    newStops[idx + 1] = temp
+    const oldIndex = unifiedList.findIndex((item) => item.id === active.id)
+    const newIndex = unifiedList.findIndex((item) => item.id === over.id)
+
+    if (oldIndex === -1 || newIndex === -1) return
+
+    // Reorder the unified list
+    const reordered = arrayMove(unifiedList, oldIndex, newIndex)
+
+    // Extract new origin, stops, and destination from reordered list
+    // First item becomes origin, last becomes destination, middle are stops
+    if (reordered.length === 0) return
+
+    const newOriginItem = reordered[0]
+    const newDestItem = reordered.length > 1 ? reordered[reordered.length - 1] : null
+    const newStopItems = reordered.length > 2 ? reordered.slice(1, -1) : []
+
+    // Convert items to proper format
+    const newOrigin = newOriginItem.data ? {
+      lat: newOriginItem.data.lat,
+      lon: newOriginItem.data.lon,
+      name: newOriginItem.data.name,
+      source: newOriginItem.data.source,
+    } : null
+
+    const newDest = newDestItem?.data ? {
+      lat: newDestItem.data.lat,
+      lon: newDestItem.data.lon,
+      name: newDestItem.data.name,
+      source: newDestItem.data.source,
+    } : null
+
+    const newStops = newStopItems.map((item) => ({
+      id: item.id === "origin" || item.id === "destination" ? crypto.randomUUID() : item.id,
+      lat: item.data?.lat ?? null,
+      lon: item.data?.lon ?? null,
+      name: item.data?.name ?? "",
+    }))
+
+    // Update state
+    setRouteStart(newOrigin)
+    setRouteEnd(newDest)
     setStops(newStops)
-    computeRoute()
+
+    // Trigger route recalculation
+    setTimeout(() => computeRoute(), 0)
   }
 
   // Check if route has wilderness segments
@@ -117,113 +209,87 @@ export default function DirectionsPanel({ onClose }) {
         </button>
       </div>
 
-      {/* Origin/Destination inputs */}
-      <div className="flex flex-col gap-2">
-        {/* Origin row with swap button on right */}
-        <div className="flex items-center gap-1">
-          <div className="flex-1">
-            <LocationInput
-              value={routeStart}
-              onChange={setRouteStart}
-              placeholder={geoPermission === "granted" ? "Your location" : "Choose starting point"}
-              icon="origin"
-              fieldId="origin"
-              autoFocus={!routeStart}
-            />
-          </div>
-          {/* Swap button - only on origin row, swaps origin and destination */}
-          <button
-            onClick={handleSwap}
-            className="p-1.5 rounded-lg hover:bg-[var(--bg-overlay)] transition-colors shrink-0"
-            style={{
-              background: "var(--bg-overlay)",
-              border: "1px solid var(--border)",
-            }}
-            title="Swap origin and destination"
-          >
-            <ArrowUpDown size={14} style={{ color: "var(--text-secondary)" }} />
-          </button>
-        </div>
+      {/* Drag-and-drop location list */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+          <div className="flex flex-col gap-2">
+            {unifiedList.map((item, idx) => (
+              <SortableRow key={item.id} id={item.id}>
+                <div className="flex-1">
+                  {item.type === "origin" && (
+                    <LocationInput
+                      value={routeStart}
+                      onChange={setRouteStart}
+                      placeholder={geoPermission === "granted" ? "Your location" : "Choose starting point"}
+                      icon="origin"
+                      fieldId="origin"
+                      autoFocus={!routeStart}
+                    />
+                  )}
+                  {item.type === "destination" && (
+                    <LocationInput
+                      value={routeEnd}
+                      onChange={setRouteEnd}
+                      placeholder="Choose destination"
+                      icon="destination"
+                      fieldId="destination"
+                      autoFocus={routeStart && !routeEnd}
+                    />
+                  )}
+                  {item.type === "stop" && (
+                    <LocationInput
+                      value={item.data.lat != null ? { lat: item.data.lat, lon: item.data.lon, name: item.data.name } : null}
+                      onChange={(place) => {
+                        if (place) {
+                          updateStop(item.id, place)
+                        }
+                      }}
+                      placeholder={`Stop ${idx}`}
+                      icon="stop"
+                      fieldId={`stop-${item.id}`}
+                      autoFocus={item.data.lat == null}
+                    />
+                  )}
+                </div>
+                {/* Remove button for intermediate stops only */}
+                {item.type === "stop" && (
+                  <button
+                    onClick={() => removeStop(item.id)}
+                    className="p-1.5 rounded-lg hover:bg-[var(--bg-overlay)] transition-colors shrink-0"
+                    title="Remove stop"
+                  >
+                    <Trash2 size={14} style={{ color: "var(--text-tertiary)" }} />
+                  </button>
+                )}
+                {/* Spacer for origin/destination to align with stops that have remove button */}
+                {item.type !== "stop" && (
+                  <div className="w-[30px] shrink-0" />
+                )}
+              </SortableRow>
+            ))}
 
-        {/* Intermediate stops - rendered between origin and destination */}
-        {stops.map((stop, idx) => (
-          <div key={stop.id} className="flex items-center gap-1">
-            <div className="flex-1">
-              <LocationInput
-                value={stop.lat != null ? { lat: stop.lat, lon: stop.lon, name: stop.name } : null}
-                onChange={(place) => {
-                  if (place) {
-                    updateStop(stop.id, place)
-                  }
+            {/* Add stop button - only show when route exists */}
+            {routeStart && routeEnd && stops.length < 8 && (
+              <button
+                onClick={handleAddStop}
+                className="flex items-center justify-center gap-1.5 py-1.5 text-xs rounded-lg transition-colors ml-6"
+                style={{
+                  background: "var(--bg-overlay)",
+                  color: "var(--text-secondary)",
+                  border: "1px dashed var(--border)",
                 }}
-                placeholder={`Stop ${idx + 1}`}
-                icon="stop"
-                fieldId={`stop-${idx}`}
-                autoFocus={stop.lat == null}
-              />
-            </div>
-            {/* Reorder buttons */}
-            <div className="flex flex-col shrink-0">
-              <button
-                onClick={() => handleMoveStopUp(idx)}
-                disabled={idx === 0}
-                className="p-0.5 rounded hover:bg-[var(--bg-overlay)] transition-colors disabled:opacity-30"
-                title="Move up"
               >
-                <ChevronUp size={12} style={{ color: "var(--text-tertiary)" }} />
+                <Plus size={14} />
+                <span>Add stop</span>
               </button>
-              <button
-                onClick={() => handleMoveStopDown(idx)}
-                disabled={idx >= stops.length - 1}
-                className="p-0.5 rounded hover:bg-[var(--bg-overlay)] transition-colors disabled:opacity-30"
-                title="Move down"
-              >
-                <ChevronDown size={12} style={{ color: "var(--text-tertiary)" }} />
-              </button>
-            </div>
-            {/* Remove button */}
-            <button
-              onClick={() => removeStop(stop.id)}
-              className="p-1.5 rounded-lg hover:bg-[var(--bg-overlay)] transition-colors shrink-0"
-              title="Remove stop"
-            >
-              <Trash2 size={14} style={{ color: "var(--text-tertiary)" }} />
-            </button>
+            )}
           </div>
-        ))}
-
-        {/* Destination row */}
-        <div className="flex items-center gap-1">
-          <div className="flex-1">
-            <LocationInput
-              value={routeEnd}
-              onChange={setRouteEnd}
-              placeholder="Choose destination"
-              icon="destination"
-              fieldId="destination"
-              autoFocus={routeStart && !routeEnd}
-            />
-          </div>
-          {/* Spacer to align with origin row swap button */}
-          <div className="w-[30px] shrink-0" />
-        </div>
-
-        {/* Add stop button - only show when route exists */}
-        {routeStart && routeEnd && stops.length < 8 && (
-          <button
-            onClick={handleAddStop}
-            className="flex items-center justify-center gap-1.5 py-1.5 text-xs rounded-lg transition-colors"
-            style={{
-              background: "var(--bg-overlay)",
-              color: "var(--text-secondary)",
-              border: "1px dashed var(--border)",
-            }}
-          >
-            <Plus size={14} />
-            <span>Add stop</span>
-          </button>
-        )}
-      </div>
+        </SortableContext>
+      </DndContext>
 
       {/* Travel mode selector */}
       <div className="flex gap-1">
