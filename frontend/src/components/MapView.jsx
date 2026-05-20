@@ -528,6 +528,8 @@ function addPublicLands(map, themeId) {
     type: 'symbol',
     source: PUBLIC_LANDS_SOURCE,
     'source-layer': 'public_lands',
+    // Exclude PAD-US sub-polygons whose unit_nm is "Unknown <agency>" — USGS source artifact, not real label.
+    filter: ['!', ['==', ['slice', ['coalesce', ['get', 'name'], ''], 0, 8], 'Unknown ']],
     minzoom: 10,
     layout: {
       'text-field': ['get', 'name'],
