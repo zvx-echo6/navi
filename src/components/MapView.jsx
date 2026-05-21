@@ -560,9 +560,11 @@ function removePublicLands(map) {
 }
 
 /** Add topographic contours via maplibre-contour */
-function addContours(map) {
-  console.log('[CONTOUR] addContours called, source exists:', !!map?.getSource(CONTOUR_SOURCE), 'demSource:', !!demSourceInstance)
+function addContours(map, themeId) {
+  console.log("[CONTOUR] addContours called, source exists:", !!map?.getSource(CONTOUR_SOURCE), "demSource:", !!demSourceInstance)
   if (!map || !demSourceInstance || map.getSource(CONTOUR_SOURCE)) return
+
+  const c = getOverlayConfig(themeId, "contours")
   const contourThresholds = {
     3:  [5000, 25000],
     4:  [2500, 10000],
@@ -579,54 +581,69 @@ function addContours(map) {
     15: [20, 100],
   }
   map.addSource(CONTOUR_SOURCE, {
-    type: 'vector',
+    type: "vector",
     tiles: [demSourceInstance.contourProtocolUrl({
       multiplier: 3.28084,
       thresholds: contourThresholds,
     })],
     maxzoom: 16,
   })
-  console.log('[CONTOUR] protocol URL:', demSourceInstance.contourProtocolUrl({
+  console.log("[CONTOUR] protocol URL:", demSourceInstance.contourProtocolUrl({
     multiplier: 3.28084,
     thresholds: contourThresholds,
   }))
-  console.log('[CONTOUR] source added:', !!map.getSource(CONTOUR_SOURCE))
+  console.log("[CONTOUR] source added:", !!map.getSource(CONTOUR_SOURCE))
   let beforeId = undefined
   for (const layer of map.getStyle().layers) {
-    if (layer.type === 'symbol') { beforeId = layer.id; break }
+    if (layer.type === "symbol") { beforeId = layer.id; break }
   }
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+
+  // Line layer with theme-aware colors
+  // maplibre-contour level: 0 = minor, 1 = index (major)
+  const opacityMod = c.opacityMod ?? 1
   map.addLayer({
-    id: CONTOUR_LINE, type: 'line', source: CONTOUR_SOURCE,
-    'source-layer': 'contours',
+    id: CONTOUR_LINE, type: "line", source: CONTOUR_SOURCE,
+    "source-layer": "contours",
     paint: {
-      'line-color': 'rgba(0,0,0,0.35)',
-      'line-width': [
-        'interpolate', ['linear'], ['zoom'],
-        7, ['match', ['get', 'level'], 1, 1, 0.3],
-        11, ['match', ['get', 'level'], 1, 1.5, 0.6],
-        14, ['match', ['get', 'level'], 1, 2, 0.8],
+      "line-color": [
+        "match", ["get", "level"],
+        1, c.indexColor,
+        c.minorColor
+      ],
+      "line-opacity": [
+        "match", ["get", "level"],
+        1, c.indexOpacity * opacityMod,
+        c.minorOpacity * opacityMod
+      ],
+      "line-width": [
+        "interpolate", ["linear"], ["zoom"],
+        7, ["match", ["get", "level"], 1, c.indexWidth?.z4 ?? 1.2, c.minorWidth?.z11 ?? 0.5],
+        11, ["match", ["get", "level"], 1, ((c.indexWidth?.z4 ?? 1.2) + (c.indexWidth?.z14 ?? 1.8)) / 2, ((c.minorWidth?.z11 ?? 0.5) + (c.minorWidth?.z14 ?? 1.0)) / 2],
+        14, ["match", ["get", "level"], 1, c.indexWidth?.z14 ?? 1.8, c.minorWidth?.z14 ?? 1.0],
       ],
     },
   }, beforeId)
+
+  // Label layer for index contours (level > 0)
   map.addLayer({
-    id: CONTOUR_LABEL, type: 'symbol', source: CONTOUR_SOURCE,
-    'source-layer': 'contours',
-    filter: ['>', ['get', 'level'], 0],
+    id: CONTOUR_LABEL, type: "symbol", source: CONTOUR_SOURCE,
+    "source-layer": "contours",
+    filter: [">", ["get", "level"], 0],
     layout: {
-      'symbol-placement': 'line',
-      'text-size': ['interpolate', ['linear'], ['zoom'], 7, 9, 11, 11, 14, 13],
-      'text-field': ['concat', ['number-format', ['get', 'ele'], {}], "'"],
-      'text-font': ['Noto Sans Medium'],
-      'text-max-angle': 25,
+      "symbol-placement": "line",
+      "text-size": c.labelSize ?? 10,
+      "text-field": ["concat", ["number-format", ["get", "ele"], {}], "'"],
+      "text-font": c.labelFont ?? ["Noto Sans Regular"],
+      "text-max-angle": 25,
     },
     paint: {
-      'text-color': 'rgba(0,0,0,0.7)',
-      'text-halo-color': 'rgba(255,255,255,0.9)',
-      'text-halo-width': 1.5,
+      "text-color": c.labelColor,
+      "text-halo-color": c.labelHaloColor,
+      "text-halo-width": c.labelHaloWidth ?? 1.5,
+      "text-opacity": (c.labelOpacity ?? 0.85) * opacityMod,
     },
   })
-  console.log('[CONTOUR] layers added:', !!map.getLayer(CONTOUR_LINE), !!map.getLayer(CONTOUR_LABEL))
+  console.log("[CONTOUR] layers added:", !!map.getLayer(CONTOUR_LINE), !!map.getLayer(CONTOUR_LABEL))
 }
 
 /** Remove contour layers + source */
