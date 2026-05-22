@@ -21,6 +21,10 @@ const FALLBACK_CONFIG = {
     address_book: '/api/address_book',
     valhalla: '/valhalla',
   },
+  auth: {
+    login_url: '/outpost.goauthentik.io/start?rd=%2F',
+    logout_url: 'https://auth.echo6.co/if/flow/default-invalidation-flow/?next=https://navi.echo6.co/',
+  },
   features: {
     has_nominatim_details: false,
     has_kiwix_wiki: false,
