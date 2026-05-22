@@ -3,6 +3,7 @@ import { LogIn, LogOut, Footprints, Bike, Car, Shield, AlertTriangle, Zap, X, Ma
 import ThemePicker from './ThemePicker'
 import { useStore, usePanelState } from '../store'
 import { hasFeature } from '../config'
+import { useConfig } from '../hooks/useConfig'
 import SearchBar from './SearchBar'
 import ManeuverList from './ManeuverList'
 import ContactList from './ContactList'
@@ -54,6 +55,7 @@ export default function Panel({ onClearRoute }) {
   const dragStartState = useRef('half')
 
   const showContacts = hasFeature('has_contacts') && auth.authenticated
+  const cfg = useConfig()
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
@@ -62,8 +64,12 @@ export default function Panel({ onClearRoute }) {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  const handleLogin = () => { window.location.href = '/outpost.goauthentik.io/start?rd=%2F' }
-  const handleLogout = () => { window.location.href = 'https://auth.echo6.co/if/flow/default-invalidation-flow/?next=https://navi.echo6.co/' }
+  // Auth URLs come from /api/config (config.auth.*); the literals are the
+  // current home-profile values, kept as fallback for an older backend that
+  // doesn't yet serve `auth`, or when FALLBACK_CONFIG is in use (offline).
+  // TODO(navi): add tests when test infra lands — see extraction #2 PR-C
+  const handleLogin = () => { window.location.href = cfg?.auth?.login_url ?? '/outpost.goauthentik.io/start?rd=%2F' }
+  const handleLogout = () => { window.location.href = cfg?.auth?.logout_url ?? 'https://auth.echo6.co/if/flow/default-invalidation-flow/?next=https://navi.echo6.co/' }
 
   const handleTouchStart = useCallback((e) => {
     dragStartY.current = e.touches[0].clientY
