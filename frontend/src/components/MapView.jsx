@@ -2400,7 +2400,9 @@ const MapView = forwardRef(function MapView(_, ref) {
             addHillshade(map, currentThemeRef.current)
             activeLayersRef.current.hillshade = true
           }
-          if (prefs.traffic && hasFeature('has_traffic_overlay')) {
+          // Traffic tiles are auth-gated at the edge — don't re-add for an
+          // anonymous session (would 302 -> MapLibre retry loop).
+          if (prefs.traffic && hasFeature('has_traffic_overlay') && useStore.getState().auth.authenticated) {
             addTraffic(map, currentThemeRef.current)
             activeLayersRef.current.traffic = true
           }
