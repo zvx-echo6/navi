@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Layers, Map, Satellite, Globe } from 'lucide-react'
 import { hasFeature, getConfig } from '../config'
+import { useConfig } from '../hooks/useConfig'
 import { useStore } from '../store'
 
 const STORAGE_KEY = 'navi-layer-prefs'
@@ -33,7 +34,14 @@ export default function LayerControl({ mapRef }) {
   const viewMode = useStore((s) => s.viewMode)
   const setViewMode = useStore((s) => s.setViewMode)
 
-  // Initialize from localStorage or defaults on mount
+  // Auth state — Traffic tiles are auth-gated at the edge (Caddy @authed_api),
+  // so the toggle is only usable when authenticated. config drives re-init once
+  // /api/config resolves (so saved prefs hydrate against known feature flags).
+  const auth = useStore((s) => s.auth)
+  const config = useConfig()
+  const trafficDisabled = !auth.loaded || !auth.authenticated
+
+  // Initialize from localStorage or defaults on mount (re-runs when config loads)
   useEffect(() => {
     const saved = loadPrefs()
     const hsAvailable = hasFeature('has_hillshade')
@@ -47,7 +55,7 @@ export default function LayerControl({ mapRef }) {
 
     if (saved) {
       setHillshade(hsAvailable && (saved.hillshade ?? true))
-      setTraffic(trAvailable && (saved.traffic ?? false))
+      setTraffic(trAvailable && auth.authenticated && (saved.traffic ?? false))
       setPublicLands(plAvailable && (saved.publicLands ?? false))
       setContours(ctAvailable && (saved.contours ?? false))
       setContoursTest(ctTestAvailable && (saved.contoursTest ?? false))
@@ -64,7 +72,14 @@ export default function LayerControl({ mapRef }) {
       setContoursTest10ft(false)
       setUsfsTrails(false)
     }
-  }, [])
+  }, [config])
+
+  // Tear down traffic when the session goes anonymous (only after auth has
+  // loaded, so we don't tear down during the brief pre-whoami window on reload).
+  // Flipping the pref off drives the apply effect below -> removeTrafficLayer.
+  useEffect(() => {
+    if (auth.loaded && !auth.authenticated && traffic) setTraffic(false)
+  }, [auth.loaded, auth.authenticated])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Apply layers when prefs change
   useEffect(() => {
@@ -97,7 +112,7 @@ export default function LayerControl({ mapRef }) {
     if (!map) return
 
     const apply = () => {
-      if (traffic && hasFeature('has_traffic_overlay')) {
+      if (traffic && hasFeature('has_traffic_overlay') && auth.authenticated) {
         mapView.addTrafficLayer?.()
       } else {
         mapView.removeTrafficLayer?.()
@@ -111,7 +126,7 @@ export default function LayerControl({ mapRef }) {
     }
     savePrefs({ hillshade, traffic, publicLands, contours, contoursTest, contoursTest10ft, usfsTrails, blmTrails })
     return () => map.off('style.load', apply)
-  }, [traffic, mapRef])
+  }, [traffic, mapRef, auth.authenticated])
 
   useEffect(() => {
     const mapView = mapRef?.current
@@ -343,12 +358,17 @@ export default function LayerControl({ mapRef }) {
           )}
 
           {showTraffic && (
-            <label className="layer-control-item">
+            <label
+              className="layer-control-item"
+              title={trafficDisabled ? 'Sign in to enable traffic' : undefined}
+              style={trafficDisabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+            >
               <span className="layer-control-label">Traffic</span>
               <input
                 type="checkbox"
                 className="layer-control-toggle"
                 checked={traffic}
+                disabled={trafficDisabled}
                 onChange={(e) => setTraffic(e.target.checked)}
               />
             </label>
