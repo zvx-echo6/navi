@@ -325,8 +325,9 @@ export default function DirectionsPanel({ onClose }) {
         </div>
       )}
 
-      {/* Boundary mode selector (only for non-auto modes) */}
-      {routeMode !== "auto" && (
+      {/* Boundary mode selector — hidden only for Drive (vehicle), which is pure
+          Valhalla road routing; Auto/Foot/MTB/ATV may traverse wilderness. */}
+      {routeMode !== "vehicle" && (
         <div className="flex gap-1">
           {BOUNDARY_MODES.map((m) => {
             const active = boundaryMode === m.id
