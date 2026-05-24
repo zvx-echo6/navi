@@ -68,6 +68,10 @@ MODE_TO_COSTING = {
     "vehicle": "auto",
 }
 
+# Auto mode probes these concrete modes in capability order (most -> least
+# demanding terrain) and uses the first that yields a usable route.
+AUTO_MODE_PRIORITY = ["vehicle", "atv", "mtb", "foot"]
+
 # Mode to valid entry point highway classes
 # foot = any trail/track/road, mtb = tracks and roads, vehicle = roads only
 MODE_TO_VALID_HIGHWAYS = {
@@ -511,7 +515,7 @@ class OffrouteRouter:
         start_lon: float,
         end_lat: float,
         end_lon: float,
-        mode: Literal["foot", "mtb", "atv", "vehicle"] = "foot",
+        mode: Literal["auto", "foot", "mtb", "atv", "vehicle"] = "foot",
         boundary_mode: Literal["strict", "pragmatic", "emergency"] = "pragmatic"
     ) -> Dict:
         """
@@ -531,6 +535,11 @@ class OffrouteRouter:
 
         Returns a GeoJSON FeatureCollection with route segments.
         """
+        if mode == "auto":
+            return self._route_auto(
+                start_lat, start_lon, end_lat, end_lon, boundary_mode
+            )
+
         if mode not in MODE_TO_COSTING:
             return {"status": "error", "message": f"Unknown mode: {mode}"}
 
@@ -562,6 +571,37 @@ class OffrouteRouter:
             return self._route_B_wilderness_both(
                 start_lat, start_lon, end_lat, end_lon, mode, boundary_mode
             )
+
+    def _route_auto(
+        self,
+        start_lat: float, start_lon: float,
+        end_lat: float, end_lon: float,
+        boundary_mode: str
+    ) -> Dict:
+        """
+        Auto mode: pick the best concrete travel mode by terrain feasibility.
+
+        Probes AUTO_MODE_PRIORITY (vehicle -> atv -> mtb -> foot) and returns the
+        first mode whose network can serve the route. Each candidate's route()
+        already reports status="error" when its network can't reach an endpoint,
+        so the first status="ok" is the most road-capable feasible mode. The chosen
+        mode is reported back as result["selected_mode"] for the UI.
+        """
+        last_error = None
+        for candidate in AUTO_MODE_PRIORITY:
+            result = self.route(
+                start_lat, start_lon, end_lat, end_lon,
+                mode=candidate, boundary_mode=boundary_mode
+            )
+            if result.get("status") == "ok":
+                result["selected_mode"] = candidate
+                return result
+            last_error = result
+
+        return last_error or {
+            "status": "error",
+            "message": "No route found in any mode"
+        }
 
     def _route_D_network_only(
         self,

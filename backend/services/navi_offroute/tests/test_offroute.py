@@ -256,3 +256,70 @@ def test_admin_info_no_secrets_and_probes(client, monkeypatch):
     assert {'dem', 'osm_pbf', 'navi_db', 'barriers_tif', 'wilderness_tif',
             'trails_tif', 'friction_vrt'} == fs_names
     assert all(set(f) == {'name', 'path', 'exists', 'readable'} for f in d['filesystem'])
+
+
+# ── OffrouteRouter._route_auto — feasibility-based mode selection ─────────
+# Tested in isolation: a bare router (no __init__/readers) with OffrouteRouter.route
+# monkeypatched to a per-mode fixture. Exercises _route_auto directly, not the blueprint.
+
+from services.navi_offroute.router import OffrouteRouter, AUTO_MODE_PRIORITY
+
+
+def _stub_route(per_mode, calls):
+    def stub(self, start_lat, start_lon, end_lat, end_lon, mode="foot", boundary_mode="pragmatic"):
+        calls.append(mode)
+        return dict(per_mode[mode])
+    return stub
+
+
+def test_route_auto_first_probe_ok_returns_vehicle(monkeypatch):
+    calls = []
+    per_mode = {m: {"status": "ok"} for m in AUTO_MODE_PRIORITY}
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
+    assert out["status"] == "ok"
+    assert out["selected_mode"] == "vehicle"
+    assert calls == ["vehicle"]  # stops probing after first success
+
+
+def test_route_auto_falls_through_to_foot(monkeypatch):
+    calls = []
+    per_mode = {
+        "vehicle": {"status": "error", "message": "No roads found"},
+        "atv": {"status": "error", "message": "No tracks found"},
+        "mtb": {"status": "error", "message": "No tracks found"},
+        "foot": {"status": "ok"},
+    }
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
+    assert out["status"] == "ok"
+    assert out["selected_mode"] == "foot"
+    assert calls == ["vehicle", "atv", "mtb", "foot"]
+
+
+def test_route_auto_all_error_returns_error(monkeypatch):
+    calls = []
+    per_mode = {m: {"status": "error", "message": f"{m} failed"} for m in AUTO_MODE_PRIORITY}
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
+    assert out["status"] == "error"
+    assert "selected_mode" not in out
+    assert calls == ["vehicle", "atv", "mtb", "foot"]
+
+
+def test_route_auto_selected_mode_present_in_ok_response(monkeypatch):
+    calls = []
+    per_mode = {
+        "vehicle": {"status": "error", "message": "No roads found"},
+        "atv": {"status": "ok", "route": {"type": "FeatureCollection", "features": []}},
+        "mtb": {"status": "ok"},
+        "foot": {"status": "ok"},
+    }
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
+    assert out["status"] == "ok"
+    assert "selected_mode" in out and out["selected_mode"] == "atv"
