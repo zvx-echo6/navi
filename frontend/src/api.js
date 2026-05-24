@@ -331,7 +331,7 @@ const MVUM_URL = "/api/mvum"
  * Request an offroute route from the pathfinder API.
  * @param {object} start - { lat, lon }
  * @param {object} end - { lat, lon }
- * @param {string} mode - foot | mtb | atv | vehicle
+ * @param {string} mode - auto | foot | mtb | atv | vehicle
  * @param {string} boundaryMode - strict | pragmatic | emergency
  * @returns {Promise<object>} Offroute response with GeoJSON route
  */
