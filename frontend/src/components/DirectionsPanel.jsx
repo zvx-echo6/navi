@@ -8,12 +8,15 @@ import LocationInput from "./LocationInput"
 import ManeuverList from "./ManeuverList"
 
 const TRAVEL_MODES = [
-  { id: "auto", label: "Drive", Icon: Car },
+  { id: "auto", label: "Auto", Icon: Zap },
   { id: "foot", label: "Foot", Icon: Footprints },
   { id: "mtb", label: "MTB", Icon: Bike },
   { id: "atv", label: "ATV", Icon: Car },
-  { id: "vehicle", label: "4x4", Icon: Car },
+  { id: "vehicle", label: "Drive", Icon: Car },
 ]
+
+// Maps the backend's selected_mode to the chip label shown in the "Auto chose X" badge.
+const SELECTED_MODE_LABEL = { vehicle: "Drive", atv: "ATV", mtb: "MTB", foot: "Foot" }
 
 const BOUNDARY_MODES = [
   { id: "strict", label: "Strict", Icon: Shield, title: "Avoid barriers" },
@@ -312,6 +315,17 @@ export default function DirectionsPanel({ onClose }) {
           )
         })}
       </div>
+
+      {/* Auto mode: show which travel mode feasibility picked */}
+      {routeMode === "auto" && routeResult?.selected_mode && (
+        <div
+          className="flex items-center justify-center gap-1 py-1.5 text-xs rounded-lg"
+          style={{ background: "var(--accent-muted)", color: "var(--accent)" }}
+        >
+          <Zap size={14} />
+          <span>{`Auto chose ${SELECTED_MODE_LABEL[routeResult.selected_mode] || routeResult.selected_mode}`}</span>
+        </div>
+      )}
 
       {/* Boundary mode selector (only for non-auto modes) */}
       {routeMode !== "auto" && (
