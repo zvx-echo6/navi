@@ -98,15 +98,13 @@ export default function DirectionsPanel({ onClose }) {
   // Each item has: { id, type, data }
   const unifiedList = useMemo(() => {
     const items = []
-    if (routeStart) {
-      items.push({ id: "origin", type: "origin", data: routeStart })
-    }
+    // Always render origin first and destination last, even when unset (data:null);
+    // LocationInput shows its placeholder for value={null}. Stops sit in between.
+    items.push({ id: "origin", type: "origin", data: routeStart })
     stops.forEach((stop) => {
       items.push({ id: stop.id, type: "stop", data: stop })
     })
-    if (routeEnd) {
-      items.push({ id: "destination", type: "destination", data: routeEnd })
-    }
+    items.push({ id: "destination", type: "destination", data: routeEnd })
     return items
   }, [routeStart, stops, routeEnd])
 
