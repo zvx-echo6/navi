@@ -56,8 +56,10 @@ EXPANDED_SEARCH_RADIUS_KM = 100
 # Memory limit
 MEMORY_LIMIT_GB = 12
 
-# Off-network detection threshold (meters)
-OFF_NETWORK_THRESHOLD_M = 10
+# Off-network detection threshold (meters). Geocoded street addresses commonly
+# snap 20-50m from the road centerline, so a tight value forces normal road routes
+# into wilderness pathfinding; 50m keeps on-road endpoints on-network.
+OFF_NETWORK_THRESHOLD_M = 50
 
 # Mode to Valhalla costing mapping
 MODE_TO_COSTING = {
