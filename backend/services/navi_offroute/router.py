@@ -751,9 +751,9 @@ class OffrouteRouter:
 
         Each endpoint's eligible modes come from its category type-hint
         (CATEGORY_ELIGIBLE_MODES); an untyped endpoint falls back to a spatial
-        Valhalla-snap probe. Auto probes only the intersection of both endpoints'
-        eligible sets, in AUTO_MODE_PRIORITY order, returning the first route() that
-        succeeds. selected_mode + selected_mode_set are added for visibility.
+        Valhalla-snap probe. Auto probes the intersection of both endpoints'
+        eligible sets and returns the candidate that minimises total trip time.
+        selected_mode + selected_mode_set are added for visibility.
         """
         snap_cache = {}
         start_typed = self._eligible_modes_from_category(start_category)
@@ -788,6 +788,13 @@ class OffrouteRouter:
 
         priority = [m for m in AUTO_MODE_PRIORITY if m in intersection]
 
+        # Probe every eligible candidate and pick the one that minimises total trip
+        # time, NOT the first that succeeds. When the start is in wilderness and the
+        # end is on-road, falling through to foot would compute the whole network leg
+        # at foot pace. The wilderness leg always uses foot regardless; the candidate
+        # only changes the network leg.
+        best_result = None
+        best_minutes = None
         last_error = None
         for candidate in priority:
             result = self.route(
@@ -795,10 +802,18 @@ class OffrouteRouter:
                 mode=candidate, boundary_mode=boundary_mode
             )
             if result.get("status") == "ok":
-                result["selected_mode"] = candidate
-                result["selected_mode_set"] = mode_set
-                return result
-            last_error = result
+                minutes = (result.get("summary") or {}).get(
+                    "total_effort_minutes", float("inf"))
+                if best_minutes is None or minutes < best_minutes:
+                    best_minutes = minutes
+                    best_result = result
+                    best_result["selected_mode"] = candidate
+            else:
+                last_error = result
+
+        if best_result is not None:
+            best_result["selected_mode_set"] = mode_set
+            return best_result
 
         if last_error is not None:
             last_error["selected_mode_set"] = mode_set
@@ -898,6 +913,8 @@ class OffrouteRouter:
                     "wilderness_effort_minutes": 0.0,
                     "network_distance_km": float(distance_km),
                     "network_duration_minutes": float(duration_min),
+                    "wilderness_minutes": 0.0,
+                    "network_minutes": float(duration_min),
                     "on_trail_pct": 100.0,
                     "barrier_crossings": 0,
                     "network_mode": mode,
@@ -1800,6 +1817,8 @@ class OffrouteRouter:
             "wilderness_effort_minutes": float(wilderness_effort_minutes),
             "network_distance_km": float(network_distance_km),
             "network_duration_minutes": float(network_duration_minutes),
+            "wilderness_minutes": float(wilderness_effort_minutes),
+            "network_minutes": float(network_duration_minutes),
             "on_trail_pct": float(on_trail_pct),
             "barrier_crossings": barrier_crossings,
             "boundary_mode": boundary_mode,
