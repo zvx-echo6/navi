@@ -67,14 +67,16 @@ AUTO_SNAP_RELAXED_M = 100  # near the edge -> vehicle needs paved + flat terrain
 FLAT_TERRAIN_DELTA_M = 5
 FLAT_SAMPLE_RADIUS_M = 50
 
-# Highway-class buckets used by the spatial eligibility rules.
+# Spatial eligibility vocabulary. Valhalla's verbose /locate exposes the road grade
+# under classification.classification (PAVED below) and the edge purpose under
+# classification.use (TRACK/PATH below) — track/path/footway are NOT road grades.
 PAVED_HIGHWAY_CLASSES = frozenset({
     "motorway", "trunk", "primary", "secondary", "tertiary",
-    "unclassified", "residential", "service",
+    "unclassified", "residential", "service", "service_other",
 })
-TRACK_HIGHWAY_CLASSES = frozenset({"track"})
-PATH_HIGHWAY_CLASSES = frozenset({
-    "path", "footway", "bridleway", "steps", "pedestrian", "cycleway",
+TRACK_USE_VALUES = frozenset({"track"})
+PATH_USE_VALUES = frozenset({
+    "path", "footway", "cycleway", "bridleway", "steps", "pedestrian",
 })
 
 # Mode to Valhalla costing mapping
@@ -553,9 +555,11 @@ class OffrouteRouter:
                         "snap_distance_m": snap_dist,
                         "snapped_lat": snap_lat,
                         "snapped_lon": snap_lon,
-                        # Valhalla puts the highway class under edge.classification.classification
-                        # (verbose=true); defensive .get chain so missing keys yield None.
+                        # Valhalla (verbose=true) puts the road grade under
+                        # edge.classification.classification and the edge purpose under
+                        # edge.classification.use; defensive .get chains -> None if absent.
                         "road_class": edge.get("edge", {}).get("classification", {}).get("classification"),
+                        "use": edge.get("edge", {}).get("classification", {}).get("use"),
                     }
         except Exception:
             pass
@@ -566,6 +570,7 @@ class OffrouteRouter:
             "snapped_lat": lat,
             "snapped_lon": lon,
             "road_class": None,
+            "use": None,
         }
 
     def route(
@@ -693,8 +698,10 @@ class OffrouteRouter:
 
         auto_snap = snap_cache[(lat, lon, "auto")]
         bike_snap = snap_cache[(lat, lon, "bicycle")]
-        d_auto, cls_auto = auto_snap["snap_distance_m"], auto_snap.get("road_class")
-        d_bike, cls_bike = bike_snap["snap_distance_m"], bike_snap.get("road_class")
+        d_auto = auto_snap["snap_distance_m"]
+        cls_auto, use_auto = auto_snap.get("road_class"), auto_snap.get("use")
+        d_bike = bike_snap["snap_distance_m"]
+        cls_bike, use_bike = bike_snap.get("road_class"), bike_snap.get("use")
 
         modes = {"foot"}  # foot is always eligible
         # vehicle: on a paved road (tight), or near one if paved AND flat (relaxed)
@@ -702,12 +709,14 @@ class OffrouteRouter:
            (d_auto <= AUTO_SNAP_RELAXED_M and cls_auto in PAVED_HIGHWAY_CLASSES
                 and self._is_terrain_flat(lat, lon)):
             modes.add("vehicle")
-        # atv: on/near a paved or track edge
-        if d_auto <= AUTO_SNAP_RELAXED_M and cls_auto in (PAVED_HIGHWAY_CLASSES | TRACK_HIGHWAY_CLASSES):
+        # atv: near a paved road OR a track (auto costing)
+        if d_auto <= AUTO_SNAP_RELAXED_M and (
+                cls_auto in PAVED_HIGHWAY_CLASSES or use_auto in TRACK_USE_VALUES):
             modes.add("atv")
-        # mtb: on/near a paved, track, or path edge (bicycle costing)
-        if d_bike <= AUTO_SNAP_RELAXED_M and cls_bike in (
-                PAVED_HIGHWAY_CLASSES | TRACK_HIGHWAY_CLASSES | PATH_HIGHWAY_CLASSES):
+        # mtb: near a paved road OR a track/path (bicycle costing)
+        if d_bike <= AUTO_SNAP_RELAXED_M and (
+                cls_bike in PAVED_HIGHWAY_CLASSES
+                or use_bike in (TRACK_USE_VALUES | PATH_USE_VALUES)):
             modes.add("mtb")
         return frozenset(modes)
 

@@ -418,3 +418,50 @@ def test_route_auto_both_unknown_uses_spatial_fallback(monkeypatch):
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")  # no categories
     assert len(spatial_calls) == 2  # both endpoints resolved spatially
     assert out["selected_mode"] == "vehicle"
+
+
+# ── _spatial_eligible_modes — Valhalla classification.classification + .use ──
+# _locate_on_network is monkeypatched to inject snap fixtures (road_class + use).
+
+def _stub_locate_fixed(snap):
+    def stub(self, lat, lon, mode="vehicle"):
+        return dict(snap)
+    return stub
+
+
+def test_spatial_service_other_picks_vehicle(monkeypatch):
+    # (a) paved grade "service_other" close in -> vehicle eligible (tight tier)
+    snap = {"snap_distance_m": 3.0, "road_class": "service_other", "use": "road"}
+    monkeypatch.setattr(OffrouteRouter, "_locate_on_network", _stub_locate_fixed(snap))
+    r = object.__new__(OffrouteRouter)
+    modes = r._spatial_eligible_modes(43.6, -116.2, {})
+    assert "vehicle" in modes
+    assert modes == frozenset({"vehicle", "atv", "mtb", "foot"})
+
+
+def test_spatial_use_track_picks_atv_mtb_foot(monkeypatch):
+    # (b) no road grade, use="track" -> atv/mtb/foot, NOT vehicle
+    snap = {"snap_distance_m": 20.0, "road_class": None, "use": "track"}
+    monkeypatch.setattr(OffrouteRouter, "_locate_on_network", _stub_locate_fixed(snap))
+    r = object.__new__(OffrouteRouter)
+    modes = r._spatial_eligible_modes(43.6, -116.2, {})
+    assert modes == frozenset({"atv", "mtb", "foot"})
+    assert "vehicle" not in modes
+
+
+def test_spatial_use_footway_picks_mtb_foot(monkeypatch):
+    # (c) no road grade, use="footway" -> mtb/foot (path, not track -> no atv)
+    snap = {"snap_distance_m": 20.0, "road_class": None, "use": "footway"}
+    monkeypatch.setattr(OffrouteRouter, "_locate_on_network", _stub_locate_fixed(snap))
+    r = object.__new__(OffrouteRouter)
+    modes = r._spatial_eligible_modes(43.6, -116.2, {})
+    assert modes == frozenset({"mtb", "foot"})
+
+
+def test_spatial_no_class_no_use_picks_foot(monkeypatch):
+    # (d) nothing recognized -> foot only
+    snap = {"snap_distance_m": 20.0, "road_class": None, "use": None}
+    monkeypatch.setattr(OffrouteRouter, "_locate_on_network", _stub_locate_fixed(snap))
+    r = object.__new__(OffrouteRouter)
+    modes = r._spatial_eligible_modes(43.6, -116.2, {})
+    assert modes == frozenset({"foot"})
