@@ -512,3 +512,50 @@ def test_has_entry_points_empty(monkeypatch):
 def test_has_entry_points_rows(monkeypatch):
     idx = _bare_index(monkeypatch, table_exists=True, row=(True,))
     assert idx.has_entry_points() is True
+
+
+# ── EntryPointIndex.query_radius — k-NN <-> ordering + radius soft cap ─────
+
+class _FakeCurQ:
+    def __init__(self, rows, capture):
+        self._rows, self._capture = rows, capture
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def execute(self, q, params=None):
+        self._capture["query"] = q
+        self._capture["params"] = params
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConnQ:
+    def __init__(self, rows, capture):
+        self._rows, self._capture = rows, capture
+    def cursor(self, cursor_factory=None):
+        return _FakeCurQ(self._rows, self._capture)
+
+
+def test_query_radius_uses_knn_sql(monkeypatch):
+    cap = {}
+    monkeypatch.setattr(EntryPointIndex, "table_exists", lambda self: True)
+    monkeypatch.setattr(EntryPointIndex, "_get_conn", lambda self: _FakeConnQ([], cap))
+    idx = object.__new__(EntryPointIndex)
+    idx.query_radius(44.1, -115.0, 50, limit=10)
+    assert "<->" in cap["query"]
+    assert "LIMIT" in cap["query"]
+    assert "ST_DWithin" not in cap["query"]  # radius scan removed
+
+
+def test_query_radius_soft_cap_filters_beyond_radius(monkeypatch):
+    rows = [
+        {"id": 1, "distance_m": 100.0},
+        {"id": 2, "distance_m": 50000.0},
+        {"id": 3, "distance_m": 200000.0},  # beyond 50km cap -> dropped
+    ]
+    monkeypatch.setattr(EntryPointIndex, "table_exists", lambda self: True)
+    monkeypatch.setattr(EntryPointIndex, "_get_conn", lambda self: _FakeConnQ(rows, {}))
+    idx = object.__new__(EntryPointIndex)
+    out = idx.query_radius(44.1, -115.0, 50, limit=10)  # 50 km = 50000 m cap
+    assert [r["id"] for r in out] == [1, 2]
