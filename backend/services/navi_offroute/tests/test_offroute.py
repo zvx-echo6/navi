@@ -465,3 +465,50 @@ def test_spatial_no_class_no_use_picks_foot(monkeypatch):
     r = object.__new__(OffrouteRouter)
     modes = r._spatial_eligible_modes(43.6, -116.2, {})
     assert modes == frozenset({"foot"})
+
+
+# ── EntryPointIndex.has_entry_points — EXISTS guard (replaces COUNT(*)) ────
+# Bare index (no __init__/DB); table_exists + _get_conn monkeypatched.
+
+from services.navi_offroute.router import EntryPointIndex
+
+
+class _FakeCur:
+    def __init__(self, row):
+        self._row = row
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def execute(self, q, *a):
+        self.q = q
+    def fetchone(self):
+        return self._row
+
+
+class _FakeConn:
+    def __init__(self, row):
+        self._row = row
+    def cursor(self):
+        return _FakeCur(self._row)
+
+
+def _bare_index(monkeypatch, table_exists, row=None):
+    monkeypatch.setattr(EntryPointIndex, "table_exists", lambda self: table_exists)
+    monkeypatch.setattr(EntryPointIndex, "_get_conn", lambda self: _FakeConn(row))
+    return object.__new__(EntryPointIndex)
+
+
+def test_has_entry_points_table_missing(monkeypatch):
+    idx = _bare_index(monkeypatch, table_exists=False)
+    assert idx.has_entry_points() is False
+
+
+def test_has_entry_points_empty(monkeypatch):
+    idx = _bare_index(monkeypatch, table_exists=True, row=(False,))
+    assert idx.has_entry_points() is False
+
+
+def test_has_entry_points_rows(monkeypatch):
+    idx = _bare_index(monkeypatch, table_exists=True, row=(True,))
+    assert idx.has_entry_points() is True
