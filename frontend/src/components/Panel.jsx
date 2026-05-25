@@ -14,8 +14,8 @@ import PlaceDetail from './PlaceDetail'
 const TRAVEL_MODES = [
   { id: 'auto', label: 'Drive', Icon: Car },
   { id: 'foot', label: 'Foot', Icon: Footprints },
-  { id: '2w', label: 'MTB', Icon: Bike },
-  { id: '4w', label: 'ATV', Icon: Car },
+  { id: '2w', label: '2W', Icon: Bike },
+  { id: '4w', label: '4W', Icon: Car },
   { id: 'vehicle', label: '4x4', Icon: Car },
 ]
 

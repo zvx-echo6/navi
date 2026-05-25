@@ -691,7 +691,7 @@ def test_pathfind_wilderness_always_uses_foot_effort(monkeypatch):
     out = r._pathfind_wilderness(44.0, -115.0, 44.001, -115.001, ep, "pragmatic", "start", mode="2w")
 
     assert out["status"] == "ok"
-    assert captured["mult_mode"] == "foot"        # cost grid built as foot despite mode=mtb
+    assert captured["mult_mode"] == "foot"        # cost grid built as foot despite mode=2w
     assert captured["speed_function_id"] == 0     # tobler (foot)
     assert captured["base_speed"] == 6.0          # foot base speed
     assert captured["lookup"][5] == 0.1           # foot road
