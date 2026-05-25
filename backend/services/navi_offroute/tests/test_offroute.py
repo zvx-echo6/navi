@@ -272,11 +272,39 @@ def _stub_route(per_mode, calls):
     return stub
 
 
+def _stub_locate(snap_distance_m, road_class=None):
+    def stub(self, lat, lon, mode="vehicle"):
+        return {
+            "on_network": snap_distance_m <= 10,
+            "snap_distance_m": snap_distance_m,
+            "snapped_lat": lat,
+            "snapped_lon": lon,
+            "road_class": road_class,
+        }
+    return stub
+
+
+def _bare_router(monkeypatch, *, route_stub=None, vehicle_eligible=None,
+                 locate=None, terrain_flat=None):
+    if route_stub is not None:
+        monkeypatch.setattr(OffrouteRouter, "route", route_stub)
+    if vehicle_eligible is not None:
+        monkeypatch.setattr(OffrouteRouter, "_vehicle_eligible",
+                            lambda self, lat, lon: vehicle_eligible)
+    if locate is not None:
+        monkeypatch.setattr(OffrouteRouter, "_locate_on_network", locate)
+    if terrain_flat is not None:
+        monkeypatch.setattr(OffrouteRouter, "_is_terrain_flat",
+                            lambda self, lat, lon: terrain_flat)
+    return object.__new__(OffrouteRouter)
+
+
+# ── probe-iteration logic (vehicle eligibility stubbed True) ──────────────
+
 def test_route_auto_first_probe_ok_returns_vehicle(monkeypatch):
     calls = []
     per_mode = {m: {"status": "ok"} for m in AUTO_MODE_PRIORITY}
-    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
-    r = object.__new__(OffrouteRouter)
+    r = _bare_router(monkeypatch, route_stub=_stub_route(per_mode, calls), vehicle_eligible=True)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "ok"
     assert out["selected_mode"] == "vehicle"
@@ -291,8 +319,7 @@ def test_route_auto_falls_through_to_foot(monkeypatch):
         "mtb": {"status": "error", "message": "No tracks found"},
         "foot": {"status": "ok"},
     }
-    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
-    r = object.__new__(OffrouteRouter)
+    r = _bare_router(monkeypatch, route_stub=_stub_route(per_mode, calls), vehicle_eligible=True)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "ok"
     assert out["selected_mode"] == "foot"
@@ -302,8 +329,7 @@ def test_route_auto_falls_through_to_foot(monkeypatch):
 def test_route_auto_all_error_returns_error(monkeypatch):
     calls = []
     per_mode = {m: {"status": "error", "message": f"{m} failed"} for m in AUTO_MODE_PRIORITY}
-    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
-    r = object.__new__(OffrouteRouter)
+    r = _bare_router(monkeypatch, route_stub=_stub_route(per_mode, calls), vehicle_eligible=True)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "error"
     assert "selected_mode" not in out
@@ -318,8 +344,65 @@ def test_route_auto_selected_mode_present_in_ok_response(monkeypatch):
         "mtb": {"status": "ok"},
         "foot": {"status": "ok"},
     }
-    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
-    r = object.__new__(OffrouteRouter)
+    r = _bare_router(monkeypatch, route_stub=_stub_route(per_mode, calls), vehicle_eligible=True)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "ok"
     assert "selected_mode" in out and out["selected_mode"] == "atv"
+
+
+# ── 3-tier vehicle eligibility (real _vehicle_eligible via stubbed locate/terrain) ──
+
+def test_vehicle_eligibility_a_on_road_picks_vehicle(monkeypatch):
+    # (a) snap 3m -> tight branch -> vehicle always ok
+    calls = []
+    per_mode = {m: {"status": "ok"} for m in AUTO_MODE_PRIORITY}
+    r = _bare_router(monkeypatch, route_stub=_stub_route(per_mode, calls),
+                     locate=_stub_locate(3.0, "residential"), terrain_flat=False)
+    out = r._route_auto(43.6, -116.2, 43.7, -116.3, "pragmatic")
+    assert out["selected_mode"] == "vehicle"
+    assert calls == ["vehicle"]
+
+
+def test_vehicle_eligibility_b_relaxed_paved_flat_picks_vehicle(monkeypatch):
+    # (b) snap 60m + paved + flat -> relaxed branch grants vehicle
+    calls = []
+    per_mode = {m: {"status": "ok"} for m in AUTO_MODE_PRIORITY}
+    r = _bare_router(monkeypatch, route_stub=_stub_route(per_mode, calls),
+                     locate=_stub_locate(60.0, "secondary"), terrain_flat=True)
+    out = r._route_auto(43.6, -116.2, 43.7, -116.3, "pragmatic")
+    assert out["selected_mode"] == "vehicle"
+    assert calls == ["vehicle"]
+
+
+def test_vehicle_eligibility_c_relaxed_paved_not_flat_skips_vehicle(monkeypatch):
+    # (c) snap 60m + paved + NOT flat -> vehicle skipped
+    calls = []
+    per_mode = {m: {"status": "ok"} for m in AUTO_MODE_PRIORITY}
+    r = _bare_router(monkeypatch, route_stub=_stub_route(per_mode, calls),
+                     locate=_stub_locate(60.0, "secondary"), terrain_flat=False)
+    out = r._route_auto(43.6, -116.2, 43.7, -116.3, "pragmatic")
+    assert out["selected_mode"] == "atv"
+    assert "vehicle" not in calls
+    assert calls[0] == "atv"
+
+
+def test_vehicle_eligibility_d_relaxed_not_paved_skips_vehicle(monkeypatch):
+    # (d) snap 60m + NOT paved + flat -> vehicle skipped
+    calls = []
+    per_mode = {m: {"status": "ok"} for m in AUTO_MODE_PRIORITY}
+    r = _bare_router(monkeypatch, route_stub=_stub_route(per_mode, calls),
+                     locate=_stub_locate(60.0, "track"), terrain_flat=True)
+    out = r._route_auto(43.6, -116.2, 43.7, -116.3, "pragmatic")
+    assert out["selected_mode"] == "atv"
+    assert "vehicle" not in calls
+
+
+def test_vehicle_eligibility_e_over_relaxed_limit_skips_vehicle(monkeypatch):
+    # (e) snap 150m -> beyond relaxed limit -> vehicle skipped regardless of paved/flat
+    calls = []
+    per_mode = {m: {"status": "ok"} for m in AUTO_MODE_PRIORITY}
+    r = _bare_router(monkeypatch, route_stub=_stub_route(per_mode, calls),
+                     locate=_stub_locate(150.0, "primary"), terrain_flat=True)
+    out = r._route_auto(43.6, -116.2, 43.7, -116.3, "pragmatic")
+    assert out["selected_mode"] == "atv"
+    assert "vehicle" not in calls

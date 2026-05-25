@@ -59,6 +59,24 @@ MEMORY_LIMIT_GB = 12
 # Off-network detection threshold (meters)
 OFF_NETWORK_THRESHOLD_M = 10
 
+# Auto-mode vehicle-eligibility (3-tier snap discriminator). Vehicle skips the
+# off-network gate (pure Valhalla), so Auto must decide whether snapping to a road
+# is *safe* before probing vehicle:
+#   <= AUTO_SNAP_TIGHT_M           : literally on the road -> vehicle always ok
+#   <= AUTO_SNAP_RELAXED_M         : grace zone -> vehicle ok ONLY if the snapped road
+#                                    is paved AND local terrain is flat (urban/suburban);
+#                                    in wilderness you can't see 100m, so aggressive
+#                                    snapping could route from the wrong start point
+#   >  AUTO_SNAP_RELAXED_M         : too far from any road -> vehicle not ok
+AUTO_SNAP_TIGHT_M = 5
+AUTO_SNAP_RELAXED_M = 100
+FLAT_TERRAIN_DELTA_M = 5
+FLAT_SAMPLE_RADIUS_M = 50
+PAVED_HIGHWAY_CLASSES = frozenset({
+    "motorway", "trunk", "primary", "secondary", "tertiary",
+    "unclassified", "residential", "service",
+})
+
 # Mode to Valhalla costing mapping
 MODE_TO_COSTING = {
     "auto": "auto",
@@ -497,7 +515,8 @@ class OffrouteRouter:
                         "on_network": snap_dist <= OFF_NETWORK_THRESHOLD_M,
                         "snap_distance_m": snap_dist,
                         "snapped_lat": snap_lat,
-                        "snapped_lon": snap_lon
+                        "snapped_lon": snap_lon,
+                        "road_class": edge.get("road_class"),
                     }
         except Exception:
             pass
@@ -506,8 +525,45 @@ class OffrouteRouter:
             "on_network": False,
             "snap_distance_m": float('inf'),
             "snapped_lat": lat,
-            "snapped_lon": lon
+            "snapped_lon": lon,
+            "road_class": None,
         }
+
+    def _is_terrain_flat(self, lat: float, lon: float) -> bool:
+        """
+        True if the DEM is flat (max-min elevation < FLAT_TERRAIN_DELTA_M) across the
+        center and four cardinal points FLAT_SAMPLE_RADIUS_M away. Conservative: any
+        DEM read failure (untiled / ocean / error) returns False, so an unknown area
+        never earns the relaxed-snap grace.
+        """
+        try:
+            if self.dem_reader is None:
+                self.dem_reader = DEMReader(dem_path())
+            dlat = FLAT_SAMPLE_RADIUS_M / 111320.0
+            dlon = FLAT_SAMPLE_RADIUS_M / (111320.0 * max(0.01, math.cos(math.radians(lat))))
+            points = [
+                (lat, lon),
+                (lat + dlat, lon), (lat - dlat, lon),
+                (lat, lon + dlon), (lat, lon - dlon),
+            ]
+            elevs = [self.dem_reader.sample_point(plat, plon) for plat, plon in points]
+            if any(e is None for e in elevs):
+                return False
+            return (max(elevs) - min(elevs)) < FLAT_TERRAIN_DELTA_M
+        except Exception:
+            return False
+
+    def _vehicle_eligible(self, lat: float, lon: float) -> bool:
+        """
+        Whether Auto should consider vehicle for an endpoint (3-tier, see constants).
+        """
+        snap = self._locate_on_network(lat, lon, "vehicle")
+        d = snap["snap_distance_m"]
+        if d <= AUTO_SNAP_TIGHT_M:
+            return True
+        if d > AUTO_SNAP_RELAXED_M:
+            return False
+        return (snap.get("road_class") in PAVED_HIGHWAY_CLASSES) and self._is_terrain_flat(lat, lon)
 
     def route(
         self,
@@ -598,8 +654,16 @@ class OffrouteRouter:
         so the first status="ok" is the most road-capable feasible mode. The chosen
         mode is reported back as result["selected_mode"] for the UI.
         """
+        # Vehicle skips the off-network gate, so only probe it when BOTH endpoints
+        # are vehicle-eligible (on/near a safe paved+flat road); otherwise drop vehicle
+        # and start at atv so genuinely off-road routes demo multi-mode behavior.
+        if self._vehicle_eligible(start_lat, start_lon) and self._vehicle_eligible(end_lat, end_lon):
+            priority = AUTO_MODE_PRIORITY
+        else:
+            priority = AUTO_MODE_PRIORITY[1:]
+
         last_error = None
-        for candidate in AUTO_MODE_PRIORITY:
+        for candidate in priority:
             result = self.route(
                 start_lat, start_lon, end_lat, end_lon,
                 mode=candidate, boundary_mode=boundary_mode
