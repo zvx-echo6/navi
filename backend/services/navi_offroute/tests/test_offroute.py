@@ -559,3 +559,141 @@ def test_query_radius_soft_cap_filters_beyond_radius(monkeypatch):
     idx = object.__new__(EntryPointIndex)
     out = idx.query_radius(44.1, -115.0, 50, limit=10)  # 50 km = 50000 m cap
     assert [r["id"] for r in out] == [1, 2]
+
+
+# ── Anisotropic A* pathfinder (#17+#18) ───────────────────────────────────
+import numpy as _np
+import services.navi_offroute.router as _router_mod
+from services.navi_offroute.astar import (
+    _speed_kmh, astar_multigoal, inflate_cost_multiplier,
+)
+from services.navi_offroute.cost import compute_cost_multiplier_grid
+
+_MG = float(_np.tan(_np.radians(40.0)))
+
+
+def test_signed_tobler_asymmetry():
+    # Same magnitude, opposite sign -> downhill faster than uphill; peak near -0.05.
+    up = _speed_kmh(0.2, 0, 6.0, _MG)
+    down = _speed_kmh(-0.2, 0, 6.0, _MG)
+    assert down > up
+    peak = _speed_kmh(-0.05, 0, 6.0, _MG)
+    assert peak >= _speed_kmh(0.0, 0, 6.0, _MG)
+    assert peak >= _speed_kmh(-0.15, 0, 6.0, _MG)
+
+
+def test_inflation_bumps_neighbors_and_preserves_inf():
+    grid = _np.ones((30, 30), dtype=_np.float64)
+    grid[15, 15] = 100.0  # high finite cost
+    out = inflate_cost_multiplier(grid)
+    assert out[15, 16] > 1.0          # neighbor inflated
+    assert out[0, 0] < 1.05           # far corner ~baseline
+
+    grid2 = _np.ones((30, 30), dtype=_np.float64)
+    grid2[15, 15] = _np.inf           # impassable
+    out2 = inflate_cost_multiplier(grid2)
+    assert _np.isinf(out2[15, 15])    # inf preserved exactly
+    assert _np.isfinite(out2[15, 16]) and out2[15, 16] > 1.0  # neighbor bumped, not inf
+
+
+def _flat_inputs(n):
+    elev = _np.zeros((n, n), dtype=_np.float64)
+    mult = _np.ones((n, n), dtype=_np.float64)
+    trail = _np.zeros((n, n), dtype=_np.uint8)
+    lookup = _np.full(256, _np.inf, dtype=_np.float64)
+    barr = _np.zeros((n, n), dtype=_np.uint8)
+    return elev, mult, trail, lookup, barr
+
+
+def test_astar_small_synthetic_shortest_path():
+    elev, mult, trail, lookup, barr = _flat_inputs(30)
+    gr = _np.array([29], dtype=_np.int64)
+    gc = _np.array([29], dtype=_np.int64)
+    idx, path, cost = astar_multigoal(
+        mult, elev, 30.0, 30.0, _MG, 0, 6.0, trail, lookup, barr, 2, 0, 0, gr, gc)
+    assert idx == 0
+    assert tuple(path[0]) == (0, 0)
+    assert tuple(path[-1]) == (29, 29)
+    assert len(path) == 30  # pure diagonal on a flat grid
+    assert cost > 0 and _np.isfinite(cost)
+
+
+def test_astar_multigoal_picks_cheaper():
+    elev, mult, trail, lookup, barr = _flat_inputs(30)
+    gr = _np.array([0, 20], dtype=_np.int64)   # goal0 at (0,5) near; goal1 at (20,20) far
+    gc = _np.array([5, 20], dtype=_np.int64)
+    idx, path, cost = astar_multigoal(
+        mult, elev, 30.0, 30.0, _MG, 0, 6.0, trail, lookup, barr, 2, 0, 0, gr, gc)
+    assert idx == 0
+    assert tuple(path[-1]) == (0, 5)
+
+
+def test_compute_cost_multiplier_grid_math():
+    elev = _np.zeros((4, 4), dtype=_np.float64)
+    friction = _np.full((4, 4), 2.0, dtype=_np.float64)
+    # mtb override: grass(30)=2.0, water(80)=inf
+    fr = _np.full((4, 4), 30, dtype=_np.uint8)
+    fr[0, 0] = 80
+    mult = compute_cost_multiplier_grid(
+        elev, 30.0, 30.0, friction=friction, friction_raw=fr, wilderness=None, mode="mtb")
+    assert mult[1, 1] == 4.0          # 2.0 friction * 2.0 grass override
+    assert _np.isinf(mult[0, 0])      # water impassable
+
+
+# ── _pathfind_wilderness mode wiring (mtb profile -> herzog + mtb trail set) ──
+
+class _FakeDEM:
+    def get_elevation_grid(self, south, north, west, east):
+        return _np.zeros((10, 10), dtype=_np.float64), {"cell_size_m": 30.0}
+    def latlon_to_pixel(self, lat, lon, meta):
+        return (0, 0) if lat == 44.0 else (9, 9)
+    def pixel_to_latlon(self, row, col, meta):
+        return (44.0 + row * 0.001, -115.0 + col * 0.001)
+
+
+class _FakeGrid:
+    def __init__(self, val, dtype):
+        self.val, self.dtype = val, dtype
+    def _grid(self, **k):
+        return _np.full((10, 10), self.val, dtype=self.dtype)
+
+
+def test_pathfind_wilderness_always_uses_foot_effort(monkeypatch):
+    # Even when called with mode="mtb", the wilderness cost is computed as foot:
+    # compute_cost_multiplier_grid receives mode="foot", and A* gets the foot speed
+    # function (tobler=0), foot base speed (6.0), and foot trail friction.
+    captured = {}
+
+    def fake_mult(elevation, cell_size_lat_m, cell_size_lon_m,
+                  friction=None, friction_raw=None, wilderness=None, mode="foot"):
+        captured["mult_mode"] = mode
+        return _np.ones((10, 10), dtype=_np.float64)
+
+    def fake_astar(cost_mult, elevation, clat, clon, max_grade, sfid, base, trails,
+                   lookup, barriers, bmid, orow, ocol, grows, gcols):
+        captured["speed_function_id"] = sfid
+        captured["base_speed"] = base
+        captured["lookup"] = lookup
+        return 0, _np.array([[0, 0], [9, 9]], dtype=_np.int64), 6.0
+
+    monkeypatch.setattr(_router_mod, "compute_cost_multiplier_grid", fake_mult)
+    monkeypatch.setattr(_router_mod, "astar_multigoal", fake_astar)
+    monkeypatch.setattr(OffrouteRouter, "_init_readers", lambda self: None)
+
+    r = object.__new__(OffrouteRouter)
+    r.dem_reader = _FakeDEM()
+    r.friction_reader = type("F", (), {"get_friction_grid": lambda self, **k: _np.full((10, 10), 30, dtype=_np.uint8)})()
+    r.barrier_reader = type("B", (), {"get_barrier_grid": lambda self, **k: _np.zeros((10, 10), dtype=_np.uint8)})()
+    r.trail_reader = type("T", (), {"get_trails_grid": lambda self, **k: _np.zeros((10, 10), dtype=_np.uint8)})()
+    r.wilderness_reader = None  # foot is not wilderness_impassable -> not loaded anyway
+
+    ep = [{"lat": 44.001, "lon": -115.001, "highway_class": "track", "name": "t", "land_status": "open"}]
+    out = r._pathfind_wilderness(44.0, -115.0, 44.001, -115.001, ep, "pragmatic", "start", mode="mtb")
+
+    assert out["status"] == "ok"
+    assert captured["mult_mode"] == "foot"        # cost grid built as foot despite mode=mtb
+    assert captured["speed_function_id"] == 0     # tobler (foot)
+    assert captured["base_speed"] == 6.0          # foot base speed
+    assert captured["lookup"][5] == 0.1           # foot road
+    assert captured["lookup"][15] == 0.3          # foot track
+    assert captured["lookup"][25] == 0.5          # foot foot-trail

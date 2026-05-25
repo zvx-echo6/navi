@@ -31,10 +31,10 @@ import requests
 import psycopg2
 import psycopg2.extras
 from shapely.geometry import LineString
-from skimage.graph import MCP_Geometric
+from .astar import astar_multigoal, inflate_cost_multiplier
 
 from shared.dem import DEMReader, dem_path
-from .cost import compute_cost_grid
+from .cost import compute_cost_grid, compute_cost_multiplier_grid, MODE_PROFILES
 from .friction import FrictionReader, friction_to_multiplier
 from .barriers import BarrierReader, WildernessReader, wilderness_tif_path
 from .trails import TrailReader
@@ -956,7 +956,7 @@ class OffrouteRouter:
         # Run wilderness pathfinding
         wilderness_result = self._pathfind_wilderness(
             start_lat, start_lon, end_lat, end_lon,
-            entry_points, boundary_mode, "start"
+            entry_points, boundary_mode, "start", mode=mode
         )
 
         if wilderness_result.get("status") == "error":
@@ -1036,7 +1036,7 @@ class OffrouteRouter:
         # Run wilderness pathfinding FROM END toward entry points
         wilderness_result = self._pathfind_wilderness(
             end_lat, end_lon, start_lat, start_lon,
-            entry_points, boundary_mode, "end"
+            entry_points, boundary_mode, "end", mode=mode
         )
 
         if wilderness_result.get("status") == "error":
@@ -1120,7 +1120,7 @@ class OffrouteRouter:
         # Phase 1: Wilderness pathfinding from START
         wilderness_start_result = self._pathfind_wilderness(
             start_lat, start_lon, end_lat, end_lon,
-            entry_points_start, boundary_mode, "start"
+            entry_points_start, boundary_mode, "start", mode=mode
         )
 
         if wilderness_start_result.get("status") == "error":
@@ -1134,7 +1134,7 @@ class OffrouteRouter:
         # Phase 2: Wilderness pathfinding from END (run after freeing phase 1 memory)
         wilderness_end_result = self._pathfind_wilderness(
             end_lat, end_lon, start_lat, start_lon,
-            entry_points_end, boundary_mode, "end"
+            entry_points_end, boundary_mode, "end", mode=mode
         )
 
         if wilderness_end_result.get("status") == "error":
@@ -1177,7 +1177,8 @@ class OffrouteRouter:
         dest_lat: float, dest_lon: float,
         entry_points: List[Dict],
         boundary_mode: str,
-        label: str
+        label: str,
+        mode: str = "foot",
     ) -> Dict:
         """
         Run MCP wilderness pathfinding from origin toward entry points.
@@ -1258,23 +1259,51 @@ class OffrouteRouter:
             target_shape=elevation.shape
         )
 
-        # Compute cost grid (ALWAYS foot mode for wilderness)
-        cost = compute_cost_grid(
+        # ── Anisotropic A* pathfinding (replaces isotropic MCP) ──
+        # Wilderness pathfinding ALWAYS uses foot effort, regardless of the user's mode.
+        # The off-trail cost math for MTB/ATV/vehicle is not well-grounded (no peer-reviewed
+        # off-road model), and real-world wilderness traversal is foot anyway: you push the
+        # bike and walk past where the vehicle stops. The user's mode still affects entry-point
+        # eligibility (the highway filter at the query_radius call sites) and the Valhalla
+        # network-leg costing -- just not this wilderness leg.
+        _ = mode  # reserved for future flexibility; unused for wilderness cost
+        cost_mode = "foot"
+        profile = MODE_PROFILES[cost_mode]
+        cell_size_m = meta["cell_size_m"]
+
+        # Wilderness grid only matters for modes that treat it as impassable.
+        wilderness = None
+        if profile.wilderness_impassable and self.wilderness_reader is not None:
+            wilderness = self.wilderness_reader.get_wilderness_grid(
+                south=bbox["south"], north=bbox["north"],
+                west=bbox["west"], east=bbox["east"],
+                target_shape=elevation.shape,
+            )
+
+        # Per-cell context multiplier (slope-free; trails/barriers are per-edge in A*),
+        # then exponentially inflated so hard cells bleed a decaying penalty outward.
+        cost_mult = compute_cost_multiplier_grid(
             elevation,
-            cell_size_m=meta["cell_size_m"],
+            cell_size_lat_m=cell_size_m,
+            cell_size_lon_m=cell_size_m,
             friction=friction_mult,
             friction_raw=friction_raw,
-            trails=trails,
-            barriers=barriers,
-            wilderness=None,
-            mvum=None,
-            boundary_mode=boundary_mode,
-            mode="foot",
+            wilderness=wilderness,
+            mode=cost_mode,
         )
+        cost_mult = inflate_cost_multiplier(cost_mult)
 
         # Free intermediate arrays
         del friction_mult, friction_raw
         gc.collect()
+
+        # Trail friction lookup (length-256, indexed by trail value; inf = impassable).
+        trail_friction_lookup = np.full(256, np.inf, dtype=np.float64)
+        for tv, fric in profile.trail_friction.items():
+            trail_friction_lookup[tv] = np.inf if fric is None else float(fric)
+
+        speed_function_id = {"tobler": 0, "herzog": 1, "linear": 2}.get(profile.speed_function, 0)
+        max_grade = float(np.tan(np.radians(profile.max_slope_deg)))
 
         # Convert origin to pixel coordinates
         origin_row, origin_col = self.dem_reader.latlon_to_pixel(origin_lat, origin_lon, meta)
@@ -1283,7 +1312,7 @@ class OffrouteRouter:
         if not (0 <= origin_row < rows and 0 <= origin_col < cols):
             return {"status": "error", "message": f"{label.capitalize()} point outside grid bounds"}
 
-        # Map entry points to pixels
+        # Map entry points to pixels (these are the A* goals).
         entry_pixels = []
         for ep in entry_points:
             row, col = self.dem_reader.latlon_to_pixel(ep["lat"], ep["lon"], meta)
@@ -1293,28 +1322,29 @@ class OffrouteRouter:
         if not entry_pixels:
             return {"status": "error", "message": f"No entry points map to grid bounds for {label}"}
 
-        # Run MCP
-        mcp = MCP_Geometric(cost, fully_connected=True)
-        cumulative_costs, traceback = mcp.find_costs([(origin_row, origin_col)])
+        goal_rows = np.array([ep["row"] for ep in entry_pixels], dtype=np.int64)
+        goal_cols = np.array([ep["col"] for ep in entry_pixels], dtype=np.int64)
+        boundary_mode_id = {"strict": 0, "pragmatic": 1, "emergency": 2}.get(boundary_mode, 1)
 
-        # Find nearest reachable entry point
-        best_entry = None
-        best_cost = np.inf
+        # Run multi-goal A* (first goal popped wins).
+        elevation = np.ascontiguousarray(elevation, dtype=np.float64)
+        best_goal_idx, path_indices, best_cost = astar_multigoal(
+            cost_mult, elevation,
+            float(cell_size_m), float(cell_size_m),
+            max_grade, speed_function_id, float(profile.base_speed_kmh),
+            np.ascontiguousarray(trails, dtype=np.uint8), trail_friction_lookup,
+            np.ascontiguousarray(barriers, dtype=np.uint8), boundary_mode_id,
+            int(origin_row), int(origin_col),
+            goal_rows, goal_cols,
+        )
 
-        for ep in entry_pixels:
-            ep_cost = cumulative_costs[ep["row"], ep["col"]]
-            if ep_cost < best_cost:
-                best_cost = ep_cost
-                best_entry = ep
-
-        if best_entry is None or np.isinf(best_cost):
+        if best_goal_idx < 0 or len(path_indices) == 0 or np.isinf(best_cost):
             return {
                 "status": "error",
                 "message": f"No path found from {label} to any entry point (blocked by impassable terrain)"
             }
 
-        # Traceback path
-        path_indices = mcp.traceback((best_entry["row"], best_entry["col"]))
+        best_entry = entry_pixels[best_goal_idx]
 
         # Convert to coordinates and collect stats
         coords = []
@@ -1350,7 +1380,7 @@ class OffrouteRouter:
         on_trail_pct = float(100 * on_trail_cells / total_cells) if total_cells > 0 else 0
 
         # Free memory
-        del mcp, cumulative_costs, traceback, cost, trails, barriers, elevation
+        del cost_mult, trails, barriers, elevation
         gc.collect()
 
         return {

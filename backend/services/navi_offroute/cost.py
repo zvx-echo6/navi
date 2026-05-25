@@ -203,6 +203,91 @@ PRAGMATIC_BARRIER_MULTIPLIER = 5.0
 # COST GRID COMPUTATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _per_cell_grade(elevation, cell_size_lat_m, cell_size_lon_m):
+    """Per-cell slope magnitude (rise/run), matching compute_cost_grid's gradient.
+    Used only to classify the vehicle off-trail flat-field special case."""
+    grade = np.zeros(elevation.shape, dtype=np.float32)
+    dy = np.zeros(elevation.shape, dtype=np.float32)
+    dy[1:-1, :] = ((elevation[:-2, :] - elevation[2:, :]) / (2 * cell_size_lat_m)) ** 2
+    dy[0, :] = ((elevation[0, :] - elevation[1, :]) / cell_size_lat_m) ** 2
+    dy[-1, :] = ((elevation[-2, :] - elevation[-1, :]) / cell_size_lat_m) ** 2
+    dy[:, 1:-1] += ((elevation[:, 2:] - elevation[:, :-2]) / (2 * cell_size_lon_m)) ** 2
+    dy[:, 0] += ((elevation[:, 1] - elevation[:, 0]) / cell_size_lon_m) ** 2
+    dy[:, -1] += ((elevation[:, -1] - elevation[:, -2]) / cell_size_lon_m) ** 2
+    np.sqrt(dy, out=grade)
+    return grade
+
+
+def compute_cost_multiplier_grid(
+    elevation: np.ndarray,
+    cell_size_lat_m: float,
+    cell_size_lon_m: float,
+    friction: Optional[np.ndarray] = None,
+    friction_raw: Optional[np.ndarray] = None,
+    wilderness: Optional[np.ndarray] = None,
+    mode: Literal["foot", "mtb", "atv", "vehicle"] = "foot",
+) -> np.ndarray:
+    """Per-cell SLOPE-FREE context cost multiplier for the anisotropic A* pathfinder.
+
+    Returns a float64 grid: 1.0 baseline, higher = harder, np.inf = impassable. It
+    combines the base WorldCover friction, the mode's terrain-friction overrides, the
+    vehicle off-trail flat-field special case, and wilderness impassability. Slope,
+    trails, and barriers are handled PER-EDGE in the A* kernel and are NOT applied here.
+
+    This is a strict refactor of compute_cost_grid's friction-and-mode pieces.
+    (elevation + cell sizes are needed only for the vehicle flat-field slope check —
+    that classification is per-cell, distinct from the per-edge traversal slope.)
+    """
+    if mode not in MODE_PROFILES:
+        raise ValueError(f"mode must be one of {list(MODE_PROFILES.keys())}")
+    profile = MODE_PROFILES[mode]
+
+    mult = np.ones(elevation.shape, dtype=np.float64)
+
+    # Base WorldCover friction.
+    if friction is not None:
+        if friction.shape != elevation.shape:
+            raise ValueError("Friction shape mismatch")
+        np.multiply(mult, friction, out=mult)
+
+    # NaN elevation -> impassable.
+    mult[np.isnan(elevation)] = np.inf
+
+    # Mode-specific terrain friction overrides.
+    if friction_raw is not None and profile.terrain_friction_override:
+        if friction_raw.shape != elevation.shape:
+            raise ValueError("Friction_raw shape mismatch")
+        for wc_class, override in profile.terrain_friction_override.items():
+            if override is None:
+                continue
+            if override == np.inf:
+                np.putmask(mult, friction_raw == wc_class, np.inf)
+            else:
+                m = friction_raw == wc_class
+                mult[m] *= override
+                del m
+
+    # Vehicle off-trail flat-field special case (overrides the inf set above on flat
+    # grassland/cropland). Uses a per-cell slope classification.
+    if mode == "vehicle" and profile.off_trail_flat_threshold_deg > 0 and friction_raw is not None:
+        grade = _per_cell_grade(elevation, cell_size_lat_m, cell_size_lon_m)
+        slope_deg = np.degrees(np.arctan(grade))
+        flat_field = (
+            (slope_deg <= profile.off_trail_flat_threshold_deg)
+            & ((friction_raw == 30) | (friction_raw == 40))
+        )
+        mult[flat_field] = profile.off_trail_flat_friction
+        del grade, slope_deg, flat_field
+
+    # Wilderness areas (mode-specific).
+    if wilderness is not None and profile.wilderness_impassable:
+        if wilderness.shape != elevation.shape:
+            raise ValueError("Wilderness shape mismatch")
+        np.putmask(mult, wilderness == 255, np.inf)
+
+    return mult
+
+
 def compute_cost_grid(
     elevation: np.ndarray,
     cell_size_m: float,
