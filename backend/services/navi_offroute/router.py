@@ -21,6 +21,7 @@ import os
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Literal, Set
 
@@ -59,6 +60,23 @@ MEMORY_LIMIT_GB = 12
 # Off-network detection threshold (meters)
 OFF_NETWORK_THRESHOLD_M = 10
 
+# Auto-mode spatial-eligibility snap thresholds (meters).
+AUTO_SNAP_TIGHT_M = 5      # on the edge -> eligible without a flatness check
+AUTO_SNAP_RELAXED_M = 100  # near the edge -> vehicle needs paved + flat terrain
+# Terrain-flatness probe for vehicle's relaxed-snap grace.
+FLAT_TERRAIN_DELTA_M = 5
+FLAT_SAMPLE_RADIUS_M = 50
+
+# Highway-class buckets used by the spatial eligibility rules.
+PAVED_HIGHWAY_CLASSES = frozenset({
+    "motorway", "trunk", "primary", "secondary", "tertiary",
+    "unclassified", "residential", "service",
+})
+TRACK_HIGHWAY_CLASSES = frozenset({"track"})
+PATH_HIGHWAY_CLASSES = frozenset({
+    "path", "footway", "bridleway", "steps", "pedestrian", "cycleway",
+})
+
 # Mode to Valhalla costing mapping
 MODE_TO_COSTING = {
     "auto": "auto",
@@ -71,6 +89,43 @@ MODE_TO_COSTING = {
 # Auto mode probes these concrete modes in capability order (most -> least
 # demanding terrain) and uses the first that yields a usable route.
 AUTO_MODE_PRIORITY = ["vehicle", "atv", "mtb", "foot"]
+
+# Per-endpoint travel-mode eligibility from an OSM-style "key:value" category hint.
+# Looked up exact first, then "key:*" wildcard (see _eligible_modes_from_category).
+_MODES_ALL = frozenset({"vehicle", "atv", "mtb", "foot"})
+_MODES_TRACK = frozenset({"atv", "mtb", "foot"})
+_MODES_PATH = frozenset({"mtb", "foot"})
+_MODES_FOOT = frozenset({"foot"})
+
+CATEGORY_ELIGIBLE_MODES = {
+    # Address-like -> full access
+    "highway:motorway": _MODES_ALL, "highway:trunk": _MODES_ALL,
+    "highway:primary": _MODES_ALL, "highway:secondary": _MODES_ALL,
+    "highway:tertiary": _MODES_ALL, "highway:unclassified": _MODES_ALL,
+    "highway:residential": _MODES_ALL, "highway:service": _MODES_ALL,
+    "building:*": _MODES_ALL, "amenity:*": _MODES_ALL,
+    "shop:*": _MODES_ALL, "office:*": _MODES_ALL,
+    "tourism:hotel": _MODES_ALL, "tourism:motel": _MODES_ALL,
+    "tourism:guest_house": _MODES_ALL, "tourism:hostel": _MODES_ALL,
+    "tourism:apartment": _MODES_ALL,
+    "leisure:park": _MODES_ALL,
+    "place:city": _MODES_ALL, "place:town": _MODES_ALL,
+    "place:village": _MODES_ALL, "place:hamlet": _MODES_ALL,
+    "place:suburb": _MODES_ALL, "place:neighbourhood": _MODES_ALL,
+    "railway:station": _MODES_ALL,
+    # Track-like -> atv/mtb/foot
+    "highway:track": _MODES_TRACK, "highway:trailhead": _MODES_TRACK,
+    # Path-like -> mtb/foot
+    "highway:path": _MODES_PATH, "highway:bridleway": _MODES_PATH,
+    # Foot-only
+    "highway:footway": _MODES_FOOT, "highway:steps": _MODES_FOOT,
+    "highway:pedestrian": _MODES_FOOT,
+    "natural:*": _MODES_FOOT,
+    "place:roadless_area": _MODES_FOOT, "place:protected_area": _MODES_FOOT,
+    "landuse:forest": _MODES_FOOT, "landuse:nature_reserve": _MODES_FOOT,
+    "tourism:camp_site": _MODES_FOOT, "tourism:picnic_site": _MODES_FOOT,
+    "tourism:viewpoint": _MODES_FOOT,
+}
 
 # Mode to valid entry point highway classes
 # foot = any trail/track/road, mtb = tracks and roads, vehicle = roads only
@@ -497,7 +552,8 @@ class OffrouteRouter:
                         "on_network": snap_dist <= OFF_NETWORK_THRESHOLD_M,
                         "snap_distance_m": snap_dist,
                         "snapped_lat": snap_lat,
-                        "snapped_lon": snap_lon
+                        "snapped_lon": snap_lon,
+                        "road_class": edge.get("road_class"),
                     }
         except Exception:
             pass
@@ -506,7 +562,8 @@ class OffrouteRouter:
             "on_network": False,
             "snap_distance_m": float('inf'),
             "snapped_lat": lat,
-            "snapped_lon": lon
+            "snapped_lon": lon,
+            "road_class": None,
         }
 
     def route(
@@ -516,7 +573,9 @@ class OffrouteRouter:
         end_lat: float,
         end_lon: float,
         mode: Literal["auto", "foot", "mtb", "atv", "vehicle"] = "foot",
-        boundary_mode: Literal["strict", "pragmatic", "emergency"] = "pragmatic"
+        boundary_mode: Literal["strict", "pragmatic", "emergency"] = "pragmatic",
+        start_category: Optional[str] = None,
+        end_category: Optional[str] = None
     ) -> Dict:
         """
         Route between two points, handling all four scenarios.
@@ -537,7 +596,8 @@ class OffrouteRouter:
         """
         if mode == "auto":
             return self._route_auto(
-                start_lat, start_lon, end_lat, end_lon, boundary_mode
+                start_lat, start_lon, end_lat, end_lon, boundary_mode,
+                start_category, end_category
             )
 
         if mode not in MODE_TO_COSTING:
@@ -583,35 +643,141 @@ class OffrouteRouter:
                 start_lat, start_lon, end_lat, end_lon, mode, boundary_mode
             )
 
+    def _eligible_modes_from_category(self, category: Optional[str]):
+        """Eligible travel modes for an OSM "key:value" category hint, or None if the
+        category is empty/unknown. Exact match first, then a "key:*" wildcard."""
+        if not category:
+            return None
+        modes = CATEGORY_ELIGIBLE_MODES.get(category)
+        if modes is not None:
+            return modes
+        if ":" in category:
+            key = category.split(":", 1)[0]
+            return CATEGORY_ELIGIBLE_MODES.get(f"{key}:*")
+        return None
+
+    def _is_terrain_flat(self, lat: float, lon: float) -> bool:
+        """True if the DEM is flat (max-min < FLAT_TERRAIN_DELTA_M) across the center
+        and four cardinal points FLAT_SAMPLE_RADIUS_M away. Conservative: any DEM read
+        failure (untiled/ocean/error) returns False, so unknown terrain earns no grace."""
+        try:
+            if self.dem_reader is None:
+                self.dem_reader = DEMReader(dem_path())
+            dlat = FLAT_SAMPLE_RADIUS_M / 111320.0
+            dlon = FLAT_SAMPLE_RADIUS_M / (111320.0 * max(0.01, math.cos(math.radians(lat))))
+            pts = [(lat, lon), (lat + dlat, lon), (lat - dlat, lon),
+                   (lat, lon + dlon), (lat, lon - dlon)]
+            elevs = [self.dem_reader.sample_point(la, lo) for la, lo in pts]
+            if any(e is None for e in elevs):
+                return False
+            return (max(elevs) - min(elevs)) < FLAT_TERRAIN_DELTA_M
+        except Exception:
+            return False
+
+    def _spatial_eligible_modes(self, lat: float, lon: float, snap_cache: dict):
+        """Eligible modes for an UNTYPED endpoint, derived from Valhalla /locate snaps.
+        Runs the three distinct costings (auto/pedestrian/bicycle) in parallel and
+        applies the per-mode snap-distance + road-class rules. snap_cache dedupes
+        /locate results within a single request."""
+        # auto costing -> vehicle/atv reach, bicycle -> mtb reach, pedestrian -> foot
+        costing_modes = {"auto": "vehicle", "pedestrian": "foot", "bicycle": "mtb"}
+        need = [c for c in costing_modes if (lat, lon, c) not in snap_cache]
+        if need:
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                futs = {ex.submit(self._locate_on_network, lat, lon, costing_modes[c]): c
+                        for c in need}
+                for fut in as_completed(futs):
+                    snap_cache[(lat, lon, futs[fut])] = fut.result()
+
+        auto_snap = snap_cache[(lat, lon, "auto")]
+        bike_snap = snap_cache[(lat, lon, "bicycle")]
+        d_auto, cls_auto = auto_snap["snap_distance_m"], auto_snap.get("road_class")
+        d_bike, cls_bike = bike_snap["snap_distance_m"], bike_snap.get("road_class")
+
+        modes = {"foot"}  # foot is always eligible
+        # vehicle: on a paved road (tight), or near one if paved AND flat (relaxed)
+        if (d_auto <= AUTO_SNAP_TIGHT_M and cls_auto in PAVED_HIGHWAY_CLASSES) or \
+           (d_auto <= AUTO_SNAP_RELAXED_M and cls_auto in PAVED_HIGHWAY_CLASSES
+                and self._is_terrain_flat(lat, lon)):
+            modes.add("vehicle")
+        # atv: on/near a paved or track edge
+        if d_auto <= AUTO_SNAP_RELAXED_M and cls_auto in (PAVED_HIGHWAY_CLASSES | TRACK_HIGHWAY_CLASSES):
+            modes.add("atv")
+        # mtb: on/near a paved, track, or path edge (bicycle costing)
+        if d_bike <= AUTO_SNAP_RELAXED_M and cls_bike in (
+                PAVED_HIGHWAY_CLASSES | TRACK_HIGHWAY_CLASSES | PATH_HIGHWAY_CLASSES):
+            modes.add("mtb")
+        return frozenset(modes)
+
     def _route_auto(
         self,
         start_lat: float, start_lon: float,
         end_lat: float, end_lon: float,
-        boundary_mode: str
+        boundary_mode: str,
+        start_category: Optional[str] = None,
+        end_category: Optional[str] = None
     ) -> Dict:
         """
-        Auto mode: pick the best concrete travel mode by terrain feasibility.
+        Auto mode: per-endpoint eligible-mode-set intersection.
 
-        Probes AUTO_MODE_PRIORITY (vehicle -> atv -> mtb -> foot) and returns the
-        first mode whose network can serve the route. Each candidate's route()
-        already reports status="error" when its network can't reach an endpoint,
-        so the first status="ok" is the most road-capable feasible mode. The chosen
-        mode is reported back as result["selected_mode"] for the UI.
+        Each endpoint's eligible modes come from its category type-hint
+        (CATEGORY_ELIGIBLE_MODES); an untyped endpoint falls back to a spatial
+        Valhalla-snap probe. Auto probes only the intersection of both endpoints'
+        eligible sets, in AUTO_MODE_PRIORITY order, returning the first route() that
+        succeeds. selected_mode + selected_mode_set are added for visibility.
         """
+        snap_cache = {}
+        start_typed = self._eligible_modes_from_category(start_category)
+        end_typed = self._eligible_modes_from_category(end_category)
+
+        jobs = {}
+        if start_typed is None:
+            jobs["start"] = (start_lat, start_lon)
+        if end_typed is None:
+            jobs["end"] = (end_lat, end_lon)
+
+        spatial = {}
+        if len(jobs) == 2:
+            # Both endpoints untyped: resolve them in parallel.
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                futs = {ex.submit(self._spatial_eligible_modes, la, lo, snap_cache): name
+                        for name, (la, lo) in jobs.items()}
+                for fut in as_completed(futs):
+                    spatial[futs[fut]] = fut.result()
+        else:
+            for name, (la, lo) in jobs.items():
+                spatial[name] = self._spatial_eligible_modes(la, lo, snap_cache)
+
+        start_eligible = start_typed if start_typed is not None else spatial["start"]
+        end_eligible = end_typed if end_typed is not None else spatial["end"]
+
+        intersection = start_eligible & end_eligible
+        if not intersection:
+            # foot is always eligible, so this is defensive only.
+            intersection = frozenset({"foot"})
+        mode_set = sorted(intersection)
+
+        priority = [m for m in AUTO_MODE_PRIORITY if m in intersection]
+
         last_error = None
-        for candidate in AUTO_MODE_PRIORITY:
+        for candidate in priority:
             result = self.route(
                 start_lat, start_lon, end_lat, end_lon,
                 mode=candidate, boundary_mode=boundary_mode
             )
             if result.get("status") == "ok":
                 result["selected_mode"] = candidate
+                result["selected_mode_set"] = mode_set
                 return result
             last_error = result
 
-        return last_error or {
+        if last_error is not None:
+            last_error["selected_mode_set"] = mode_set
+            return last_error
+        return {
             "status": "error",
-            "message": "No route found in any mode"
+            "message": "No route found in any mode",
+            "selected_mode_set": mode_set,
         }
 
     def _route_D_network_only(

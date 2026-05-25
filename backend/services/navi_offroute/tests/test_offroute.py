@@ -258,11 +258,14 @@ def test_admin_info_no_secrets_and_probes(client, monkeypatch):
     assert all(set(f) == {'name', 'path', 'exists', 'readable'} for f in d['filesystem'])
 
 
-# ── OffrouteRouter._route_auto — feasibility-based mode selection ─────────
-# Tested in isolation: a bare router (no __init__/readers) with OffrouteRouter.route
-# monkeypatched to a per-mode fixture. Exercises _route_auto directly, not the blueprint.
+# ── OffrouteRouter._route_auto — eligible-mode-set selection ──────────────
+# Tested in isolation on a bare router (no __init__/readers): OffrouteRouter.route is
+# monkeypatched per-mode; eligibility comes from category hints or a stubbed spatial
+# fallback. Exercises _route_auto directly, not the Flask blueprint.
 
 from services.navi_offroute.router import OffrouteRouter, AUTO_MODE_PRIORITY
+
+ALL_MODES = frozenset({"vehicle", "atv", "mtb", "foot"})
 
 
 def _stub_route(per_mode, calls):
@@ -272,18 +275,57 @@ def _stub_route(per_mode, calls):
     return stub
 
 
+def _all_ok():
+    return {m: {"status": "ok"} for m in AUTO_MODE_PRIORITY}
+
+
+# ── _eligible_modes_from_category ─────────────────────────────────────────
+
+def test_eligible_modes_exact_match():
+    r = object.__new__(OffrouteRouter)
+    assert r._eligible_modes_from_category("highway:residential") == ALL_MODES
+    assert r._eligible_modes_from_category("highway:track") == frozenset({"atv", "mtb", "foot"})
+    assert r._eligible_modes_from_category("highway:path") == frozenset({"mtb", "foot"})
+    assert r._eligible_modes_from_category("highway:footway") == frozenset({"foot"})
+
+
+def test_eligible_modes_wildcard_match():
+    r = object.__new__(OffrouteRouter)
+    # building:house -> building:* -> all modes
+    assert r._eligible_modes_from_category("building:house") == ALL_MODES
+    assert r._eligible_modes_from_category("amenity:cafe") == ALL_MODES
+    # natural:* -> foot only
+    assert r._eligible_modes_from_category("natural:peak") == frozenset({"foot"})
+
+
+def test_eligible_modes_none_or_unknown():
+    r = object.__new__(OffrouteRouter)
+    assert r._eligible_modes_from_category(None) is None
+    assert r._eligible_modes_from_category("") is None
+    assert r._eligible_modes_from_category("bogus:thing") is None
+
+
+# ── probe-iteration logic (both endpoints typed -> no spatial calls) ──────
+
+def _typed_all(monkeypatch):
+    monkeypatch.setattr(OffrouteRouter, "_eligible_modes_from_category",
+                        lambda self, cat: ALL_MODES)
+
+
 def test_route_auto_first_probe_ok_returns_vehicle(monkeypatch):
+    _typed_all(monkeypatch)
     calls = []
-    per_mode = {m: {"status": "ok"} for m in AUTO_MODE_PRIORITY}
-    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
     r = object.__new__(OffrouteRouter)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "ok"
     assert out["selected_mode"] == "vehicle"
-    assert calls == ["vehicle"]  # stops probing after first success
+    assert out["selected_mode_set"] == sorted(ALL_MODES)
+    assert calls == ["vehicle"]
 
 
 def test_route_auto_falls_through_to_foot(monkeypatch):
+    _typed_all(monkeypatch)
     calls = []
     per_mode = {
         "vehicle": {"status": "error", "message": "No roads found"},
@@ -300,6 +342,7 @@ def test_route_auto_falls_through_to_foot(monkeypatch):
 
 
 def test_route_auto_all_error_returns_error(monkeypatch):
+    _typed_all(monkeypatch)
     calls = []
     per_mode = {m: {"status": "error", "message": f"{m} failed"} for m in AUTO_MODE_PRIORITY}
     monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
@@ -307,10 +350,12 @@ def test_route_auto_all_error_returns_error(monkeypatch):
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "error"
     assert "selected_mode" not in out
+    assert out["selected_mode_set"] == sorted(ALL_MODES)
     assert calls == ["vehicle", "atv", "mtb", "foot"]
 
 
 def test_route_auto_selected_mode_present_in_ok_response(monkeypatch):
+    _typed_all(monkeypatch)
     calls = []
     per_mode = {
         "vehicle": {"status": "error", "message": "No roads found"},
@@ -322,4 +367,54 @@ def test_route_auto_selected_mode_present_in_ok_response(monkeypatch):
     r = object.__new__(OffrouteRouter)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "ok"
-    assert "selected_mode" in out and out["selected_mode"] == "atv"
+    assert out["selected_mode"] == "atv"
+
+
+# ── _route_auto with category type hints (real _eligible_modes_from_category) ──
+
+def test_route_auto_address_to_address_picks_vehicle(monkeypatch):
+    calls = []
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
+                        start_category="building:house", end_category="highway:residential")
+    assert out["selected_mode"] == "vehicle"
+    assert calls == ["vehicle"]
+
+
+def test_route_auto_address_to_trailhead_picks_atv(monkeypatch):
+    calls = []
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
+                        start_category="building:house", end_category="highway:trailhead")
+    assert out["selected_mode"] == "atv"
+    assert "vehicle" not in calls
+    assert out["selected_mode_set"] == sorted({"atv", "mtb", "foot"})
+
+
+def test_route_auto_address_to_peak_picks_foot(monkeypatch):
+    calls = []
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
+                        start_category="building:house", end_category="natural:peak")
+    assert out["selected_mode"] == "foot"
+    assert calls == ["foot"]
+    assert out["selected_mode_set"] == ["foot"]
+
+
+def test_route_auto_both_unknown_uses_spatial_fallback(monkeypatch):
+    calls = []
+    spatial_calls = []
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
+
+    def fake_spatial(self, lat, lon, snap_cache):
+        spatial_calls.append((lat, lon))
+        return ALL_MODES
+
+    monkeypatch.setattr(OffrouteRouter, "_spatial_eligible_modes", fake_spatial)
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")  # no categories
+    assert len(spatial_calls) == 2  # both endpoints resolved spatially
+    assert out["selected_mode"] == "vehicle"

@@ -60,12 +60,18 @@ def api_offroute():
         if boundary_mode not in VALID_BOUNDARY_MODES:
             return jsonify({"status": "error", "message": "boundary_mode must be strict, pragmatic, or emergency"}), 400
 
+        # Optional per-endpoint OSM "key:value" category hints. Only used by Auto
+        # mode to gate eligible travel modes; ignored for concrete modes.
+        start_category = data.get("start_category")
+        end_category = data.get("end_category")
+
         router = OffrouteRouter()
         try:
             result = router.route(
                 start_lat=start_lat, start_lon=start_lon,
                 end_lat=end_lat, end_lon=end_lon,
                 mode=mode, boundary_mode=boundary_mode,
+                start_category=start_category, end_category=end_category,
             )
         finally:
             router.close()
