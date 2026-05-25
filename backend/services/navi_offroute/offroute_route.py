@@ -18,7 +18,7 @@ logger = logging.getLogger('navi_offroute.route')
 
 bp = Blueprint('offroute', __name__)
 
-VALID_MODES = ("auto", "foot", "mtb", "atv", "vehicle")
+VALID_MODES = ("auto", "foot", "2w", "4w", "vehicle")
 VALID_BOUNDARY_MODES = ("strict", "pragmatic", "emergency")
 
 
@@ -29,7 +29,7 @@ def api_offroute():
 
     Request body:
         {start:[lat,lon], end:[lat,lon],
-         mode: auto|foot|mtb|atv|vehicle (default foot),
+         mode: auto|foot|2w|4w|vehicle (default foot),
          boundary_mode: strict|pragmatic|emergency (default pragmatic)}
 
     Response: {status:"ok", route:<GeoJSON FeatureCollection>, summary:{...}}
@@ -53,8 +53,13 @@ def api_offroute():
         end_lat, end_lon = float(end[0]), float(end[1])
 
         mode = data.get("mode", "foot")
+        # Backward-compat: map legacy mode names from bookmarked URLs.
+        if mode == "mtb":
+            mode = "2w"
+        elif mode == "atv":
+            mode = "4w"
         if mode not in VALID_MODES:
-            return jsonify({"status": "error", "message": "mode must be auto, foot, mtb, atv, or vehicle"}), 400
+            return jsonify({"status": "error", "message": "mode must be auto, foot, 2w, 4w, or vehicle"}), 400
 
         boundary_mode = data.get("boundary_mode", "pragmatic")
         if boundary_mode not in VALID_BOUNDARY_MODES:

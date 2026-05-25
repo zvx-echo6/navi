@@ -106,7 +106,7 @@ function ManeuverIcon({ type }) {
 
 /**
  * Add transport mode prefix to network maneuver instruction.
- * "Drive east on..." for auto, "Walk south on..." for foot, "Ride north on..." for mtb
+ * "Drive east on..." for auto, "Walk south on..." for foot, "Ride north on..." for 2w
  */
 function formatNetworkInstruction(instruction, mode) {
   if (!instruction) return ''
@@ -116,9 +116,9 @@ function formatNetworkInstruction(instruction, mode) {
     'auto': 'Drive',
     'foot': 'Walk',
     'pedestrian': 'Walk',
-    'mtb': 'Ride',
+    '2w': 'Ride',
     'bicycle': 'Ride',
-    'atv': 'Drive',
+    '4w': 'Drive',
     'vehicle': 'Drive',
   }
   const verb = modeVerbs[mode] || 'Go'
