@@ -7,6 +7,7 @@ indicating which roads/trails are open or closed to specific vehicle modes.
 MVUM is motor-vehicle specific — foot mode should skip this layer entirely.
 """
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -33,9 +34,14 @@ def navi_db_path() -> Path:
 
 logger = logging.getLogger("navi_offroute.mvum_spatial")
 
-# Rough degrees-per-metre for small buffers (latitude scale; good enough for the
-# coarse candidate filter at Layer 0).
-_DEG_PER_M = 1.0 / 111320.0
+def _buffer_degrees_for_meters(meters: float, lat: float) -> float:
+    """Approximate buffer radius in degrees for a metre tolerance at a given latitude.
+    Longitude degrees shrink with cos(lat); use the larger of the lat/lon equivalents so
+    the bbox-coarse buffer stays conservative."""
+    cos_lat = max(math.cos(math.radians(lat)), 0.01)
+    lat_deg = meters / 111320.0
+    lon_deg = meters / (111320.0 * cos_lat)
+    return max(lat_deg, lon_deg)
 
 
 class MVUMSpatialIndex:
@@ -74,6 +80,7 @@ class MVUMSpatialIndex:
 
     def _load_table(self, table, kind):
         count = 0
+        parse_errors = 0
         conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         try:
@@ -83,6 +90,7 @@ class MVUMSpatialIndex:
                 try:
                     geom = wkb.loads(bytes(row["shape"]))
                 except Exception:
+                    parse_errors += 1
                     continue
                 if geom.is_empty:
                     continue
@@ -101,6 +109,8 @@ class MVUMSpatialIndex:
                 count += 1
         finally:
             conn.close()
+        if parse_errors > 0:
+            logger.warning("%s: %d rows had unparseable WKB shape blobs", table, parse_errors)
         return count
 
     @property
@@ -127,9 +137,12 @@ class MVUMSpatialIndex:
         MVUM features which merely cross the route are rejected, keeping only those
         that run alongside it.
         """
+        if not coords:
+            return []
         pts = [(lon, lat) for (lat, lon) in coords]
         geom = LineString(pts) if len(pts) >= 2 else Point(pts[0])
-        return self._query_geom(geom.buffer(tolerance_m * _DEG_PER_M))
+        avg_lat = sum(lat for (lat, lon) in coords) / len(coords)
+        return self._query_geom(geom.buffer(_buffer_degrees_for_meters(tolerance_m, avg_lat)))
 
 
 def parse_date_range(date_str: str) -> List[Tuple[int, int, int, int]]:
