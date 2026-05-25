@@ -537,7 +537,7 @@ class OffrouteRouter:
         try:
             resp = requests.post(
                 f"{VALHALLA_URL}/locate",
-                json={"locations": [{"lat": lat, "lon": lon}], "costing": costing},
+                json={"locations": [{"lat": lat, "lon": lon}], "costing": costing, "verbose": True},
                 timeout=10
             )
 
@@ -553,7 +553,9 @@ class OffrouteRouter:
                         "snap_distance_m": snap_dist,
                         "snapped_lat": snap_lat,
                         "snapped_lon": snap_lon,
-                        "road_class": edge.get("road_class"),
+                        # Valhalla puts the highway class under edge.classification.classification
+                        # (verbose=true); defensive .get chain so missing keys yield None.
+                        "road_class": edge.get("edge", {}).get("classification", {}).get("classification"),
                     }
         except Exception:
             pass
