@@ -31,7 +31,7 @@ export const useStore = create((set, get) => ({
   routeStart: null, // { lat, lon, name }
   routeEnd: null, // { lat, lon, name }
   stops: [], // Intermediate waypoints only: [{ id, lat, lon, name }, ...]
-  routeMode: "auto", // auto | foot | mtb | atv | vehicle
+  routeMode: "auto", // auto | foot | 2w | 4w | vehicle
   boundaryMode: "strict", // strict | pragmatic | emergency
   routeResult: null, // Response from /api/offroute
   routeLoading: false,

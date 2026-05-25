@@ -11,7 +11,7 @@ Off-network detection: Valhalla /locate snap distance > 500m = off-network.
 
 IMPORTANT: The wilderness segment ALWAYS uses foot mode for pathfinding.
 The user's selected mode affects:
-  1. Which entry points are valid (foot=any, mtb=tracks+roads, vehicle=roads only)
+  1. Which entry points are valid (foot=any, 2w=tracks+roads, vehicle=roads only)
   2. The Valhalla costing profile for the network segment
 """
 import gc
@@ -83,20 +83,20 @@ PATH_USE_VALUES = frozenset({
 MODE_TO_COSTING = {
     "auto": "auto",
     "foot": "pedestrian",
-    "mtb": "bicycle",
-    "atv": "auto",
+    "2w": "bicycle",
+    "4w": "auto",
     "vehicle": "auto",
 }
 
 # Auto mode probes these concrete modes in capability order (most -> least
 # demanding terrain) and uses the first that yields a usable route.
-AUTO_MODE_PRIORITY = ["vehicle", "atv", "mtb", "foot"]
+AUTO_MODE_PRIORITY = ["vehicle", "4w", "2w", "foot"]
 
 # Per-endpoint travel-mode eligibility from an OSM-style "key:value" category hint.
 # Looked up exact first, then "key:*" wildcard (see _eligible_modes_from_category).
-_MODES_ALL = frozenset({"vehicle", "atv", "mtb", "foot"})
-_MODES_TRACK = frozenset({"atv", "mtb", "foot"})
-_MODES_PATH = frozenset({"mtb", "foot"})
+_MODES_ALL = frozenset({"vehicle", "4w", "2w", "foot"})
+_MODES_TRACK = frozenset({"4w", "2w", "foot"})
+_MODES_PATH = frozenset({"2w", "foot"})
 _MODES_FOOT = frozenset({"foot"})
 
 CATEGORY_ELIGIBLE_MODES = {
@@ -115,9 +115,9 @@ CATEGORY_ELIGIBLE_MODES = {
     "place:village": _MODES_ALL, "place:hamlet": _MODES_ALL,
     "place:suburb": _MODES_ALL, "place:neighbourhood": _MODES_ALL,
     "railway:station": _MODES_ALL,
-    # Track-like -> atv/mtb/foot
+    # Track-like -> 4w/2w/foot
     "highway:track": _MODES_TRACK, "highway:trailhead": _MODES_TRACK,
-    # Path-like -> mtb/foot
+    # Path-like -> 2w/foot
     "highway:path": _MODES_PATH, "highway:bridleway": _MODES_PATH,
     # Foot-only
     "highway:footway": _MODES_FOOT, "highway:steps": _MODES_FOOT,
@@ -130,15 +130,15 @@ CATEGORY_ELIGIBLE_MODES = {
 }
 
 # Mode to valid entry point highway classes
-# foot = any trail/track/road, mtb = tracks and roads, vehicle = roads only
+# foot = any trail/track/road, 2w = tracks and roads, vehicle = roads only
 MODE_TO_VALID_HIGHWAYS = {
     "auto": {"primary", "secondary", "tertiary", "unclassified", "residential",
              "service"},
     "foot": {"primary", "secondary", "tertiary", "unclassified", "residential",
              "service", "track", "path", "footway", "bridleway"},
-    "mtb": {"primary", "secondary", "tertiary", "unclassified", "residential",
+    "2w": {"primary", "secondary", "tertiary", "unclassified", "residential",
             "service", "track"},
-    "atv": {"primary", "secondary", "tertiary", "unclassified", "residential",
+    "4w": {"primary", "secondary", "tertiary", "unclassified", "residential",
             "service", "track"},
     "vehicle": {"primary", "secondary", "tertiary", "unclassified", "residential",
                 "service"},
@@ -597,7 +597,7 @@ class OffrouteRouter:
         start_lon: float,
         end_lat: float,
         end_lon: float,
-        mode: Literal["auto", "foot", "mtb", "atv", "vehicle"] = "foot",
+        mode: Literal["auto", "foot", "2w", "4w", "vehicle"] = "foot",
         boundary_mode: Literal["strict", "pragmatic", "emergency"] = "pragmatic",
         start_category: Optional[str] = None,
         end_category: Optional[str] = None
@@ -614,7 +614,7 @@ class OffrouteRouter:
         Args:
             start_lat, start_lon: Starting coordinates
             end_lat, end_lon: Destination coordinates
-            mode: Travel mode (foot, mtb, atv, vehicle)
+            mode: Travel mode (foot, 2w, 4w, vehicle)
             boundary_mode: How to handle private land (strict, pragmatic, emergency)
 
         Returns a GeoJSON FeatureCollection with route segments.
@@ -704,8 +704,8 @@ class OffrouteRouter:
         Runs the three distinct costings (auto/pedestrian/bicycle) in parallel and
         applies the per-mode snap-distance + road-class rules. snap_cache dedupes
         /locate results within a single request."""
-        # auto costing -> vehicle/atv reach, bicycle -> mtb reach, pedestrian -> foot
-        costing_modes = {"auto": "vehicle", "pedestrian": "foot", "bicycle": "mtb"}
+        # auto costing -> vehicle/4w reach, bicycle -> 2w reach, pedestrian -> foot
+        costing_modes = {"auto": "vehicle", "pedestrian": "foot", "bicycle": "2w"}
         need = [c for c in costing_modes if (lat, lon, c) not in snap_cache]
         if need:
             with ThreadPoolExecutor(max_workers=3) as ex:
@@ -727,15 +727,15 @@ class OffrouteRouter:
            (d_auto <= AUTO_SNAP_RELAXED_M and cls_auto in PAVED_HIGHWAY_CLASSES
                 and self._is_terrain_flat(lat, lon)):
             modes.add("vehicle")
-        # atv: near a paved road OR a track (auto costing)
+        # 4w: near a paved road OR a track (auto costing)
         if d_auto <= AUTO_SNAP_RELAXED_M and (
                 cls_auto in PAVED_HIGHWAY_CLASSES or use_auto in TRACK_USE_VALUES):
-            modes.add("atv")
-        # mtb: near a paved road OR a track/path (bicycle costing)
+            modes.add("4w")
+        # 2w: near a paved road OR a track/path (bicycle costing)
         if d_bike <= AUTO_SNAP_RELAXED_M and (
                 cls_bike in PAVED_HIGHWAY_CLASSES
                 or use_bike in (TRACK_USE_VALUES | PATH_USE_VALUES)):
-            modes.add("mtb")
+            modes.add("2w")
         return frozenset(modes)
 
     def _route_auto(
@@ -945,7 +945,7 @@ class OffrouteRouter:
             if not entry_points:
                 if mode == "vehicle":
                     msg = f"No roads found within {EXPANDED_SEARCH_RADIUS_KM}km. Try a different mode."
-                elif mode in ("mtb", "atv"):
+                elif mode in ("2w", "4w"):
                     msg = f"No tracks or roads found within {EXPANDED_SEARCH_RADIUS_KM}km. Try foot mode."
                 else:
                     msg = f"No trail entry points found within {EXPANDED_SEARCH_RADIUS_KM}km of start."
@@ -1025,7 +1025,7 @@ class OffrouteRouter:
             if not entry_points:
                 if mode == "vehicle":
                     msg = f"No roads found within {EXPANDED_SEARCH_RADIUS_KM}km of destination. Try a different mode."
-                elif mode in ("mtb", "atv"):
+                elif mode in ("2w", "4w"):
                     msg = f"No tracks or roads found within {EXPANDED_SEARCH_RADIUS_KM}km of destination. Try foot mode."
                 else:
                     msg = f"No trail entry points found within {EXPANDED_SEARCH_RADIUS_KM}km of destination."

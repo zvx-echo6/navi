@@ -1,7 +1,7 @@
 """
 Multi-mode travel cost functions for OFFROUTE.
 
-Supports four travel modes: foot, mtb, atv, vehicle.
+Supports four travel modes: foot, 2w, 4w, vehicle.
 Each mode has its own speed function, max slope, trail access rules,
 and terrain friction overrides.
 
@@ -120,8 +120,8 @@ MODE_PROFILES: Dict[str, ModeProfile] = {
         wilderness_impassable=False,
     ),
 
-    "mtb": ModeProfile(
-        name="mtb",
+    "2w": ModeProfile(
+        name="2w",
         description="Mountain bike / dirt bike (Herzog wheeled model)",
         speed_function="herzog",
         base_speed_kmh=12.0,
@@ -143,8 +143,8 @@ MODE_PROFILES: Dict[str, ModeProfile] = {
         wilderness_impassable=True,
     ),
 
-    "atv": ModeProfile(
-        name="atv",
+    "4w": ModeProfile(
+        name="4w",
         description="ATV / side-by-side (Herzog wheeled model, higher base speed)",
         speed_function="herzog",
         base_speed_kmh=25.0,
@@ -225,7 +225,7 @@ def compute_cost_multiplier_grid(
     friction: Optional[np.ndarray] = None,
     friction_raw: Optional[np.ndarray] = None,
     wilderness: Optional[np.ndarray] = None,
-    mode: Literal["foot", "mtb", "atv", "vehicle"] = "foot",
+    mode: Literal["foot", "2w", "4w", "vehicle"] = "foot",
 ) -> np.ndarray:
     """Per-cell SLOPE-FREE context cost multiplier for the anisotropic A* pathfinder.
 
@@ -300,7 +300,7 @@ def compute_cost_grid(
     wilderness: Optional[np.ndarray] = None,
     mvum: Optional[np.ndarray] = None,
     boundary_mode: Literal["strict", "pragmatic", "emergency"] = "pragmatic",
-    mode: Literal["foot", "mtb", "atv", "vehicle"] = "foot"
+    mode: Literal["foot", "2w", "4w", "vehicle"] = "foot"
 ) -> np.ndarray:
     """
     Compute isotropic travel cost grid from elevation data.
@@ -327,7 +327,7 @@ def compute_cost_grid(
                   MVUM closures respond to boundary_mode (strict/pragmatic/emergency).
                   Foot mode should pass None (MVUM is motor-vehicle specific).
         boundary_mode: How to handle barriers ("strict", "pragmatic", "emergency")
-        mode: Travel mode ("foot", "mtb", "atv", "vehicle")
+        mode: Travel mode ("foot", "2w", "4w", "vehicle")
 
     Returns:
         2D array of travel cost in seconds per cell.
@@ -550,7 +550,7 @@ if __name__ == "__main__":
     trails = np.zeros((10, 10), dtype=np.uint8)
     trails[5, :] = 5  # Road across middle
 
-    for mode_name in ["foot", "mtb", "atv", "vehicle"]:
+    for mode_name in ["foot", "2w", "4w", "vehicle"]:
         cost = compute_cost_grid(
             elev, cell_size_m=30.0,
             friction=friction,
@@ -567,7 +567,7 @@ if __name__ == "__main__":
     wilderness = np.zeros((10, 10), dtype=np.uint8)
     wilderness[3:7, 3:7] = 255
 
-    for mode_name in ["foot", "mtb", "atv", "vehicle"]:
+    for mode_name in ["foot", "2w", "4w", "vehicle"]:
         cost = compute_cost_grid(
             elev, cell_size_m=30.0,
             wilderness=wilderness,

@@ -265,7 +265,7 @@ def test_admin_info_no_secrets_and_probes(client, monkeypatch):
 
 from services.navi_offroute.router import OffrouteRouter, AUTO_MODE_PRIORITY
 
-ALL_MODES = frozenset({"vehicle", "atv", "mtb", "foot"})
+ALL_MODES = frozenset({"vehicle", "4w", "2w", "foot"})
 
 
 def _stub_route(per_mode, calls):
@@ -284,8 +284,8 @@ def _all_ok():
 def test_eligible_modes_exact_match():
     r = object.__new__(OffrouteRouter)
     assert r._eligible_modes_from_category("highway:residential") == ALL_MODES
-    assert r._eligible_modes_from_category("highway:track") == frozenset({"atv", "mtb", "foot"})
-    assert r._eligible_modes_from_category("highway:path") == frozenset({"mtb", "foot"})
+    assert r._eligible_modes_from_category("highway:track") == frozenset({"4w", "2w", "foot"})
+    assert r._eligible_modes_from_category("highway:path") == frozenset({"2w", "foot"})
     assert r._eligible_modes_from_category("highway:footway") == frozenset({"foot"})
 
 
@@ -329,8 +329,8 @@ def test_route_auto_falls_through_to_foot(monkeypatch):
     calls = []
     per_mode = {
         "vehicle": {"status": "error", "message": "No roads found"},
-        "atv": {"status": "error", "message": "No tracks found"},
-        "mtb": {"status": "error", "message": "No tracks found"},
+        "4w": {"status": "error", "message": "No tracks found"},
+        "2w": {"status": "error", "message": "No tracks found"},
         "foot": {"status": "ok"},
     }
     monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
@@ -338,7 +338,7 @@ def test_route_auto_falls_through_to_foot(monkeypatch):
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "ok"
     assert out["selected_mode"] == "foot"
-    assert calls == ["vehicle", "atv", "mtb", "foot"]
+    assert calls == ["vehicle", "4w", "2w", "foot"]
 
 
 def test_route_auto_all_error_returns_error(monkeypatch):
@@ -351,7 +351,7 @@ def test_route_auto_all_error_returns_error(monkeypatch):
     assert out["status"] == "error"
     assert "selected_mode" not in out
     assert out["selected_mode_set"] == sorted(ALL_MODES)
-    assert calls == ["vehicle", "atv", "mtb", "foot"]
+    assert calls == ["vehicle", "4w", "2w", "foot"]
 
 
 def test_route_auto_selected_mode_present_in_ok_response(monkeypatch):
@@ -359,15 +359,15 @@ def test_route_auto_selected_mode_present_in_ok_response(monkeypatch):
     calls = []
     per_mode = {
         "vehicle": {"status": "error", "message": "No roads found"},
-        "atv": {"status": "ok", "route": {"type": "FeatureCollection", "features": []}},
-        "mtb": {"status": "ok"},
+        "4w": {"status": "ok", "route": {"type": "FeatureCollection", "features": []}},
+        "2w": {"status": "ok"},
         "foot": {"status": "ok"},
     }
     monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
     r = object.__new__(OffrouteRouter)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "ok"
-    assert out["selected_mode"] == "atv"
+    assert out["selected_mode"] == "4w"
 
 
 # ── _route_auto with category type hints (real _eligible_modes_from_category) ──
@@ -388,9 +388,9 @@ def test_route_auto_address_to_trailhead_picks_atv(monkeypatch):
     r = object.__new__(OffrouteRouter)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
                         start_category="building:house", end_category="highway:trailhead")
-    assert out["selected_mode"] == "atv"
+    assert out["selected_mode"] == "4w"
     assert "vehicle" not in calls
-    assert out["selected_mode_set"] == sorted({"atv", "mtb", "foot"})
+    assert out["selected_mode_set"] == sorted({"4w", "2w", "foot"})
 
 
 def test_route_auto_address_to_peak_picks_foot(monkeypatch):
@@ -436,7 +436,7 @@ def test_spatial_service_other_picks_vehicle(monkeypatch):
     r = object.__new__(OffrouteRouter)
     modes = r._spatial_eligible_modes(43.6, -116.2, {})
     assert "vehicle" in modes
-    assert modes == frozenset({"vehicle", "atv", "mtb", "foot"})
+    assert modes == frozenset({"vehicle", "4w", "2w", "foot"})
 
 
 def test_spatial_use_track_picks_atv_mtb_foot(monkeypatch):
@@ -445,7 +445,7 @@ def test_spatial_use_track_picks_atv_mtb_foot(monkeypatch):
     monkeypatch.setattr(OffrouteRouter, "_locate_on_network", _stub_locate_fixed(snap))
     r = object.__new__(OffrouteRouter)
     modes = r._spatial_eligible_modes(43.6, -116.2, {})
-    assert modes == frozenset({"atv", "mtb", "foot"})
+    assert modes == frozenset({"4w", "2w", "foot"})
     assert "vehicle" not in modes
 
 
@@ -455,7 +455,7 @@ def test_spatial_use_footway_picks_mtb_foot(monkeypatch):
     monkeypatch.setattr(OffrouteRouter, "_locate_on_network", _stub_locate_fixed(snap))
     r = object.__new__(OffrouteRouter)
     modes = r._spatial_eligible_modes(43.6, -116.2, {})
-    assert modes == frozenset({"mtb", "foot"})
+    assert modes == frozenset({"2w", "foot"})
 
 
 def test_spatial_no_class_no_use_picks_foot(monkeypatch):
@@ -635,7 +635,7 @@ def test_compute_cost_multiplier_grid_math():
     fr = _np.full((4, 4), 30, dtype=_np.uint8)
     fr[0, 0] = 80
     mult = compute_cost_multiplier_grid(
-        elev, 30.0, 30.0, friction=friction, friction_raw=fr, wilderness=None, mode="mtb")
+        elev, 30.0, 30.0, friction=friction, friction_raw=fr, wilderness=None, mode="2w")
     assert mult[1, 1] == 4.0          # 2.0 friction * 2.0 grass override
     assert _np.isinf(mult[0, 0])      # water impassable
 
@@ -659,7 +659,7 @@ class _FakeGrid:
 
 
 def test_pathfind_wilderness_always_uses_foot_effort(monkeypatch):
-    # Even when called with mode="mtb", the wilderness cost is computed as foot:
+    # Even when called with mode="2w", the wilderness cost is computed as foot:
     # compute_cost_multiplier_grid receives mode="foot", and A* gets the foot speed
     # function (tobler=0), foot base speed (6.0), and foot trail friction.
     captured = {}
@@ -688,7 +688,7 @@ def test_pathfind_wilderness_always_uses_foot_effort(monkeypatch):
     r.wilderness_reader = None  # foot is not wilderness_impassable -> not loaded anyway
 
     ep = [{"lat": 44.001, "lon": -115.001, "highway_class": "track", "name": "t", "land_status": "open"}]
-    out = r._pathfind_wilderness(44.0, -115.0, 44.001, -115.001, ep, "pragmatic", "start", mode="mtb")
+    out = r._pathfind_wilderness(44.0, -115.0, 44.001, -115.001, ep, "pragmatic", "start", mode="2w")
 
     assert out["status"] == "ok"
     assert captured["mult_mode"] == "foot"        # cost grid built as foot despite mode=mtb

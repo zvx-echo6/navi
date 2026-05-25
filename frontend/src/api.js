@@ -331,7 +331,7 @@ const MVUM_URL = "/api/mvum"
  * Request an offroute route from the pathfinder API.
  * @param {object} start - { lat, lon }
  * @param {object} end - { lat, lon }
- * @param {string} mode - auto | foot | mtb | atv | vehicle
+ * @param {string} mode - auto | foot | 2w | 4w | vehicle
  * @param {string} boundaryMode - strict | pragmatic | emergency
  * @param {string} [startCategory] - OSM "key:value" hint for the origin (Auto mode)
  * @param {string} [endCategory] - OSM "key:value" hint for the destination (Auto mode)
