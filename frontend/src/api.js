@@ -333,15 +333,20 @@ const MVUM_URL = "/api/mvum"
  * @param {object} end - { lat, lon }
  * @param {string} mode - auto | foot | mtb | atv | vehicle
  * @param {string} boundaryMode - strict | pragmatic | emergency
+ * @param {string} [startCategory] - OSM "key:value" hint for the origin (Auto mode)
+ * @param {string} [endCategory] - OSM "key:value" hint for the destination (Auto mode)
  * @returns {Promise<object>} Offroute response with GeoJSON route
  */
-export async function requestOffroute(start, end, mode = "foot", boundaryMode = "strict") {
+export async function requestOffroute(start, end, mode = "foot", boundaryMode = "strict", startCategory = null, endCategory = null) {
   const body = {
     start: [start.lat, start.lon],
     end: [end.lat, end.lon],
     mode,
     boundary_mode: boundaryMode,
   }
+  // Optional OSM "key:value" hints; Auto mode uses them to gate eligible modes.
+  if (startCategory) body.start_category = startCategory
+  if (endCategory) body.end_category = endCategory
   console.log('[TRACE-API] requestOffroute body:', JSON.stringify(body))
 
   const controller = new AbortController()

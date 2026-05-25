@@ -134,7 +134,7 @@ export const useStore = create((set, get) => ({
     try {
       if (waypoints.length === 2) {
         // Simple 2-point routing
-        const data = await requestOffroute(routeStart, routeEnd, routeMode, boundaryMode)
+        const data = await requestOffroute(routeStart, routeEnd, routeMode, boundaryMode, routeStart.category, routeEnd.category)
         if (data.status === "ok" && data.route) {
           set({ routeResult: data, routeError: null })
           if (_updateRouteDisplay) _updateRouteDisplay(data.route)
@@ -151,7 +151,7 @@ export const useStore = create((set, get) => ({
         for (let i = 0; i < waypoints.length - 1; i++) {
           const from = waypoints[i]
           const to = waypoints[i + 1]
-          const segmentData = await requestOffroute(from, to, routeMode, boundaryMode)
+          const segmentData = await requestOffroute(from, to, routeMode, boundaryMode, from.category, to.category)
 
           if (segmentData.status !== "ok" || !segmentData.route) {
             throw new Error("No route found between " + (from.name || "waypoint") + " and " + (to.name || "waypoint"))
@@ -214,6 +214,7 @@ export const useStore = create((set, get) => ({
       name: place.name,
       source: place.source,
       matchCode: place.matchCode,
+      category: place.category ?? null,  // preserve OSM key:value hint for Auto mode
     }
 
     let origin = null
