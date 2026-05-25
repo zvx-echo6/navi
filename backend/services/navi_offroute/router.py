@@ -543,6 +543,17 @@ class OffrouteRouter:
         if mode not in MODE_TO_COSTING:
             return {"status": "error", "message": f"Unknown mode: {mode}"}
 
+        # Vehicle is pure Valhalla road routing: Valhalla snaps endpoints to the
+        # nearest road automatically, so the off-network classifier is irrelevant
+        # (and a tight threshold would wrongly push normal road routes into
+        # wilderness pathfinding). Foot/MTB/ATV still use the threshold gate so
+        # users can intentionally pin backcountry points. Auto inherits this via
+        # its recursive self.route(..., mode="vehicle", ...) probe.
+        if mode == "vehicle":
+            return self._route_D_network_only(
+                start_lat, start_lon, end_lat, end_lon, mode
+            )
+
         # Detect network status for both endpoints
         start_status = self._locate_on_network(start_lat, start_lon, mode)
         end_status = self._locate_on_network(end_lat, end_lon, mode)
