@@ -2038,7 +2038,7 @@ const MapView = forwardRef(function MapView(_, ref) {
         // Reverse geocode for name
         fetchReverse(lat, lng).then((place) => {
           const name = place?.name || lat.toFixed(5) + ", " + lng.toFixed(5)
-          const location = { lat, lon: lng, name, source: "map_click" }
+          const location = { lat, lon: lng, name, source: "map_click", category: (place?.raw?.osm_key && place?.raw?.osm_value) ? `${place.raw.osm_key}:${place.raw.osm_value}` : null }
           if (pickingRouteField === "origin") {
             setRouteStart(location)
           } else if (pickingRouteField === "destination") {
@@ -2286,6 +2286,8 @@ const MapView = forwardRef(function MapView(_, ref) {
             address: null,
             type: props.kind_detail || props.kind || null,
             source: 'basemap_label',
+            // Auto-mode hint from basemap tags (null -> spatial fallback)
+            category: (props.kind && props.kind_detail) ? `${props.kind}:${props.kind_detail}` : (props.kind ? `${props.kind}:*` : null),
             matchCode: null,
             mode: 'feature',
             featureId: featureId,
