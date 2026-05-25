@@ -312,7 +312,9 @@ def _typed_all(monkeypatch):
                         lambda self, cat: ALL_MODES)
 
 
-def test_route_auto_first_probe_ok_returns_vehicle(monkeypatch):
+def test_route_auto_equal_times_keep_priority(monkeypatch):
+    # All candidates succeed with no recorded time -> tie -> highest priority wins,
+    # and every candidate is probed (no early return under min-time selection).
     _typed_all(monkeypatch)
     calls = []
     monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
@@ -321,7 +323,7 @@ def test_route_auto_first_probe_ok_returns_vehicle(monkeypatch):
     assert out["status"] == "ok"
     assert out["selected_mode"] == "vehicle"
     assert out["selected_mode_set"] == sorted(ALL_MODES)
-    assert calls == ["vehicle"]
+    assert calls == ["vehicle", "4w", "2w", "foot"]
 
 
 def test_route_auto_falls_through_to_foot(monkeypatch):
@@ -359,15 +361,15 @@ def test_route_auto_selected_mode_present_in_ok_response(monkeypatch):
     calls = []
     per_mode = {
         "vehicle": {"status": "error", "message": "No roads found"},
-        "4w": {"status": "ok", "route": {"type": "FeatureCollection", "features": []}},
-        "2w": {"status": "ok"},
-        "foot": {"status": "ok"},
+        "4w": {"status": "ok", "summary": {"total_effort_minutes": 90.0}},
+        "2w": {"status": "ok", "summary": {"total_effort_minutes": 40.0}},
+        "foot": {"status": "ok", "summary": {"total_effort_minutes": 600.0}},
     }
     monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
     r = object.__new__(OffrouteRouter)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "ok"
-    assert out["selected_mode"] == "4w"
+    assert out["selected_mode"] == "2w"   # fastest success wins
 
 
 # ── _route_auto with category type hints (real _eligible_modes_from_category) ──
@@ -379,7 +381,7 @@ def test_route_auto_address_to_address_picks_vehicle(monkeypatch):
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
                         start_category="building:house", end_category="highway:residential")
     assert out["selected_mode"] == "vehicle"
-    assert calls == ["vehicle"]
+    assert calls == ["vehicle", "4w", "2w", "foot"]
 
 
 def test_route_auto_address_to_trailhead_picks_atv(monkeypatch):
@@ -823,3 +825,41 @@ def test_pathfind_wilderness_bbox_pad_is_1_5km(monkeypatch):
     assert abs((bounds["north"] - 44.0) - 0.015) < 1e-9
     assert abs((44.0 - bounds["south"]) - 0.015) < 1e-9
     assert abs((bounds["east"] - (-115.0)) - 0.015) < 1e-9
+
+
+# ── Auto min-time selection + per-leg breakdown (feat/auto-picks-fastest) ──
+
+def test_route_auto_picks_min_time(monkeypatch):
+    # vehicle is first in AUTO_MODE_PRIORITY but slow; 4w is fastest -> 4w wins.
+    _typed_all(monkeypatch)
+    calls = []
+    per_mode = {
+        "vehicle": {"status": "ok", "summary": {"total_effort_minutes": 200.0}},
+        "4w": {"status": "ok", "summary": {"total_effort_minutes": 50.0}},
+        "2w": {"status": "ok", "summary": {"total_effort_minutes": 120.0}},
+        "foot": {"status": "ok", "summary": {"total_effort_minutes": 800.0}},
+    }
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
+    assert out["status"] == "ok"
+    assert out["selected_mode"] == "4w"                       # fastest, not first-priority
+    assert calls == ["vehicle", "4w", "2w", "foot"]           # probed every candidate
+
+
+def test_route_auto_per_leg_breakdown():
+    # Scenario A (_build_response): foot wilderness leg + network leg -> both > 0.
+    r = object.__new__(OffrouteRouter)
+    ws = [[-116.20, 43.60], [-116.21, 43.61]]
+    ws_stats = {"effort_minutes": 12.0, "distance_km": 1.0, "elevation_gain_m": 10.0,
+                "elevation_loss_m": 5.0, "on_trail_pct": 50.0, "barrier_crossings": 0}
+    net = {"distance_km": 60.0, "duration_minutes": 45.0, "maneuvers": [],
+           "coordinates": [[-116.21, 43.61], [-116.30, 43.70]]}
+    out = r._build_response(ws, ws_stats, None, net, None, None, None,
+                            "vehicle", "pragmatic", None, None, "A", 0.0, None)
+    assert out["status"] == "ok"
+    summ = out["summary"]
+    assert summ["wilderness_minutes"] > 0
+    assert summ["network_minutes"] > 0
+    # approx adds up to total
+    assert abs((summ["wilderness_minutes"] + summ["network_minutes"]) - summ["total_effort_minutes"]) < 1e-6

@@ -316,14 +316,18 @@ export default function DirectionsPanel({ onClose }) {
         })}
       </div>
 
-      {/* Auto mode: show which travel mode feasibility picked */}
+      {/* Auto mode: show which travel mode was picked (+ leg breakdown on transitions) */}
       {routeMode === "auto" && routeResult?.selected_mode && (
         <div
           className="flex items-center justify-center gap-1 py-1.5 text-xs rounded-lg"
           style={{ background: "var(--accent-muted)", color: "var(--accent)" }}
         >
           <Zap size={14} />
-          <span>{`Auto chose ${SELECTED_MODE_LABEL[routeResult.selected_mode] || routeResult.selected_mode}`}</span>
+          <span>{
+            (routeResult?.summary?.wilderness_minutes > 0 && routeResult.selected_mode !== "foot")
+              ? `Auto: Foot ${Math.round(routeResult.summary.wilderness_minutes)}min + ${SELECTED_MODE_LABEL[routeResult.selected_mode] || routeResult.selected_mode} ${Math.round(routeResult.summary.network_minutes)}min`
+              : `Auto chose ${SELECTED_MODE_LABEL[routeResult.selected_mode] || routeResult.selected_mode}`
+          }</span>
         </div>
       )}
 
