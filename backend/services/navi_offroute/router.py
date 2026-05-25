@@ -197,6 +197,17 @@ class EntryPointIndex:
             cur.execute("SELECT COUNT(*) FROM entry_points")
             return cur.fetchone()[0]
 
+    def has_entry_points(self) -> bool:
+        """Fast non-emptiness check. SELECT EXISTS short-circuits at the first row,
+        unlike SELECT COUNT(*) which scans the entire table (~73s on 2.94M rows).
+        Returns False if the table is absent."""
+        if not self.table_exists():
+            return False
+        conn = self._get_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT EXISTS (SELECT 1 FROM entry_points LIMIT 1)")
+            return cur.fetchone()[0]
+
     def query_bbox(
         self,
         south: float,
@@ -905,7 +916,7 @@ class OffrouteRouter:
         t0 = time.time()
 
         # Ensure entry point index exists
-        if not self.entry_index.table_exists() or self.entry_index.get_entry_point_count() == 0:
+        if not self.entry_index.has_entry_points():
             return {
                 "status": "error",
                 "message": "Trail entry point index not built. Run build_entry_index() first."
@@ -986,7 +997,7 @@ class OffrouteRouter:
         """
         t0 = time.time()
 
-        if not self.entry_index.table_exists() or self.entry_index.get_entry_point_count() == 0:
+        if not self.entry_index.has_entry_points():
             return {
                 "status": "error",
                 "message": "Trail entry point index not built. Run build_entry_index() first."
@@ -1066,7 +1077,7 @@ class OffrouteRouter:
         """
         t0 = time.time()
 
-        if not self.entry_index.table_exists() or self.entry_index.get_entry_point_count() == 0:
+        if not self.entry_index.has_entry_points():
             return {
                 "status": "error",
                 "message": "Trail entry point index not built. Run build_entry_index() first."
