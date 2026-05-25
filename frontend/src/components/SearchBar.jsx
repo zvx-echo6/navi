@@ -194,7 +194,7 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
     }
 
     if (pending) {
-      addStop({ lat: result.lat, lon: result.lon, name: result.name, source: result.source, matchCode: result.match_code })
+      addStop({ lat: result.lat, lon: result.lon, name: result.name, source: result.source, matchCode: result.match_code, category: (result.raw?.osm_key && result.raw?.osm_value) ? `${result.raw.osm_key}:${result.raw.osm_value}` : null })
       addStop({ lat: pending.lat, lon: pending.lon, name: pending.name, source: pending.source, matchCode: pending.matchCode })
       clearPendingDestination()
       toast(`Routing from ${result.name} to ${pending.name}`, { icon: '\u{1F9ED}' })
@@ -208,6 +208,8 @@ const SearchBar = forwardRef(function SearchBar(_, ref) {
         source: result.source,
         matchCode: result.match_code,
         raw: result.raw || {},
+        // OSM key:value hint for Auto mode (null -> spatial fallback)
+        category: (result.raw?.osm_key && result.raw?.osm_value) ? `${result.raw.osm_key}:${result.raw.osm_value}` : null,
       })
       // Set click marker for two-click model consistency
       setClickMarker({
