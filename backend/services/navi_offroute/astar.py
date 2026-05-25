@@ -8,7 +8,9 @@ two endpoints (or the trail friction when either endpoint is on a trail), and a
 barrier/boundary rule. The first goal cell popped from the open set wins, which is
 optimal under the admissible heuristic (straight-line distance / base speed).
 
-Cliffs (|grade| > max_grade) are a hard wall here; smoothing is deferred to #19.
+Cliffs (|grade| > max_grade) incur a smooth exponential penalty rather than a hard
+wall, so a single noisy DEM cell can't fabricate an impassable edge; only truly
+absurd grades (penalty > SLOPE_PENALTY_CAP) are dropped.
 """
 import math
 
@@ -22,6 +24,13 @@ INF = np.inf
 INFLATE_SIGMA = 1.8           # ~25% contribution at a 3-cell radius
 INFLATE_HARD_FACTOR = 50.0    # HARD sentinel = 50 x p95 of finite multipliers
 INFLATE_HARD_CAP = 1e12       # cap to avoid float overflow in the blur
+
+# Smooth slope penalty (replaces the old hard max_grade cliff). No penalty up to
+# max_grade; past it the edge cost is multiplied by exp(overshoot * SCALE), so a single
+# noisy DEM cell can't make an edge unconditionally impassable. Only truly absurd grades
+# (penalty above the cap) are dropped.
+SLOPE_PENALTY_SCALE = 10.0    # cost multiplier doubles for ~7% overshoot past max_grade
+SLOPE_PENALTY_CAP = 1e6       # beyond this, treat as impassable (true bad data)
 
 
 def inflate_cost_multiplier(mult, sigma=INFLATE_SIGMA):
@@ -194,12 +203,19 @@ def astar_multigoal(
                 dlon = dc * cell_size_lon_m
                 dist = math.sqrt(dlat * dlat + dlon * dlon)
                 signed_grade = (elev_n - elev_cur) / dist
-                if abs(signed_grade) > max_grade:
-                    continue  # hard cliff
+                # Smooth slope penalty: free up to max_grade, then an exponential ramp on
+                # the overshoot; only an absurd grade (penalty > cap) is impassable.
+                overshoot = abs(signed_grade) - max_grade
+                slope_penalty = 1.0
+                if overshoot > 0.0:
+                    slope_penalty = math.exp(overshoot * SLOPE_PENALTY_SCALE)
+                    if slope_penalty > SLOPE_PENALTY_CAP:
+                        continue  # absurd grade (DEM noise or true vertical) -- give up
                 spd = _speed_kmh(signed_grade, speed_function_id, base_speed_kmh, max_grade)
                 if spd <= 1e-9:
                     continue
                 base_time = dist * 3.6 / spd
+                base_time *= slope_penalty
 
                 tv_cur = trail_grid[cr, cc]
                 tv_n = trail_grid[nr, nc]

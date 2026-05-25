@@ -697,3 +697,71 @@ def test_pathfind_wilderness_always_uses_foot_effort(monkeypatch):
     assert captured["lookup"][5] == 0.1           # foot road
     assert captured["lookup"][15] == 0.3          # foot track
     assert captured["lookup"][25] == 0.5          # foot foot-trail
+
+
+# ── Smooth max_grade penalty (#19) ────────────────────────────────────────
+from services.navi_offroute.astar import SLOPE_PENALTY_CAP as _CAP  # noqa: F401
+
+
+def test_smooth_max_grade_penalty():
+    # 5x5 wall across row 2 with one crossing gap at (2,0) (the cliff cell); diagonal
+    # dodges of (2,0) are blocked so the gap can only be crossed via the penalised
+    # vertical edges. A second gap at (2,4) is opened only for the "routes around" case.
+    mg = float(_np.tan(_np.radians(40.0)))
+
+    def run(bump, second_gap):
+        elev = _np.zeros((5, 5), dtype=_np.float64)
+        elev[2, 0] = bump
+        mult = _np.ones((5, 5), dtype=_np.float64)
+        for c in (1, 2, 3):
+            mult[2, c] = _np.inf
+        if not second_gap:
+            mult[2, 4] = _np.inf          # close the detour: (2,0) is the only crossing
+        mult[1, 1] = _np.inf              # block diagonal dodge into (2,0)
+        mult[3, 1] = _np.inf              # block diagonal dodge out of (2,0)
+        trail = _np.zeros((5, 5), dtype=_np.uint8)
+        lookup = _np.full(256, _np.inf, dtype=_np.float64)
+        barr = _np.zeros((5, 5), dtype=_np.uint8)
+        gr = _np.array([4], dtype=_np.int64)
+        gc = _np.array([0], dtype=_np.int64)
+        return astar_multigoal(mult, elev, 30.0, 30.0, mg, 0, 6.0,
+                               trail, lookup, barr, 2, 0, 0, gr, gc)
+
+    def cells(path):
+        return {tuple(int(x) for x in p) for p in path}
+
+    # Flat control (only gap): crosses (2,0).
+    idx0, p0, c0 = run(0.0, second_gap=False)
+    assert idx0 == 0 and (2, 0) in cells(p0)
+
+    # Moderate cliff (grade ~0.87 > max 0.84), no alternative: the smooth penalty lets A*
+    # TRAVERSE it (a hard cliff would have returned no path) at a finite, raised cost.
+    idxm, pm, cm = run(26.0, second_gap=False)
+    assert idxm == 0 and (2, 0) in cells(pm)
+    assert _np.isfinite(cm) and cm > c0
+
+    # Absurd grade (~10) past the cap is still truly impassable: no alternative -> no path.
+    idxa, pa, ca = run(300.0, second_gap=False)
+    assert idxa == -1
+
+    # ...but when an alternative exists, A* routes AROUND the impassable cliff cell.
+    idxr, pr, cr = run(300.0, second_gap=True)
+    assert idxr == 0 and (2, 0) not in cells(pr) and (2, 4) in cells(pr)
+
+
+def test_signed_grade_at_max_threshold():
+    # A cell at EXACTLY max_grade incurs no penalty (the ramp is on the overshoot).
+    mg = 0.5
+    elev = _np.zeros((2, 1), dtype=_np.float64)
+    elev[1, 0] = mg * 30.0  # rise/run = 15/30 = 0.5 == mg exactly
+    mult = _np.ones((2, 1), dtype=_np.float64)
+    trail = _np.zeros((2, 1), dtype=_np.uint8)
+    lookup = _np.full(256, _np.inf, dtype=_np.float64)
+    barr = _np.zeros((2, 1), dtype=_np.uint8)
+    gr = _np.array([1], dtype=_np.int64)
+    gc = _np.array([0], dtype=_np.int64)
+    idx, path, cost = astar_multigoal(mult, elev, 30.0, 30.0, mg, 0, 6.0,
+                                      trail, lookup, barr, 2, 0, 0, gr, gc)
+    expected = 30.0 * 3.6 / _speed_kmh(mg, 0, 6.0, mg)  # penalty = 1.0 at threshold
+    assert idx == 0
+    assert abs(cost - expected) < 1e-6
