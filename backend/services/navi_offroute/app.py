@@ -10,6 +10,19 @@ from flask import Flask
 from shared.git_sha import git_short_sha
 
 from . import offroute_route, admin
+from .mvum import MVUMSpatialIndex
+
+# Process-wide singleton: build the MVUM spatial index once per process (per gunicorn
+# worker in prod; once across create_app() calls in tests), not once per app instance.
+_MVUM_INDEX = None
+
+
+def _get_mvum_index():
+    global _MVUM_INDEX
+    if _MVUM_INDEX is None:
+        _MVUM_INDEX = MVUMSpatialIndex()
+    return _MVUM_INDEX
+
 
 
 def create_app():
@@ -33,6 +46,13 @@ def create_app():
                 '%Y-%m-%dT%H:%M:%SZ', time.gmtime()
             )
         return response
+
+    # Load the MVUM spatial index once at service init (logs its own load line).
+    try:
+        app.config['MVUM_SPATIAL_INDEX'] = _get_mvum_index()
+    except Exception as e:
+        app.logger.warning("MVUM spatial index failed to load: %s", e)
+        app.config['MVUM_SPATIAL_INDEX'] = None
 
     app.register_blueprint(offroute_route.bp)
     app.register_blueprint(admin.bp)
