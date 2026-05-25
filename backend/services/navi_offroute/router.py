@@ -255,23 +255,31 @@ class EntryPointIndex:
         limit: int = 50
     ) -> List[Dict]:
         """
-        Find entry points within radius_km of (lat, lon).
-        Uses PostGIS ST_DWithin with geography cast for meter-accurate distance.
+        Find the nearest entry points to (lat, lon), ordered by true geodesic distance.
+
+        Uses PostGIS k-NN ordering (the geography ``<->`` operator), which is
+        index-assisted by the GiST index on ``(geom::geography)``: it walks the index
+        nearest-first and stops after ``limit`` rows, instead of scanning every point
+        inside a radius (the old ST_DWithin approach returned ~226k candidates near
+        dense areas before sorting). ``radius_km`` is retained as a *soft cap* applied
+        in Python after the fetch — rows beyond it are dropped, so callers'
+        expanded-radius fallback still works (though it is now effectively a no-op,
+        since k-NN already returns the globally nearest K regardless of radius).
         """
         if not self.table_exists():
             return []
 
         conn = self._get_conn()
-        radius_m = radius_km * 1000
 
-        # Build query with optional highway filter
+        # SELECT distance_m needs the point; optional highway filter; ORDER BY <-> needs
+        # the point again; then LIMIT. Param order follows the placeholders top-to-bottom.
         highway_filter = ""
-        params = [lon, lat, lon, lat, radius_m]
+        params = [lon, lat]
         if valid_highways:
             placeholders = ','.join(['%s'] * len(valid_highways))
-            highway_filter = f"AND highway_class IN ({placeholders})"
+            highway_filter = f"WHERE highway_class IN ({placeholders})"
             params.extend(list(valid_highways))
-        params.append(limit)
+        params.extend([lon, lat, limit])
 
         query = f"""
             SELECT
@@ -286,19 +294,18 @@ class EntryPointIndex:
                     ST_SetSRID(ST_Point(%s, %s), 4326)::geography
                 ) as distance_m
             FROM entry_points
-            WHERE ST_DWithin(
-                geom::geography,
-                ST_SetSRID(ST_Point(%s, %s), 4326)::geography,
-                %s
-            )
             {highway_filter}
-            ORDER BY distance_m
+            ORDER BY geom::geography <-> ST_SetSRID(ST_Point(%s, %s), 4326)::geography
             LIMIT %s
         """
 
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(query, params)
-            return [dict(row) for row in cur.fetchall()]
+            rows = [dict(row) for row in cur.fetchall()]
+
+        # radius_km soft cap (backward compat): drop rows beyond it.
+        radius_m = radius_km * 1000
+        return [r for r in rows if r["distance_m"] <= radius_m]
 
     def build_index(self, osm_pbf_path: Path = None) -> Dict:
         """
