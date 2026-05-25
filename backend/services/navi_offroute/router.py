@@ -933,7 +933,7 @@ class OffrouteRouter:
         valid_highways = MODE_TO_VALID_HIGHWAYS.get(mode)
 
         # Find entry points near start, filtered by mode
-        MAX_ENTRY_POINTS = 10
+        MAX_ENTRY_POINTS = 5  # tighter wilderness bbox: origin + 5 nearest entry points
         entry_points = self.entry_index.query_radius(
             start_lat, start_lon, DEFAULT_SEARCH_RADIUS_KM, valid_highways
         )
@@ -1013,7 +1013,7 @@ class OffrouteRouter:
         valid_highways = MODE_TO_VALID_HIGHWAYS.get(mode)
 
         # Find entry points near END (destination)
-        MAX_ENTRY_POINTS = 10
+        MAX_ENTRY_POINTS = 5  # tighter wilderness bbox: origin + 5 nearest entry points
         entry_points = self.entry_index.query_radius(
             end_lat, end_lon, DEFAULT_SEARCH_RADIUS_KM, valid_highways
         )
@@ -1091,7 +1091,7 @@ class OffrouteRouter:
             }
 
         valid_highways = MODE_TO_VALID_HIGHWAYS.get(mode)
-        MAX_ENTRY_POINTS = 10
+        MAX_ENTRY_POINTS = 5  # tighter wilderness bbox: origin + 5 nearest entry points
 
         # Find entry points near START
         entry_points_start = self.entry_index.query_radius(
@@ -1194,13 +1194,15 @@ class OffrouteRouter:
             {"status": "ok", "coords": [...], "stats": {...}, "entry_point": {...}}
             or {"status": "error", "message": "..."}
         """
-        # Build bbox - only include origin and entry points, NOT distant destination
-        # The destination is handled by Valhalla, wilderness only needs to reach entry points
+        # Build a tight bbox around origin + the (<=5) nearest entry points, NOT the distant
+        # destination (Valhalla handles the network leg). A small pad keeps the pathfinder
+        # off the grid edge; typical spans land ~3-5 km/side. MAX_BBOX_DEGREES is the
+        # absolute safety clamp, unchanged.
         MAX_BBOX_DEGREES = 2.0
         all_lats = [origin_lat] + [p["lat"] for p in entry_points]
         all_lons = [origin_lon] + [p["lon"] for p in entry_points]
 
-        padding = 0.05
+        padding = 0.015  # ~1.5 km
         bbox = {
             "south": min(all_lats) - padding,
             "north": max(all_lats) + padding,

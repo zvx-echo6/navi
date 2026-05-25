@@ -765,3 +765,61 @@ def test_signed_grade_at_max_threshold():
     expected = 30.0 * 3.6 / _speed_kmh(mg, 0, 6.0, mg)  # penalty = 1.0 at threshold
     assert idx == 0
     assert abs(cost - expected) < 1e-6
+
+
+# ── Tighter wilderness bbox (#20): 5 entry points + 1.5 km pad ─────────────
+
+def test_route_a_slices_entry_points_to_five(monkeypatch):
+    # query_radius yields 8; _route_A must hand _pathfind_wilderness at most 5.
+    eps = [{"lat": 44.0 + i * 0.001, "lon": -115.0, "highway_class": "track",
+            "name": str(i), "land_status": "open"} for i in range(8)]
+    captured = {}
+
+    def fake_pf(self, olat, olon, dlat, dlon, entry_points, boundary_mode, label, mode="foot"):
+        captured["n"] = len(entry_points)
+        return {"status": "error", "message": "stop"}
+
+    monkeypatch.setattr(OffrouteRouter, "_pathfind_wilderness", fake_pf)
+    r = object.__new__(OffrouteRouter)
+    r.entry_index = type("I", (), {
+        "has_entry_points": lambda self: True,
+        "query_radius": lambda self, *a, **k: list(eps),
+    })()
+    out = r._route_A_wilderness_to_network(44.0, -115.0, 44.5, -115.5, "foot", "pragmatic")
+    assert out["status"] == "error"
+    assert captured["n"] == 5
+
+
+def test_pathfind_wilderness_bbox_pad_is_1_5km(monkeypatch):
+    # Capture the bbox passed to get_elevation_grid; with origin == the single entry point,
+    # the span is purely the padding -> 0.015 deg (~1.5 km) on each side.
+    bounds = {}
+
+    class _CapDEM:
+        def get_elevation_grid(self, south, north, west, east):
+            bounds.update(south=south, north=north, west=west, east=east)
+            return _np.zeros((10, 10), dtype=_np.float64), {"cell_size_m": 30.0}
+        def latlon_to_pixel(self, lat, lon, meta):
+            return (0, 0)
+        def pixel_to_latlon(self, row, col, meta):
+            return (44.0 + row * 0.001, -115.0 + col * 0.001)
+
+    monkeypatch.setattr(_router_mod, "compute_cost_multiplier_grid",
+                        lambda *a, **k: _np.ones((10, 10), dtype=_np.float64))
+    monkeypatch.setattr(_router_mod, "astar_multigoal",
+                        lambda *a, **k: (0, _np.array([[0, 0]], dtype=_np.int64), 5.0))
+    monkeypatch.setattr(OffrouteRouter, "_init_readers", lambda self: None)
+
+    r = object.__new__(OffrouteRouter)
+    r.dem_reader = _CapDEM()
+    r.friction_reader = type("F", (), {"get_friction_grid": lambda self, **k: _np.full((10, 10), 30, dtype=_np.uint8)})()
+    r.barrier_reader = type("B", (), {"get_barrier_grid": lambda self, **k: _np.zeros((10, 10), dtype=_np.uint8)})()
+    r.trail_reader = type("T", (), {"get_trails_grid": lambda self, **k: _np.zeros((10, 10), dtype=_np.uint8)})()
+    r.wilderness_reader = None
+
+    ep = [{"lat": 44.0, "lon": -115.0, "highway_class": "track", "name": "t", "land_status": "open"}]
+    out = r._pathfind_wilderness(44.0, -115.0, 44.0, -115.0, ep, "pragmatic", "start", mode="foot")
+    assert out["status"] == "ok"
+    assert abs((bounds["north"] - 44.0) - 0.015) < 1e-9
+    assert abs((44.0 - bounds["south"]) - 0.015) < 1e-9
+    assert abs((bounds["east"] - (-115.0)) - 0.015) < 1e-9
