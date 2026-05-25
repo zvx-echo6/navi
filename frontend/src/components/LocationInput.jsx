@@ -167,6 +167,8 @@ export default function LocationInput({
       name: result.name,
       source: result.source,
       matchCode: result.match_code,
+      // OSM key:value hint for Auto mode's type-hint fast path (null -> spatial fallback)
+      category: (result.raw?.osm_key && result.raw?.osm_value) ? `${result.raw.osm_key}:${result.raw.osm_value}` : null,
     })
     setQuery(result.name)
     setResults([])

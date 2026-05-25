@@ -166,6 +166,7 @@ export default function DirectionsPanel({ onClose }) {
       lon: newOriginItem.data.lon,
       name: newOriginItem.data.name,
       source: newOriginItem.data.source,
+      category: newOriginItem.data?.category ?? null,
     } : null
 
     const newDest = newDestItem?.data ? {
@@ -173,6 +174,7 @@ export default function DirectionsPanel({ onClose }) {
       lon: newDestItem.data.lon,
       name: newDestItem.data.name,
       source: newDestItem.data.source,
+      category: newDestItem.data?.category ?? null,
     } : null
 
     const newStops = newStopItems.map((item) => ({
