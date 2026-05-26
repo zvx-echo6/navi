@@ -15,7 +15,23 @@ import time
 
 DEFAULT_DB_PATH = '/var/lib/navi-backend/place_cache.db'
 
+# Cache entries older than this are treated as a miss so enrichment changes (new
+# wiki rewrites, etc.) propagate without a manual truncate. Override with the
+# NAVI_PLACE_CACHE_TTL_DAYS env var (days; default 30).
+DEFAULT_TTL_DAYS = 30
+
 _db_conn = None
+
+
+def _ttl_seconds():
+    """Cache entry lifetime in seconds (NAVI_PLACE_CACHE_TTL_DAYS, default 30 days)."""
+    raw = os.environ.get('NAVI_PLACE_CACHE_TTL_DAYS')
+    if raw is None:
+        return DEFAULT_TTL_DAYS * 86400
+    try:
+        return float(raw) * 86400
+    except ValueError:
+        return DEFAULT_TTL_DAYS * 86400
 
 
 def db_path():
@@ -56,6 +72,12 @@ def get_conn():
             call_count INTEGER NOT NULL DEFAULT 0
         )
     """)
+    # Idempotent TTL-column guard for any legacy DB predating cached_at (the CREATE
+    # above always includes it, so this only fires on an older on-disk DB). Existing
+    # rows get cached_at=0 -> treated as expired -> refreshed on next access.
+    cols = {r[1] for r in _db_conn.execute("PRAGMA table_info(place_cache)")}
+    if 'cached_at' not in cols:
+        _db_conn.execute("ALTER TABLE place_cache ADD COLUMN cached_at INTEGER DEFAULT 0")
     _db_conn.commit()
     return _db_conn
 
@@ -72,20 +94,29 @@ def reset_cache():
 
 
 def cache_get(osm_type, osm_id):
-    """Return cached place dict or None."""
+    """Return a cached place dict, or None on miss / TTL expiry.
+
+    A hit older than the TTL (NAVI_PLACE_CACHE_TTL_DAYS, default 30 days) is treated
+    as a miss so the caller refetches + re-enriches; the row is left in place and the
+    rewrite (cache_put) overwrites it. Entries with an unknown age (cached_at 0/NULL,
+    e.g. legacy rows) are likewise treated as expired.
+    """
     db = get_conn()
     row = db.execute(
-        "SELECT data FROM place_cache WHERE osm_type=? AND osm_id=?",
+        "SELECT data, cached_at FROM place_cache WHERE osm_type=? AND osm_id=?",
         (osm_type, osm_id)
     ).fetchone()
-    if row and row[0]:
-        try:
-            result = json.loads(row[0])
-            result['source'] = 'cache'
-            return result
-        except (json.JSONDecodeError, TypeError):
-            pass
-    return None
+    if not row or not row[0]:
+        return None
+    cached_at = row[1]
+    if not cached_at or (time.time() - cached_at) > _ttl_seconds():
+        return None
+    try:
+        result = json.loads(row[0])
+        result['source'] = 'cache'
+        return result
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 def cache_put(osm_type, osm_id, data, source):
