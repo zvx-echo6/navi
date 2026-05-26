@@ -301,3 +301,48 @@ def test_wiki_enrich_via_local_db_merges_fields(tmp_path, monkeypatch):
     d = client.get('/api/place/W/123').get_json()
     assert d['wiki_summary'] == 'A city.'
     assert d['wiki_url'] == 'https://en.wikipedia.org/wiki/Filer'
+
+
+# ── place_cache TTL ──
+
+def test_cache_hit_within_ttl_no_refetch(client, monkeypatch):
+    # Fresh entry (cached_at=now) is within the default 30-day TTL -> served from
+    # cache, no upstream call (FakeHTTP raises if hit).
+    place_cache.cache_put('N', 555, {'name': 'Fresh', 'extratags': {}}, 'nominatim_local')
+    monkeypatch.setattr(pd, 'http_requests', FakeHTTP())  # raises if called
+    d = client.get('/api/place/N/555').get_json()
+    assert d['name'] == 'Fresh' and d['source'] == 'cache'
+
+
+def test_cache_hit_past_ttl_refetches_and_updates(client, monkeypatch):
+    import time
+    # Seed a stale entry and backdate it well past the 30-day TTL.
+    place_cache.cache_put('W', 123, {'name': 'Stale', 'extratags': {}}, 'nominatim_local')
+    old = int(time.time()) - 31 * 86400
+    conn = place_cache.get_conn()
+    conn.execute("UPDATE place_cache SET cached_at=? WHERE osm_type='W' AND osm_id=123", (old,))
+    conn.commit()
+    # Past TTL -> treated as a miss -> refetch from (mocked) Nominatim + re-cache.
+    monkeypatch.setattr(pd, 'http_requests', FakeHTTP(get=lambda url, **kw: FakeResp(200, NOMINATIM_CAFE)))
+    d = client.get('/api/place/W/123').get_json()
+    assert d['name'] == 'Test Cafe'          # fresh upstream value, not 'Stale'
+    assert d['source'] == 'nominatim_local'  # refetched, not 'cache'
+    # cached_at refreshed to ~now (no longer the backdated value)
+    cached_at = conn.execute(
+        "SELECT cached_at FROM place_cache WHERE osm_type='W' AND osm_id=123").fetchone()[0]
+    assert cached_at > old and (time.time() - cached_at) < 60
+
+
+def test_cache_ttl_env_override(client, monkeypatch):
+    import time
+    # A 1-day TTL expires an entry aged 2 days -> refetch.
+    monkeypatch.setenv('NAVI_PLACE_CACHE_TTL_DAYS', '1')
+    place_cache.cache_put('N', 777, {'name': 'Old', 'extratags': {}}, 'nominatim_local')
+    conn = place_cache.get_conn()
+    conn.execute("UPDATE place_cache SET cached_at=? WHERE osm_type='N' AND osm_id=777",
+                 (int(time.time()) - 2 * 86400,))
+    conn.commit()
+    nom = {**NOMINATIM_CAFE, 'osm_type': 'N', 'osm_id': 777}
+    monkeypatch.setattr(pd, 'http_requests', FakeHTTP(get=lambda url, **kw: FakeResp(200, nom)))
+    d = client.get('/api/place/N/777').get_json()
+    assert d['source'] == 'nominatim_local'   # expired under the 1-day override
