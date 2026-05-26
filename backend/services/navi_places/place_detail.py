@@ -208,6 +208,15 @@ def _enrich_wiki_links(result):
         if status and status != 'original':
             extratags[tag] = url
             sources_wr[tag] = status
+
+    # Name-based Wikivoyage discovery: many travel destinations are in the local
+    # Wikivoyage mirror without carrying an OSM wikivoyage tag (e.g. Twin Falls).
+    # Only when the tag is absent, try the place name against the wikivoyage ZIM.
+    if not extratags.get('wikivoyage'):
+        url, status = wiki_rewrite.discover_wikivoyage_article(result.get('name'))
+        if status == 'local' and url:
+            extratags['wikivoyage'] = url
+            sources_wr['wikivoyage'] = status
     return result
 
 

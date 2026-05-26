@@ -215,6 +215,67 @@ def test_wikivoyage_tag_rewrites_to_local(tmp_path, monkeypatch):
     assert d['sources']['wiki_rewrites']['wikivoyage'] == 'local'
 
 
+# ── name-based wikivoyage discovery (place has no OSM wikivoyage tag) ──
+
+def _seed_wikivoyage_zim(monkeypatch, head_status):
+    """Seed the wikivoyage ZIM map and mock the Kiwix HEAD probe for discovery."""
+    wr = pd.wiki_rewrite
+    wr.reset()
+    monkeypatch.setattr(wr, '_ensure_zim_map', lambda: None)
+    monkeypatch.setattr(wr, '_zim_map', {'wikivoyage': 'wikivoyage_en_all_maxi_2026-03'})
+
+    class FakeKiwixHTTP:
+        def head(self, url, **kw):
+            return FakeResp(head_status)
+    monkeypatch.setattr(wr, 'http_requests', FakeKiwixHTTP())
+
+
+def test_name_based_discovery_finds_local(tmp_path, monkeypatch):
+    monkeypatch.setenv('NAVI_PLACE_CACHE_DB', str(tmp_path / 'pc.db'))
+    monkeypatch.setenv('NAVI_WIKI_CACHE_DB', str(tmp_path / 'wc.db'))
+    _flags(monkeypatch, enabled=('has_wiki_rewriting',))
+    _seed_wikivoyage_zim(monkeypatch, head_status=200)
+    # No OSM wikivoyage tag; the place name ("Twin Falls") drives discovery.
+    nom = {**NOMINATIM_CAFE, 'localname': 'Twin Falls', 'extratags': {}}
+    monkeypatch.setattr(pd, 'http_requests', FakeHTTP(get=lambda url, **kw: FakeResp(200, nom)))
+    d = create_app().test_client().get('/api/place/W/123').get_json()
+    assert d['extratags']['wikivoyage'] == \
+        'https://wiki.echo6.co/content/wikivoyage_en_all_maxi_2026-03/Twin_Falls'
+    assert d['sources']['wiki_rewrites']['wikivoyage'] == 'local'
+
+
+def test_name_based_discovery_404_falls_back(tmp_path, monkeypatch):
+    monkeypatch.setenv('NAVI_PLACE_CACHE_DB', str(tmp_path / 'pc.db'))
+    monkeypatch.setenv('NAVI_WIKI_CACHE_DB', str(tmp_path / 'wc.db'))
+    _flags(monkeypatch, enabled=('has_wiki_rewriting',))
+    _seed_wikivoyage_zim(monkeypatch, head_status=404)
+    nom = {**NOMINATIM_CAFE, 'localname': 'Nowhere Town', 'extratags': {}}
+    monkeypatch.setattr(pd, 'http_requests', FakeHTTP(get=lambda url, **kw: FakeResp(200, nom)))
+    d = create_app().test_client().get('/api/place/W/123').get_json()
+    # No local article -> no link emitted (no public guess), no source recorded.
+    assert d['extratags'].get('wikivoyage') is None
+    assert 'wikivoyage' not in d.get('sources', {}).get('wiki_rewrites', {})
+
+
+def test_name_based_discovery_runs_only_when_tag_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv('NAVI_PLACE_CACHE_DB', str(tmp_path / 'pc.db'))
+    _flags(monkeypatch, enabled=('has_wiki_rewriting',))
+    # Place DOES carry an OSM wikivoyage tag -> tag rewrite wins, discovery skipped.
+    nom = {**NOMINATIM_CAFE, 'localname': 'Twin Falls',
+           'extratags': {'wikivoyage': 'en:Twin Falls'}}
+    monkeypatch.setattr(pd, 'http_requests', FakeHTTP(get=lambda url, **kw: FakeResp(200, nom)))
+    monkeypatch.setattr(pd.wiki_rewrite, 'rewrite_wiki_link',
+                        lambda tag, value: ('https://wiki.echo6.co/content/TAG/Twin_Falls', 'local'))
+
+    def _no_discovery(*a, **k):
+        raise AssertionError('discovery must not run when the wikivoyage tag is present')
+    monkeypatch.setattr(pd.wiki_rewrite, 'discover_wikivoyage_article', _no_discovery)
+
+    d = create_app().test_client().get('/api/place/W/123').get_json()
+    assert d['extratags']['wikivoyage'] == 'https://wiki.echo6.co/content/TAG/Twin_Falls'
+    assert d['sources']['wiki_rewrites']['wikivoyage'] == 'local'
+
+
 # ── wiki index summary via local wiki_index.db ──
 
 def test_wiki_enrich_via_local_db_merges_fields(tmp_path, monkeypatch):
