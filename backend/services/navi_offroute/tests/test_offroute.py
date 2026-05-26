@@ -884,3 +884,78 @@ def test_route_auto_annotates_only_winner(monkeypatch):
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["selected_mode"] == "4w"
     assert annotated == ["4w"]   # annotated once, on the winner only
+
+
+# ── Layer 3b: parking as a hybrid transition candidate source ──
+
+def _hybrid_ok_leg(distance_km, minutes):
+    return {
+        "status": "ok",
+        "route": {"type": "FeatureCollection", "features": [
+            {"type": "Feature",
+             "properties": {"segment_type": "network", "network_mode": "x"},
+             "geometry": {"type": "LineString",
+                          "coordinates": [[-114.0, 44.0], [-114.1, 44.0]]}},
+        ]},
+        "summary": {"total_distance_km": distance_km, "total_effort_minutes": minutes,
+                    "network_distance_km": distance_km, "network_duration_minutes": minutes,
+                    "wilderness_distance_km": 0.0, "wilderness_effort_minutes": 0.0,
+                    "scenario": "D"},
+    }
+
+
+def _hybrid_winning_single_mode(distance_km, minutes):
+    return {
+        "status": "ok",
+        "route": {"type": "FeatureCollection", "features": [
+            {"type": "Feature", "properties": {"segment_type": "combined"},
+             "geometry": {"type": "LineString",
+                          "coordinates": [[-114.0, 44.0], [-114.5, 44.0]]}},
+        ]},
+        "summary": {"total_distance_km": distance_km, "total_effort_minutes": minutes,
+                    "scenario": "D"},
+        "selected_mode": "vehicle",
+    }
+
+
+class _FakeParking:
+    def __init__(self, records):
+        self._records = records
+
+    def query_parking_near_line(self, coords, buffer_m=2000):
+        return list(self._records)
+
+
+def test_hybrid_consumes_parking_candidates(monkeypatch):
+    # Only the parking index supplies candidates (no trailhead index, no surface
+    # changes); the parking lot must be probed as a leg-1 destination and win.
+    parking = {"lat": 44.0, "lon": -114.25, "name": "BLM Trailhead Lot",
+               "road_class": "parking", "parking_type": "surface", "access": None}
+    monkeypatch.setattr("services.navi_offroute.router.get_surface_change_candidates",
+                        lambda coords, url: [])
+
+    seen_dests = []
+
+    def fake_route(self, s_lat, s_lon, e_lat, e_lon, mode="foot",
+                   boundary_mode="pragmatic", annotate_mvum=True, **k):
+        seen_dests.append((round(e_lat, 4), round(e_lon, 4)))
+        if mode == "vehicle":
+            return _hybrid_ok_leg(12.0, 20.0)
+        return _hybrid_ok_leg(4.0, 30.0)
+    monkeypatch.setattr(OffrouteRouter, "route", fake_route)
+
+    r = object.__new__(OffrouteRouter)
+    r.spatial_index = None
+    r.trailhead_index = None          # no trailheads -> parking must still be gathered
+    r.parking_index = _FakeParking([parking])
+
+    best = _hybrid_winning_single_mode(distance_km=20.0, minutes=120.0)
+    out = r._try_hybrid_auto(44.0, -114.0, 44.0, -114.5, "pragmatic",
+                             best, 120.0, frozenset({"vehicle", "4w", "2w", "foot"}))
+    assert out is not None
+    assert out["selected_mode"] == "hybrid"
+    # the parking lot was probed as a drive-to (leg-1) destination
+    assert (round(parking["lat"], 4), round(parking["lon"], 4)) in seen_dests
+    trans = next(f for f in out["route"]["features"]
+                 if f["properties"].get("kind") == "transition")
+    assert trans["properties"]["name"] == "BLM Trailhead Lot"
