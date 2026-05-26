@@ -75,6 +75,8 @@ def api_offroute():
         router.spatial_index = current_app.config.get('MVUM_SPATIAL_INDEX')
         # Inject the Layer-3a trailhead index for multi-modal Auto transitions.
         router.trailhead_index = current_app.config.get('MVUM_TRAILHEAD_INDEX')
+        # Inject the Layer-3b OSM parking index for multi-modal Auto transitions.
+        router.parking_index = current_app.config.get('OSM_PARKING_INDEX')
         try:
             result = router.route(
                 start_lat=start_lat, start_lon=start_lon,

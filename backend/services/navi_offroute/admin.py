@@ -149,3 +149,17 @@ def mvum_spatial_info():
         'build_time_seconds': round(idx.build_time_seconds, 3),
         'memory_estimate_mb': round(idx.memory_estimate_mb, 1),
     })
+
+
+@bp.route('/api/admin/osm-parking/info')
+@require_auth
+def osm_parking_info():
+    """Read-only stats for the in-memory OSM parking index (Layer 3b)."""
+    idx = current_app.config.get('OSM_PARKING_INDEX')
+    if idx is None:
+        return jsonify({'status': 'error', 'message': 'OSM parking index not loaded'}), 503
+    return jsonify({
+        'count': idx.count,
+        'build_time_seconds': round(idx.build_time_seconds, 3),
+        'memory_estimate_mb': round(idx.memory_estimate_mb, 1),
+    })

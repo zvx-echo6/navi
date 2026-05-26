@@ -35,6 +35,7 @@ import psycopg2.extras
 from shapely.geometry import LineString, Point
 from .astar import astar_multigoal, inflate_cost_multiplier
 from .mvum_surface_change import get_surface_change_candidates
+from .mvum_parking import load_parking_index  # noqa: F401 (singleton injected by handler)
 
 from shared.dem import DEMReader, dem_path
 from .cost import compute_cost_grid, compute_cost_multiplier_grid, MODE_PROFILES
@@ -550,6 +551,7 @@ class OffrouteRouter:
         self.mvum_on_date = None    # optional datetime for seasonal MVUM checks
         self._exclude_polygons = None  # MVUM Layer 2c, set per route() call
         self.trailhead_index = None    # TrailheadIndex (Layer 3a), injected by the handler
+        self.parking_index = None      # OSMParkingIndex (Layer 3b), injected by the handler
 
     def _init_readers(self):
         """Lazy init readers."""
@@ -921,9 +923,6 @@ class OffrouteRouter:
         single-mode winner by HYBRID_MIN_TIME_SAVINGS_MIN, else None (caller keeps
         the single-mode winner). Leg times are summed with no transition penalty.
         """
-        idx = getattr(self, "trailhead_index", None)
-        if idx is None:
-            return None
         best_summary = best_result.get("summary") or {}
         if best_summary.get("total_distance_km", 0.0) < MIN_HYBRID_DISTANCE_KM:
             return None
@@ -931,12 +930,24 @@ class OffrouteRouter:
         coords = self._route_coords_latlon(best_result)
         if len(coords) < 2:
             return None
-        candidates = idx.query_trailheads_near_line(
-            coords, buffer_m=HYBRID_TRAILHEAD_BUFFER_M)
-        # Layer 3c: also treat surface-category boundaries along the winning polyline
-        # (e.g. pavement -> dirt) as transition candidates. Same record shape, so they
-        # mix freely with trailheads below.
-        candidates = candidates + get_surface_change_candidates(coords, VALHALLA_URL)
+
+        # Gather transition candidates from every available source; each yields the
+        # same {lat, lon, name, road_class, ...} record shape, so they mix freely and
+        # share the closest-first sort + cap below.
+        candidates = []
+        # Layer 3a: MVUM/USFS trailheads near the winning polyline.
+        th_idx = getattr(self, "trailhead_index", None)
+        if th_idx is not None:
+            candidates += th_idx.query_trailheads_near_line(
+                coords, buffer_m=HYBRID_TRAILHEAD_BUFFER_M)
+        # Layer 3c: surface-category boundaries along the polyline (e.g. pavement -> dirt).
+        candidates += get_surface_change_candidates(coords, VALHALLA_URL)
+        # Layer 3b: OSM parking -- covers BLM/state/private land + urban areas where
+        # MVUM trailheads don't exist.
+        pk_idx = getattr(self, "parking_index", None)
+        if pk_idx is not None:
+            candidates += pk_idx.query_parking_near_line(
+                coords, buffer_m=HYBRID_TRAILHEAD_BUFFER_M)
         if not candidates:
             return None
         # Closest-to-route first, then cap the combined list.
