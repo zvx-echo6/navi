@@ -151,7 +151,7 @@ def test_hybrid_wins_with_big_savings(monkeypatch):
         return _ok_leg(4.0, 30.0)  # 4w/2w/foot offroad legs (>= 0.8 km)
     monkeypatch.setattr(OffrouteRouter, "route", fake_route)
 
-    best = _winning_single_mode(distance_km=20.0, minutes=120.0)
+    best = _winning_single_mode(distance_km=30.0, minutes=120.0)
     out = r._try_hybrid_auto(44.0, -114.0, 44.0, -114.5, "pragmatic",
                              best, 120.0, frozenset({"vehicle", "4w", "2w", "foot"}))
     assert out is not None
@@ -181,7 +181,7 @@ def test_hybrid_skips_trivial_offroad_detour(monkeypatch):
         return _ok_leg(0.3, 5.0)  # < 0.8 km offroad
     monkeypatch.setattr(OffrouteRouter, "route", fake_route)
 
-    best = _winning_single_mode(distance_km=20.0, minutes=120.0)
+    best = _winning_single_mode(distance_km=30.0, minutes=120.0)
     out = r._try_hybrid_auto(44.0, -114.0, 44.0, -114.5, "pragmatic",
                              best, 120.0, frozenset({"vehicle", "4w", "2w", "foot"}))
     assert out is None
@@ -191,7 +191,7 @@ def test_no_trailheads_falls_back_to_single_mode(monkeypatch):
     r = _bare_router(_FakeTrailheads([]))  # no candidates near the line
     monkeypatch.setattr(OffrouteRouter, "route",
                         lambda self, *a, **k: _ok_leg(5.0, 10.0))
-    best = _winning_single_mode(distance_km=20.0, minutes=120.0)
+    best = _winning_single_mode(distance_km=30.0, minutes=120.0)
     out = r._try_hybrid_auto(44.0, -114.0, 44.0, -114.5, "pragmatic",
                              best, 120.0, frozenset({"vehicle", "4w", "2w", "foot"}))
     assert out is None
@@ -210,7 +210,38 @@ def test_hybrid_not_taken_when_savings_below_threshold(monkeypatch):
         return _ok_leg(4.0, 20.0)
     monkeypatch.setattr(OffrouteRouter, "route", fake_route)
 
-    best = _winning_single_mode(distance_km=20.0, minutes=50.0)
+    best = _winning_single_mode(distance_km=30.0, minutes=50.0)
     out = r._try_hybrid_auto(44.0, -114.0, 44.0, -114.5, "pragmatic",
                              best, 50.0, frozenset({"vehicle", "4w", "2w", "foot"}))
     assert out is None
+
+
+def test_hybrid_early_abort_stops_probing(monkeypatch):
+    # Three trailheads, each yielding a hybrid that beats the single-mode winner by
+    # ~70 min (>= HYBRID_EARLY_ABORT_MIN). The first qualifying candidate must end
+    # probing, so not all three are routed as leg-1 destinations.
+    ths = [
+        {"lat": 44.0, "lon": -114.20, "name": "TH1", "road_class": "track"},
+        {"lat": 44.0, "lon": -114.22, "name": "TH2", "road_class": "track"},
+        {"lat": 44.0, "lon": -114.24, "name": "TH3", "road_class": "track"},
+    ]
+    r = _bare_router(_FakeTrailheads(ths))
+    seen = []
+
+    def fake_route(self, s_lat, s_lon, e_lat, e_lon, mode="foot",
+                   boundary_mode="pragmatic", annotate_mvum=True, **k):
+        seen.append((round(e_lat, 4), round(e_lon, 4)))
+        if mode == "vehicle":
+            return _ok_leg(12.0, 20.0)
+        return _ok_leg(4.0, 30.0)
+    monkeypatch.setattr(OffrouteRouter, "route", fake_route)
+
+    best = _winning_single_mode(distance_km=30.0, minutes=120.0)  # hybrids save ~70 min
+    out = r._try_hybrid_auto(44.0, -114.0, 44.0, -114.5, "pragmatic",
+                             best, 120.0, frozenset({"vehicle", "4w", "2w", "foot"}))
+    assert out is not None and out["selected_mode"] == "hybrid"
+    # early-abort: probing stopped before all three trailheads were evaluated
+    probed_ths = {(d for d in seen)}  # noqa: F841 (readability)
+    th_dests = {(round(t["lat"], 4), round(t["lon"], 4)) for t in ths}
+    seen_th_dests = th_dests & set(seen)
+    assert len(seen_th_dests) < 3   # did not probe every candidate

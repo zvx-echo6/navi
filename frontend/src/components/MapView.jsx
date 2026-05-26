@@ -1415,11 +1415,14 @@ function updateRouteDisplay(map, routeGeojson) {
     layout: { "line-join": "round", "line-cap": "round" },
     paint: {
       // Layer 3a: color each network leg by its travel mode (hybrid trips mix modes).
+      // to-string coerces a missing/null network_mode to "" so the match always hits
+      // its fallback instead of failing to paint the whole layer (which would drop
+      // the network polyline while the static-colored wilderness layer still drew).
       "line-color": [
-        "match", ["get", "network_mode"],
+        "match", ["to-string", ["get", "network_mode"]],
         "vehicle", MODE_COLORS.vehicle, "auto", MODE_COLORS.auto,
         "4w", MODE_COLORS["4w"], "2w", MODE_COLORS["2w"], "foot", MODE_COLORS.foot,
-        "#3b82f6", // default (single-mode legacy blue)
+        "#3b82f6", // default (single-mode legacy blue / unknown mode)
       ],
       "line-width": 5,
       "line-opacity": 0.85,

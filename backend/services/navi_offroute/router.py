@@ -104,10 +104,12 @@ AUTO_MODE_PRIORITY = ["vehicle", "4w", "2w", "foot"]
 # switch vehicles, continue offroad" can beat the single-mode winner; Auto picks that
 # hybrid plan when it does. Leg times are summed with NO transition penalty, and the
 # minimums below keep the suggestions sensible (no short trips / trivial detours).
-MIN_HYBRID_DISTANCE_KM = 8.0        # ~5 mi: shorter single-mode wins stay as-is
+MIN_HYBRID_DISTANCE_KM = 24.0       # ~15 mi: in-town trips never enter hybrid eval
 HYBRID_MIN_TIME_SAVINGS_MIN = 15.0  # a hybrid must beat the winner by at least this
 HYBRID_MIN_OFFROAD_KM = 0.8         # ~0.5 mi: reject trivial offroad detours
-HYBRID_MAX_TRAILHEADS = 20          # cap candidates (closest to the route first)
+HYBRID_MAX_TRAILHEADS = 8           # cap candidates (closest to the route first)
+HYBRID_OVERALL_TIMEOUT_S = 6.0      # bail hybrid eval past this, keep single-mode/best-so-far
+HYBRID_EARLY_ABORT_MIN = 30.0       # a candidate beating the winner by this much ends probing
 HYBRID_TRAILHEAD_BUFFER_M = 2000    # candidate trailheads within 2 km of the route
 # (drive_mode, offroad_mode) transition pairs, tried at each candidate trailhead.
 HYBRID_PAIRS = [("vehicle", "4w"), ("vehicle", "2w"), ("vehicle", "foot"), ("4w", "foot")]
@@ -863,6 +865,7 @@ class OffrouteRouter:
         best_result = None
         best_minutes = None
         last_error = None
+        _probe_t0 = time.perf_counter()
         for candidate in priority:
             result = self.route(
                 start_lat, start_lon, end_lat, end_lon,
@@ -877,6 +880,8 @@ class OffrouteRouter:
                     best_result["selected_mode"] = candidate
             else:
                 last_error = result
+        logger.info("single-mode probing took %.2fs (%d candidate modes)",
+                    time.perf_counter() - _probe_t0, len(priority))
 
         if best_result is not None:
             # MVUM Layer 3a: a "drive to a trailhead, switch, continue offroad" plan may
@@ -931,6 +936,8 @@ class OffrouteRouter:
         if len(coords) < 2:
             return None
 
+        _hybrid_t0 = time.perf_counter()
+        _gather_t0 = _hybrid_t0
         # Gather transition candidates from every available source; each yields the
         # same {lat, lon, name, road_class, ...} record shape, so they mix freely and
         # share the closest-first sort + cap below.
@@ -954,6 +961,8 @@ class OffrouteRouter:
         line = LineString([(lon, lat) for (lat, lon) in coords])
         candidates.sort(key=lambda th: line.distance(Point(th["lon"], th["lat"])))
         candidates = candidates[:HYBRID_MAX_TRAILHEADS]
+        logger.info("hybrid candidate gathering: %d candidates in %.2fs",
+                    len(candidates), time.perf_counter() - _gather_t0)
 
         # Per trailhead, leg1 depends only on drive_mode and leg2 only on offroad_mode,
         # so route each distinct mode once and recombine across pairs.
@@ -961,9 +970,19 @@ class OffrouteRouter:
         offroad_modes = sorted({o for _, o in HYBRID_PAIRS})
 
         threshold = best_minutes - HYBRID_MIN_TIME_SAVINGS_MIN
+        early_abort_at = best_minutes - HYBRID_EARLY_ABORT_MIN
         winner = None
         winner_minutes = None
+        _probe_t0 = time.perf_counter()
+        tested = 0
         for th in candidates:
+            if time.perf_counter() - _hybrid_t0 > HYBRID_OVERALL_TIMEOUT_S:
+                logger.warning(
+                    "hybrid eval exceeded %.1fs after %d/%d candidates; using %s",
+                    HYBRID_OVERALL_TIMEOUT_S, tested, len(candidates),
+                    "best hybrid so far" if winner is not None else "single-mode winner")
+                break
+            tested += 1
             leg1_by_mode = {}
             for dm in drive_modes:
                 r = self.route(start_lat, start_lon, th["lat"], th["lon"],
@@ -990,6 +1009,14 @@ class OffrouteRouter:
                 if total < threshold and (winner_minutes is None or total < winner_minutes):
                     winner_minutes = total
                     winner = (leg1, leg2, dm, om, th)
+            # Early abort: a candidate that beats the single-mode winner by a wide
+            # margin is good enough -- stop probing the rest and ship it.
+            if winner_minutes is not None and winner_minutes <= early_abort_at:
+                logger.info("hybrid early-abort: candidate beats single-mode by >=%.0f min "
+                            "after %d candidates", HYBRID_EARLY_ABORT_MIN, tested)
+                break
+        logger.info("hybrid probing took %.2fs across %d tested candidates",
+                    time.perf_counter() - _probe_t0, tested)
 
         if winner is None:
             return None

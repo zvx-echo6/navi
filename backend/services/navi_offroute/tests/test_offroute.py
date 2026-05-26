@@ -949,7 +949,7 @@ def test_hybrid_consumes_parking_candidates(monkeypatch):
     r.trailhead_index = None          # no trailheads -> parking must still be gathered
     r.parking_index = _FakeParking([parking])
 
-    best = _hybrid_winning_single_mode(distance_km=20.0, minutes=120.0)
+    best = _hybrid_winning_single_mode(distance_km=30.0, minutes=120.0)
     out = r._try_hybrid_auto(44.0, -114.0, 44.0, -114.5, "pragmatic",
                              best, 120.0, frozenset({"vehicle", "4w", "2w", "foot"}))
     assert out is not None
