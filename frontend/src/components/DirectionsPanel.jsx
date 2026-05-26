@@ -331,6 +331,17 @@ export default function DirectionsPanel({ onClose }) {
         </div>
       )}
 
+      {/* MVUM Layer 1: network-leg closures crossed for the selected mode */}
+      {routeResult?.summary?.mvum_closed_crossings > 0 && (
+        <div
+          className="flex items-center justify-center gap-1 py-1.5 text-xs rounded-lg"
+          style={{ background: "var(--accent-muted)", color: "var(--accent)" }}
+        >
+          <AlertTriangle size={14} />
+          <span>{`⚠ ${routeResult.summary.mvum_closed_crossings} segment(s) cross an MVUM closure for ${SELECTED_MODE_LABEL[routeResult.selected_mode || routeMode] || routeResult.selected_mode || routeMode}`}</span>
+        </div>
+      )}
+
       {/* Boundary mode selector — hidden only for Drive (vehicle), which is pure
           Valhalla road routing; Auto/Foot/MTB/ATV may traverse wilderness. */}
       {routeMode !== "vehicle" && (

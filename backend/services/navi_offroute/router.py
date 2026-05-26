@@ -16,6 +16,7 @@ The user's selected mode affects:
 """
 import gc
 import json
+import logging
 import math
 import os
 import subprocess
@@ -39,6 +40,9 @@ from .friction import FrictionReader, friction_to_multiplier
 from .barriers import BarrierReader, WildernessReader, wilderness_tif_path
 from .trails import TrailReader
 from .mvum import get_mvum_access_grid
+from .mvum_annotate import annotate_network_edges
+
+logger = logging.getLogger("navi_offroute.router")
 
 # Configuration via env vars (extraction #8: was profile.offroute.* in recon;
 # promoted to dedicated env vars here — no deployment_config machinery). Read at
@@ -527,6 +531,8 @@ class OffrouteRouter:
         self.wilderness_reader = None
         self.trail_reader = None
         self.entry_index = EntryPointIndex()
+        self.spatial_index = None   # MVUMSpatialIndex (Layer 0), injected by the handler
+        self.mvum_on_date = None    # optional datetime for seasonal MVUM checks
 
     def _init_readers(self):
         """Lazy init readers."""
@@ -880,6 +886,16 @@ class OffrouteRouter:
             duration_min = summary.get("time", 0) / 60
 
             # Build response in same format as wilderness routes
+            # MVUM Layer 1: per-edge access annotation for the network leg.
+            net_edges = []
+            if getattr(self, "spatial_index", None) is not None:
+                net_edges = annotate_network_edges(
+                    [(c[1], c[0]) for c in network_coords], mode,
+                    getattr(self, "spatial_index", None), getattr(self, "mvum_on_date", None))
+            else:
+                logger.debug("MVUM spatial index unavailable; skipping per-edge annotation")
+            mvum_closed = sum(1 for e in net_edges if e.mvum_status == "closed")
+
             network_feature = {
                 "type": "Feature",
                 "properties": {
@@ -888,6 +904,7 @@ class OffrouteRouter:
                     "duration_minutes": duration_min,
                     "maneuvers": maneuvers,
                     "network_mode": mode,
+                    "edge_mvum": [e.to_dict() for e in net_edges],
                 },
                 "geometry": {"type": "LineString", "coordinates": network_coords}
             }
@@ -917,6 +934,8 @@ class OffrouteRouter:
                     "network_minutes": float(duration_min),
                     "on_trail_pct": 100.0,
                     "barrier_crossings": 0,
+                    "mvum_closed_crossings": mvum_closed,
+                    "mvum_segments_annotated": len(net_edges),
                     "network_mode": mode,
                     "scenario": "D",
                     "computation_time_s": time.time() - t0,
@@ -1710,8 +1729,15 @@ class OffrouteRouter:
                 "geometry": {"type": "LineString", "coordinates": wilderness_start}
             })
 
-        # Network segment
+        # Network segment (MVUM Layer 1: per-edge access annotation)
+        net_edges = []
         if network_segment:
+            if getattr(self, "spatial_index", None) is not None:
+                net_edges = annotate_network_edges(
+                    [(c[1], c[0]) for c in network_segment["coordinates"]], mode,
+                    getattr(self, "spatial_index", None), getattr(self, "mvum_on_date", None))
+            else:
+                logger.debug("MVUM spatial index unavailable; skipping per-edge annotation")
             features.append({
                 "type": "Feature",
                 "properties": {
@@ -1720,6 +1746,7 @@ class OffrouteRouter:
                     "duration_minutes": network_segment["duration_minutes"],
                     "maneuvers": network_segment["maneuvers"],
                     "network_mode": mode,
+                    "edge_mvum": [e.to_dict() for e in net_edges],
                 },
                 "geometry": {"type": "LineString", "coordinates": network_segment["coordinates"]}
             })
@@ -1821,6 +1848,8 @@ class OffrouteRouter:
             "network_minutes": float(network_duration_minutes),
             "on_trail_pct": float(on_trail_pct),
             "barrier_crossings": barrier_crossings,
+            "mvum_closed_crossings": sum(1 for e in net_edges if e.mvum_status == "closed"),
+            "mvum_segments_annotated": len(net_edges),
             "boundary_mode": boundary_mode,
             "wilderness_mode": "foot",
             "network_mode": mode,
