@@ -6,6 +6,8 @@ stubbed self.route, so no Valhalla/DEM dependencies are exercised.
 """
 import sqlite3
 
+import numpy as np
+
 import pytest
 
 from services.navi_offroute.mvum_transitions import TrailheadIndex
@@ -38,11 +40,24 @@ def test_trailhead_index_loads(tmp_path):
     ])
     idx = TrailheadIndex(db_path=db)
     assert idx.count == 2
-    assert len(idx.records) == len(idx._points) == 2
+    assert len(idx.records) == idx.count == 2
     rec = idx.records[0]
     assert rec["name"] == "Trailhead A"
     assert rec["road_class"] == "track"   # highway_class surfaced as road_class
     assert rec["lat"] == 44.00 and rec["lon"] == -114.00
+
+
+def test_trailhead_index_numpy_backing(tmp_path):
+    db = _trailhead_db(tmp_path, [
+        (44.00, -114.00, "track", "A"),
+        (44.01, -114.02, "residential", "B"),
+        (44.02, -114.03, "path", "C"),
+    ])
+    idx = TrailheadIndex(db_path=db)
+    assert idx._lats.dtype == np.float64
+    assert idx._lons.dtype == np.float64
+    assert len(idx._lats) == len(idx._lons) == idx.count == 3
+    assert idx._lats[1] == 44.01 and idx._lons[1] == -114.02
 
 
 def test_query_trailheads_near_line_returns_close_only(tmp_path):

@@ -163,3 +163,17 @@ def osm_parking_info():
         'build_time_seconds': round(idx.build_time_seconds, 3),
         'memory_estimate_mb': round(idx.memory_estimate_mb, 1),
     })
+
+
+@bp.route('/api/admin/trailhead/info')
+@require_auth
+def trailhead_info():
+    """Read-only stats for the in-memory trailhead index (Layer 3a)."""
+    idx = current_app.config.get('MVUM_TRAILHEAD_INDEX')
+    if idx is None:
+        return jsonify({'status': 'error', 'message': 'trailhead index not loaded'}), 503
+    return jsonify({
+        'count': idx.count,
+        'build_time_seconds': round(idx.build_time_seconds, 3),
+        'memory_estimate_mb': round(idx.memory_estimate_mb, 1),
+    })
