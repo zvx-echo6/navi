@@ -181,6 +181,40 @@ def test_wiki_rewrite_original_passes_through(tmp_path, monkeypatch):
     assert 'wikipedia' not in d.get('sources', {}).get('wiki_rewrites', {})
 
 
+def test_catalog_url_requests_full_library():
+    # Fix 1: the OPDS fetch must pull the whole library (kiwix-serve defaults to the
+    # first 10 entries, which hid wikivoyage and other page-2 ZIMs from discovery).
+    from services.navi_places import wiki_rewrite
+    assert 'count=-1' in wiki_rewrite.KIWIX_CATALOG_URL
+
+
+def test_wikivoyage_tag_rewrites_to_local(tmp_path, monkeypatch):
+    # Fix 2: a wikivoyage OSM tag for a mirrored article rewrites to a local Kiwix
+    # URL via the same source_type-generic path as wikipedia. Kiwix is mocked: the
+    # ZIM map is seeded with the wikivoyage book and the HEAD probe returns 200.
+    monkeypatch.setenv('NAVI_PLACE_CACHE_DB', str(tmp_path / 'pc.db'))
+    monkeypatch.setenv('NAVI_WIKI_CACHE_DB', str(tmp_path / 'wiki_cache.db'))
+    _flags(monkeypatch, enabled=('has_wiki_rewriting',))
+
+    wr = pd.wiki_rewrite
+    wr.reset()
+    monkeypatch.setattr(wr, '_ensure_zim_map', lambda: None)
+    monkeypatch.setattr(wr, '_zim_map', {'wikivoyage': 'wikivoyage_en_all_maxi_2026-03'})
+
+    class FakeKiwixHTTP:
+        def head(self, url, **kw):
+            return FakeResp(200)
+    monkeypatch.setattr(wr, 'http_requests', FakeKiwixHTTP())
+
+    nom = {**NOMINATIM_CAFE, 'extratags': {'wikivoyage': 'en:Twin Falls'}}
+    monkeypatch.setattr(pd, 'http_requests', FakeHTTP(get=lambda url, **kw: FakeResp(200, nom)))
+
+    d = create_app().test_client().get('/api/place/W/123').get_json()
+    assert d['extratags']['wikivoyage'] == \
+        'https://wiki.echo6.co/content/wikivoyage_en_all_maxi_2026-03/Twin_Falls'
+    assert d['sources']['wiki_rewrites']['wikivoyage'] == 'local'
+
+
 # ── wiki index summary via local wiki_index.db ──
 
 def test_wiki_enrich_via_local_db_merges_fields(tmp_path, monkeypatch):

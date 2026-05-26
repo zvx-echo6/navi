@@ -33,7 +33,10 @@ logger = logging.getLogger('navi_places.wiki_rewrite')
 
 KIWIX_BASE = os.environ.get('NAVI_KIWIX_BASE_URL', 'http://localhost:8430')
 KIWIX_PUBLIC_BASE = os.environ.get('NAVI_KIWIX_PUBLIC_BASE', 'https://wiki.echo6.co')
-KIWIX_CATALOG_URL = f"{KIWIX_BASE}/catalog/v2/entries"
+# count=-1 returns the full library; kiwix-serve OPDS defaults to only the first
+# 10 entries, which silently hid ZIMs past page 1 (e.g. wikivoyage) from
+# _discover_zims so their tags never rewrote to local.
+KIWIX_CATALOG_URL = f"{KIWIX_BASE}/catalog/v2/entries?count=-1"
 HEAD_TIMEOUT = 1.5  # seconds
 CATALOG_REFRESH_INTERVAL = 3600  # 1 hour
 
