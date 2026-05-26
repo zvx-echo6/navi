@@ -32,7 +32,7 @@ import psutil
 import requests
 import psycopg2
 import psycopg2.extras
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 from .astar import astar_multigoal, inflate_cost_multiplier
 
 from shared.dem import DEMReader, dem_path
@@ -97,6 +97,18 @@ MODE_TO_COSTING = {
 # Auto mode probes these concrete modes in capability order (most -> least
 # demanding terrain) and uses the first that yields a usable route.
 AUTO_MODE_PRIORITY = ["vehicle", "4w", "2w", "foot"]
+
+# MVUM Layer 3a: implicit multi-modal Auto. On long trips, "drive in to a trailhead,
+# switch vehicles, continue offroad" can beat the single-mode winner; Auto picks that
+# hybrid plan when it does. Leg times are summed with NO transition penalty, and the
+# minimums below keep the suggestions sensible (no short trips / trivial detours).
+MIN_HYBRID_DISTANCE_KM = 8.0        # ~5 mi: shorter single-mode wins stay as-is
+HYBRID_MIN_TIME_SAVINGS_MIN = 15.0  # a hybrid must beat the winner by at least this
+HYBRID_MIN_OFFROAD_KM = 0.8         # ~0.5 mi: reject trivial offroad detours
+HYBRID_MAX_TRAILHEADS = 20          # cap candidates (closest to the route first)
+HYBRID_TRAILHEAD_BUFFER_M = 2000    # candidate trailheads within 2 km of the route
+# (drive_mode, offroad_mode) transition pairs, tried at each candidate trailhead.
+HYBRID_PAIRS = [("vehicle", "4w"), ("vehicle", "2w"), ("vehicle", "foot"), ("4w", "foot")]
 
 # Per-endpoint travel-mode eligibility from an OSM-style "key:value" category hint.
 # Looked up exact first, then "key:*" wildcard (see _eligible_modes_from_category).
@@ -536,6 +548,7 @@ class OffrouteRouter:
         self.spatial_index = None   # MVUMSpatialIndex (Layer 0), injected by the handler
         self.mvum_on_date = None    # optional datetime for seasonal MVUM checks
         self._exclude_polygons = None  # MVUM Layer 2c, set per route() call
+        self.trailhead_index = None    # TrailheadIndex (Layer 3a), injected by the handler
 
     def _init_readers(self):
         """Lazy init readers."""
@@ -863,6 +876,14 @@ class OffrouteRouter:
                 last_error = result
 
         if best_result is not None:
+            # MVUM Layer 3a: a "drive to a trailhead, switch, continue offroad" plan may
+            # beat the single-mode winner on long trips. If so, return it instead.
+            hybrid = self._try_hybrid_auto(
+                start_lat, start_lon, end_lat, end_lon, boundary_mode,
+                best_result, best_minutes, intersection)
+            if hybrid is not None:
+                hybrid["selected_mode_set"] = mode_set
+                return hybrid
             best_result["selected_mode_set"] = mode_set
             self._annotate_network_segments(best_result, best_result["selected_mode"])
             return best_result
@@ -874,6 +895,176 @@ class OffrouteRouter:
             "status": "error",
             "message": "No route found in any mode",
             "selected_mode_set": mode_set,
+        }
+
+    def _route_coords_latlon(self, result):
+        """Flatten a route response's polyline to [(lat, lon), ...]. Prefers the
+        single "combined" full-path feature; otherwise concatenates LineStrings."""
+        feats = (result.get("route") or {}).get("features", [])
+        for f in feats:
+            if (f.get("properties") or {}).get("segment_type") == "combined":
+                cs = (f.get("geometry") or {}).get("coordinates") or []
+                return [(c[1], c[0]) for c in cs]
+        out = []
+        for f in feats:
+            if (f.get("geometry") or {}).get("type") != "LineString":
+                continue
+            out.extend((c[1], c[0]) for c in (f["geometry"].get("coordinates") or []))
+        return out
+
+    def _try_hybrid_auto(self, start_lat, start_lon, end_lat, end_lon,
+                         boundary_mode, best_result, best_minutes, intersection):
+        """MVUM Layer 3a: consider drive->trailhead->offroad hybrid plans.
+
+        Returns a combined "multi" response if some trailhead transition beats the
+        single-mode winner by HYBRID_MIN_TIME_SAVINGS_MIN, else None (caller keeps
+        the single-mode winner). Leg times are summed with no transition penalty.
+        """
+        idx = getattr(self, "trailhead_index", None)
+        if idx is None:
+            return None
+        best_summary = best_result.get("summary") or {}
+        if best_summary.get("total_distance_km", 0.0) < MIN_HYBRID_DISTANCE_KM:
+            return None
+
+        coords = self._route_coords_latlon(best_result)
+        if len(coords) < 2:
+            return None
+        candidates = idx.query_trailheads_near_line(
+            coords, buffer_m=HYBRID_TRAILHEAD_BUFFER_M)
+        if not candidates:
+            return None
+        # Closest-to-route first, then cap.
+        line = LineString([(lon, lat) for (lat, lon) in coords])
+        candidates.sort(key=lambda th: line.distance(Point(th["lon"], th["lat"])))
+        candidates = candidates[:HYBRID_MAX_TRAILHEADS]
+
+        # Per trailhead, leg1 depends only on drive_mode and leg2 only on offroad_mode,
+        # so route each distinct mode once and recombine across pairs.
+        drive_modes = sorted({d for d, _ in HYBRID_PAIRS})
+        offroad_modes = sorted({o for _, o in HYBRID_PAIRS})
+
+        threshold = best_minutes - HYBRID_MIN_TIME_SAVINGS_MIN
+        winner = None
+        winner_minutes = None
+        for th in candidates:
+            leg1_by_mode = {}
+            for dm in drive_modes:
+                r = self.route(start_lat, start_lon, th["lat"], th["lon"],
+                               mode=dm, boundary_mode=boundary_mode, annotate_mvum=False)
+                if r.get("status") == "ok":
+                    leg1_by_mode[dm] = r
+            leg2_by_mode = {}
+            for om in offroad_modes:
+                r = self.route(th["lat"], th["lon"], end_lat, end_lon,
+                               mode=om, boundary_mode=boundary_mode, annotate_mvum=False)
+                if r.get("status") != "ok":
+                    continue
+                if (r.get("summary") or {}).get("total_distance_km", 0.0) < HYBRID_MIN_OFFROAD_KM:
+                    continue  # no trivial offroad detours
+                leg2_by_mode[om] = r
+
+            for dm, om in HYBRID_PAIRS:
+                leg1 = leg1_by_mode.get(dm)
+                leg2 = leg2_by_mode.get(om)
+                if leg1 is None or leg2 is None:
+                    continue
+                total = ((leg1.get("summary") or {}).get("total_effort_minutes", float("inf"))
+                         + (leg2.get("summary") or {}).get("total_effort_minutes", float("inf")))
+                if total < threshold and (winner_minutes is None or total < winner_minutes):
+                    winner_minutes = total
+                    winner = (leg1, leg2, dm, om, th)
+
+        if winner is None:
+            return None
+        leg1, leg2, drive_mode, offroad_mode, th = winner
+        return self._build_hybrid_response(leg1, leg2, drive_mode, offroad_mode, th)
+
+    def _build_hybrid_response(self, leg1, leg2, drive_mode, offroad_mode, trailhead):
+        """Combine two route legs into one "multi" scenario response with a transition
+        marker at the trailhead. Each leg is annotated separately (probing ran with
+        annotate_mvum=False); summary fields are summed across legs."""
+        self._annotate_network_segments(leg1, drive_mode)
+        self._annotate_network_segments(leg2, offroad_mode)
+
+        def leg_features(leg, leg_no, mode):
+            out = []
+            for f in (leg.get("route") or {}).get("features", []):
+                props = dict(f.get("properties") or {})
+                if props.get("segment_type") == "combined":
+                    continue  # drop per-leg full-path lines; we keep network/wilderness
+                # network_mode drives the map's per-mode polyline color; wilderness=foot
+                if "network_mode" not in props:
+                    props["network_mode"] = (
+                        "foot" if props.get("segment_type") == "wilderness" else mode)
+                props["leg"] = leg_no
+                out.append({"type": "Feature", "properties": props,
+                            "geometry": f.get("geometry")})
+            return out
+
+        features = leg_features(leg1, 1, drive_mode)
+        features.append({
+            "type": "Feature",
+            "properties": {
+                "segment_type": "transition",
+                "kind": "transition",
+                "lat": trailhead["lat"],
+                "lon": trailhead["lon"],
+                "name": trailhead.get("name", ""),
+                "from_mode": drive_mode,
+                "to_mode": offroad_mode,
+            },
+            "geometry": {"type": "Point",
+                         "coordinates": [trailhead["lon"], trailhead["lat"]]},
+        })
+        features.extend(leg_features(leg2, 2, offroad_mode))
+
+        s1 = leg1.get("summary") or {}
+        s2 = leg2.get("summary") or {}
+
+        def leg_summary(s, mode):
+            return {
+                "mode": mode,
+                "distance_km": float(s.get("total_distance_km", 0.0)),
+                "minutes": float(s.get("total_effort_minutes", 0.0)),
+                "segments_summary": {
+                    "scenario": s.get("scenario"),
+                    "network_km": float(s.get("network_distance_km", 0.0)),
+                    "wilderness_km": float(s.get("wilderness_distance_km", 0.0)),
+                },
+            }
+
+        total_distance = (float(s1.get("total_distance_km", 0.0))
+                          + float(s2.get("total_distance_km", 0.0)))
+        total_minutes = (float(s1.get("total_effort_minutes", 0.0))
+                         + float(s2.get("total_effort_minutes", 0.0)))
+        summary = {
+            "total_distance_km": total_distance,
+            "total_effort_minutes": total_minutes,
+            "wilderness_minutes": (float(s1.get("wilderness_effort_minutes", 0.0))
+                                   + float(s2.get("wilderness_effort_minutes", 0.0))),
+            "network_minutes": (float(s1.get("network_duration_minutes", 0.0))
+                                + float(s2.get("network_duration_minutes", 0.0))),
+            "mvum_closed_crossings": (int(s1.get("mvum_closed_crossings", 0) or 0)
+                                      + int(s2.get("mvum_closed_crossings", 0) or 0)),
+            "mvum_segments_annotated": (int(s1.get("mvum_segments_annotated", 0) or 0)
+                                        + int(s2.get("mvum_segments_annotated", 0) or 0)),
+            "scenario": "multi",
+            "network_mode": offroad_mode,
+            "wilderness_mode": "foot",
+            "legs": [leg_summary(s1, drive_mode), leg_summary(s2, offroad_mode)],
+            "transition": {
+                "lat": trailhead["lat"], "lon": trailhead["lon"],
+                "name": trailhead.get("name", ""),
+                "from_mode": drive_mode, "to_mode": offroad_mode,
+            },
+        }
+        return {
+            "status": "ok",
+            "route": {"type": "FeatureCollection", "features": features},
+            "summary": summary,
+            "selected_mode": "hybrid",
+            "scenario": "multi",
         }
 
     def _route_D_network_only(

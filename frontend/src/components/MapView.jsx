@@ -8,7 +8,8 @@ import { useStore } from '../store'
 import { decodePolyline } from '../utils/decode'
 import { fetchReverse, requestOffroute } from '../api'
 import { getConfig, hasFeature } from '../config'
-import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Star, Ruler, X, Trash2, Plus } from 'lucide-react'
+import { createRoot } from 'react-dom/client'
+import { MapPin, Navigation, ArrowUpRight, ArrowDownLeft, Star, Ruler, X, Trash2, Plus, Repeat } from 'lucide-react'
 import RadialMenu from './RadialMenu'
 import useContextMenu from '../hooks/useContextMenu'
 import toast from 'react-hot-toast'
@@ -31,6 +32,9 @@ const OFFROUTE_SOURCE = 'offroute-source'
 const OFFROUTE_WILDERNESS_LAYER = 'offroute-wilderness'
 const OFFROUTE_NETWORK_LAYER = 'offroute-network'
 const OFFROUTE_MARKERS_LAYER = 'offroute-markers'
+// MVUM Layer 3a: per-mode network polyline palette + labels for transition tooltips.
+const MODE_COLORS = { vehicle: '#1f78b4', auto: '#1f78b4', '4w': '#ff7f00', '2w': '#33a02c', foot: '#e31a1c' }
+const MODE_LABELS = { vehicle: 'Drive', auto: 'Drive', '4w': '4W', '2w': '2W', foot: 'Foot' }
 const HILLSHADE_SOURCE = 'hillshade-dem'
 const HILLSHADE_LAYER = 'hillshade-layer'
 const TRAFFIC_SOURCE = 'traffic-tiles'
@@ -1359,6 +1363,10 @@ function clearRouteDisplay(map) {
   if (map.getLayer(OFFROUTE_NETWORK_LAYER)) map.removeLayer(OFFROUTE_NETWORK_LAYER)
   if (map.getLayer(OFFROUTE_MARKERS_LAYER)) map.removeLayer(OFFROUTE_MARKERS_LAYER)
   if (map.getSource(OFFROUTE_SOURCE)) map.removeSource(OFFROUTE_SOURCE)
+  if (map._offrouteTransitionMarkers) {
+    map._offrouteTransitionMarkers.forEach((m) => m.remove())
+    map._offrouteTransitionMarkers = []
+  }
 }
 
 /** Update offroute display with route GeoJSON */
@@ -1406,16 +1414,43 @@ function updateRouteDisplay(map, routeGeojson) {
     filter: ["==", ["get", "segment_type"], "network"],
     layout: { "line-join": "round", "line-cap": "round" },
     paint: {
-      "line-color": "#3b82f6", // blue-500
+      // Layer 3a: color each network leg by its travel mode (hybrid trips mix modes).
+      "line-color": [
+        "match", ["get", "network_mode"],
+        "vehicle", MODE_COLORS.vehicle, "auto", MODE_COLORS.auto,
+        "4w", MODE_COLORS["4w"], "2w", MODE_COLORS["2w"], "foot", MODE_COLORS.foot,
+        "#3b82f6", // default (single-mode legacy blue)
+      ],
       "line-width": 5,
       "line-opacity": 0.85,
     },
   }, beforeId)
   
-  // Fit bounds to route
   const features = routeGeojson.features || []
+
+  // Layer 3a: transition markers (drive -> offroad vehicle switch) at trailheads.
+  map._offrouteTransitionMarkers = map._offrouteTransitionMarkers || []
+  for (const f of features) {
+    if (f.properties?.kind !== "transition" || !f.geometry?.coordinates) continue
+    const el = document.createElement("div")
+    el.style.cssText = "width:26px;height:26px;border-radius:50%;background:#fff;" +
+      "border:2px solid #333;display:flex;align-items:center;justify-content:center;" +
+      "cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.4)"
+    createRoot(el).render(<Repeat size={15} color="#333" />)
+    const toLabel = MODE_LABELS[f.properties.to_mode] || f.properties.to_mode
+    const marker = new maplibregl.Marker({ element: el })
+      .setLngLat(f.geometry.coordinates)
+      .setPopup(new maplibregl.Popup({ offset: 14, closeButton: false })
+        .setText(`Switch to ${toLabel}`))
+      .addTo(map)
+    el.addEventListener("mouseenter", () => marker.togglePopup())
+    el.addEventListener("mouseleave", () => marker.togglePopup())
+    map._offrouteTransitionMarkers.push(marker)
+  }
+
+  // Fit bounds to route (LineString segments only; transition points are Points)
   const allCoords = features
-    .filter(f => f.geometry?.coordinates)
+    .filter(f => f.geometry?.type === "LineString")
     .flatMap(f => f.geometry.coordinates)
   
   if (allCoords.length > 0) {

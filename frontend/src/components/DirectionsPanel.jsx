@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react"
-import { ArrowUpDown, Plus, X, Footprints, Bike, Car, Shield, AlertTriangle, Zap, Trash2, GripVertical } from "lucide-react"
+import { ArrowUpDown, Plus, X, Footprints, Bike, Car, Shield, AlertTriangle, Zap, Trash2, GripVertical, Repeat } from "lucide-react"
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core"
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
@@ -16,7 +16,9 @@ const TRAVEL_MODES = [
 ]
 
 // Maps the backend's selected_mode to the chip label shown in the "Auto chose X" badge.
-const SELECTED_MODE_LABEL = { vehicle: "Drive", "4w": "4W", "2w": "2W", foot: "Foot" }
+const SELECTED_MODE_LABEL = { vehicle: "Drive", "4w": "4W", "2w": "2W", foot: "Foot", hybrid: "Multi-modal", multi: "Multi-modal" }
+
+const KM_TO_MI = 0.621371
 
 const BOUNDARY_MODES = [
   { id: "strict", label: "Strict", Icon: Shield, title: "Avoid barriers" },
@@ -328,6 +330,23 @@ export default function DirectionsPanel({ onClose }) {
               ? `Auto: Foot ${Math.round(routeResult.summary.wilderness_minutes)}min + ${SELECTED_MODE_LABEL[routeResult.selected_mode] || routeResult.selected_mode} ${Math.round(routeResult.summary.network_minutes)}min`
               : `Auto chose ${SELECTED_MODE_LABEL[routeResult.selected_mode] || routeResult.selected_mode}`
           }</span>
+        </div>
+      )}
+
+      {/* MVUM Layer 3a: per-leg breakdown for a multi-modal (transition) trip */}
+      {(routeResult?.selected_mode === "hybrid" || routeResult?.selected_mode === "multi")
+        && Array.isArray(routeResult?.summary?.legs) && (
+        <div
+          className="flex items-center justify-center gap-1.5 py-1.5 text-xs rounded-lg"
+          style={{ background: "var(--accent-muted)", color: "var(--accent)" }}
+        >
+          {routeResult.summary.legs.map((leg, i) => (
+            <span key={i} className="flex items-center gap-1.5">
+              {i > 0 && <Repeat size={12} />}
+              <span>{`${SELECTED_MODE_LABEL[leg.mode] || leg.mode} ${(leg.distance_km * KM_TO_MI).toFixed(1)} mi (${Math.round(leg.minutes)}min)`}</span>
+            </span>
+          ))}
+          <span style={{ opacity: 0.8 }}>{`— total ${Math.round(routeResult.summary.total_effort_minutes)}min`}</span>
         </div>
       )}
 

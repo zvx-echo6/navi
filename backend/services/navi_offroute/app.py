@@ -11,6 +11,7 @@ from shared.git_sha import git_short_sha
 
 from . import offroute_route, admin
 from .mvum import MVUMSpatialIndex
+from .mvum_transitions import load_trailheads
 
 # Process-wide singleton: build the MVUM spatial index once per process (per gunicorn
 # worker in prod; once across create_app() calls in tests), not once per app instance.
@@ -53,6 +54,13 @@ def create_app():
     except Exception as e:
         app.logger.warning("MVUM spatial index failed to load: %s", e)
         app.config['MVUM_SPATIAL_INDEX'] = None
+
+    # Layer 3a: trailhead transition index (process-wide singleton, logs its own line).
+    try:
+        app.config['MVUM_TRAILHEAD_INDEX'] = load_trailheads()
+    except Exception as e:
+        app.logger.warning("MVUM trailhead index failed to load: %s", e)
+        app.config['MVUM_TRAILHEAD_INDEX'] = None
 
     app.register_blueprint(offroute_route.bp)
     app.register_blueprint(admin.bp)
