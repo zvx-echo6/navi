@@ -34,6 +34,7 @@ import psycopg2
 import psycopg2.extras
 from shapely.geometry import LineString, Point
 from .astar import astar_multigoal, inflate_cost_multiplier
+from .mvum_surface_change import get_surface_change_candidates
 
 from shared.dem import DEMReader, dem_path
 from .cost import compute_cost_grid, compute_cost_multiplier_grid, MODE_PROFILES
@@ -932,9 +933,13 @@ class OffrouteRouter:
             return None
         candidates = idx.query_trailheads_near_line(
             coords, buffer_m=HYBRID_TRAILHEAD_BUFFER_M)
+        # Layer 3c: also treat surface-category boundaries along the winning polyline
+        # (e.g. pavement -> dirt) as transition candidates. Same record shape, so they
+        # mix freely with trailheads below.
+        candidates = candidates + get_surface_change_candidates(coords, VALHALLA_URL)
         if not candidates:
             return None
-        # Closest-to-route first, then cap.
+        # Closest-to-route first, then cap the combined list.
         line = LineString([(lon, lat) for (lat, lon) in coords])
         candidates.sort(key=lambda th: line.distance(Point(th["lon"], th["lat"])))
         candidates = candidates[:HYBRID_MAX_TRAILHEADS]
