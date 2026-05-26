@@ -155,9 +155,11 @@ def test_integration_with_hybrid(monkeypatch):
     r.spatial_index = None
     r.trailhead_index = _FakeTrailheads([trailhead])
 
-    best = _winning_single_mode(distance_km=20.0, minutes=120.0)
+    # 70-min single-mode vs ~50-min hybrid = ~20 min savings: qualifies (>15) but is
+    # below the early-abort margin (30), so BOTH candidate sources are probed.
+    best = _winning_single_mode(distance_km=30.0, minutes=70.0)
     out = r._try_hybrid_auto(44.0, -114.0, 44.0, -114.5, "pragmatic",
-                             best, 120.0, frozenset({"vehicle", "4w", "2w", "foot"}))
+                             best, 70.0, frozenset({"vehicle", "4w", "2w", "foot"}))
     assert out is not None
     assert out["selected_mode"] == "hybrid"
     # BOTH candidate types were probed as leg-1 destinations (drive-to-transition).
