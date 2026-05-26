@@ -9,7 +9,7 @@ codes. Ported from recon's lib/api.py:api_offroute / api_mvum.
 import logging
 import re
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 
 from .router import OffrouteRouter
 from .mvum import MVUMReader
@@ -71,6 +71,8 @@ def api_offroute():
         end_category = data.get("end_category")
 
         router = OffrouteRouter()
+        # Inject the Layer-0 MVUM spatial index singleton for Layer-1 annotation.
+        router.spatial_index = current_app.config.get('MVUM_SPATIAL_INDEX')
         try:
             result = router.route(
                 start_lat=start_lat, start_lon=start_lon,
