@@ -330,12 +330,26 @@ def rewrite_wiki_link(tag_name, value):
 
 # ── Discovery stubs (disabled, for future activation) ───────────────────
 
-def discover_wikivoyage_article(name, category, lat, lon):
+def discover_wikivoyage_article(name, category=None, lat=None, lon=None):
+    """Find a local Wikivoyage article by place NAME, for places that lack an OSM
+    wikivoyage tag (e.g. Twin Falls). Returns (kiwix_url, "local") when an article
+    titled ``name`` exists in the wikivoyage ZIM — verified via the same catalog +
+    HEAD + positive-cache path as tag rewriting — else (None, None).
+
+    No public fallback: without an OSM tag we cannot confirm a public Wikivoyage
+    article exists, so guessing a public URL from the name would risk dead links;
+    a miss simply yields no Wikivoyage link. category/lat/lon are reserved for
+    future disambiguation.
     """
-    Discover a related Wikivoyage article for a place.
-    Enabled by has_wiki_discovery. Currently returns None.
-    """
-    return None
+    if not name or not isinstance(name, str):
+        return (None, None)
+    article_id = _normalize_article_id(name.strip())
+    if not article_id:
+        return (None, None)
+    found, kiwix_url = check_kiwix_has_article('wikivoyage', article_id)
+    if found and kiwix_url:
+        return (kiwix_url, 'local')
+    return (None, None)
 
 
 def discover_appropedia_article(name, category):
