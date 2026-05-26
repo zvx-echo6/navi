@@ -9,6 +9,7 @@ import { useStore } from '../store'
 import { fetchElevation, fetchPlaceDetails, fetchPlaceByWikidata, fetchDriveTime, fetchNearbyContacts, fetchLandclass, fetchReverse } from '../api'
 import { hasFeature } from '../config'
 import { buildAddress } from '../utils/place'
+import { wikipediaLink, wikivoyageLink, wikidataHref } from '../utils/wiki'
 
 
 // Wiki service icons (simplified monochrome versions)
@@ -118,13 +119,6 @@ function wheelchairLabel(val) {
   if (!val) return null
   const map = { yes: 'Accessible', limited: 'Limited access', no: 'Not accessible' }
   return map[val.toLowerCase()] || null
-}
-
-function wikiUrl(wp) {
-  if (!wp) return null
-  const match = wp.match(/^([a-z-]+):(.+)$/)
-  if (!match) return null
-  return `https://${match[1]}.wikipedia.org/wiki/${encodeURIComponent(match[2].replace(/ /g, '_'))}`
 }
 
 function wikiLabel(wp) {
@@ -277,14 +271,17 @@ function CopyPopover({ address, selectedPlace, onClose }) {
 function EnrichmentSections({ details }) {
   if (!details) return null
 
-  const { category, extratags, wiki_url, wikivoyage_url } = details
+  const { category, extratags } = details
   const et = extratags || {}
+  const wp = wikipediaLink(details)
+  const wv = wikivoyageLink(details)
+  const wd = wikidataHref(et)
 
   const hasAbout = category
   const hasHours = et.opening_hours
   const hasContact = et.phone || et.website || et.email
   const hasDetails = et.cuisine || et.operator || et.fee || et.wheelchair || et.takeaway
-  const hasLinks = et.wikipedia || et.wikidata || wiki_url || wikivoyage_url
+  const hasLinks = wp || wv || wd
 
   if (!hasAbout && !hasHours && !hasContact && !hasDetails && !hasLinks) return null
 
@@ -346,9 +343,9 @@ function EnrichmentSections({ details }) {
       {hasLinks && (
         <DetailSection label="Links" icon={BookOpen} first={idx++ === 0}>
           <div className="flex flex-col gap-1.5">
-            {wiki_url ? (
+            {wp && (
               <a
-                href={wiki_url}
+                href={wp.href}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-xs"
@@ -356,23 +353,12 @@ function EnrichmentSections({ details }) {
               >
                 <WikipediaIcon size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 <span>Wikipedia</span>
-                <span style={{ color: 'var(--text-tertiary)', fontSize: '9px' }}>(local)</span>
-              </a>
-            ) : et.wikipedia && wikiUrl(et.wikipedia) && (
-              <a
-                href={wikiUrl(et.wikipedia)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-xs"
-                style={{ color: 'var(--accent)' }}
-              >
-                <WikipediaIcon size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-                <span>Wikipedia</span>
+                {wp.local && <span style={{ color: 'var(--text-tertiary)', fontSize: '9px' }}>(local)</span>}
               </a>
             )}
-            {wikivoyage_url && (
+            {wv && (
               <a
-                href={wikivoyage_url}
+                href={wv.href}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-xs"
@@ -380,12 +366,12 @@ function EnrichmentSections({ details }) {
               >
                 <WikivoyageIcon size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 <span>Wikivoyage</span>
-                <span style={{ color: 'var(--text-tertiary)', fontSize: '9px' }}>(local)</span>
+                {wv.local && <span style={{ color: 'var(--text-tertiary)', fontSize: '9px' }}>(local)</span>}
               </a>
             )}
-            {et.wikidata && (
+            {wd && (
               <a
-                href={`https://www.wikidata.org/wiki/${et.wikidata}`}
+                href={wd}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-xs"
