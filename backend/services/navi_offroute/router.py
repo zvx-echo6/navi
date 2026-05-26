@@ -17,6 +17,7 @@ The user's selected mode affects:
 import gc
 import json
 import logging
+from datetime import datetime
 import math
 import os
 import subprocess
@@ -606,7 +607,8 @@ class OffrouteRouter:
         mode: Literal["auto", "foot", "2w", "4w", "vehicle"] = "foot",
         boundary_mode: Literal["strict", "pragmatic", "emergency"] = "pragmatic",
         start_category: Optional[str] = None,
-        end_category: Optional[str] = None
+        end_category: Optional[str] = None,
+        annotate_mvum: bool = True,
     ) -> Dict:
         """
         Route between two points, handling all four scenarios.
@@ -641,38 +643,72 @@ class OffrouteRouter:
         # users can intentionally pin backcountry points. Auto inherits this via
         # its recursive self.route(..., mode="vehicle", ...) probe.
         if mode == "vehicle":
-            return self._route_D_network_only(
+            result = self._route_D_network_only(
                 start_lat, start_lon, end_lat, end_lon, mode
-            )
-
-        # Detect network status for both endpoints
-        start_status = self._locate_on_network(start_lat, start_lon, mode)
-        end_status = self._locate_on_network(end_lat, end_lon, mode)
-
-        start_off_network = not start_status["on_network"]
-        end_off_network = not end_status["on_network"]
-
-        # Dispatch to appropriate handler
-        if not start_off_network and not end_off_network:
-            # Scenario D: on-network → on-network (pure Valhalla)
-            return self._route_D_network_only(
-                start_lat, start_lon, end_lat, end_lon, mode
-            )
-        elif not start_off_network and end_off_network:
-            # Scenario C: on-network → off-network
-            return self._route_C_network_to_wilderness(
-                start_lat, start_lon, end_lat, end_lon, mode, boundary_mode
-            )
-        elif start_off_network and not end_off_network:
-            # Scenario A: off-network → on-network
-            return self._route_A_wilderness_to_network(
-                start_lat, start_lon, end_lat, end_lon, mode, boundary_mode
             )
         else:
-            # Scenario B: off-network → off-network
-            return self._route_B_wilderness_both(
-                start_lat, start_lon, end_lat, end_lon, mode, boundary_mode
-            )
+            # Detect network status for both endpoints
+            start_status = self._locate_on_network(start_lat, start_lon, mode)
+            end_status = self._locate_on_network(end_lat, end_lon, mode)
+
+            start_off_network = not start_status["on_network"]
+            end_off_network = not end_status["on_network"]
+
+            # Dispatch to appropriate handler
+            if not start_off_network and not end_off_network:
+                # Scenario D: on-network → on-network (pure Valhalla)
+                result = self._route_D_network_only(
+                    start_lat, start_lon, end_lat, end_lon, mode
+                )
+            elif not start_off_network and end_off_network:
+                # Scenario C: on-network → off-network
+                result = self._route_C_network_to_wilderness(
+                    start_lat, start_lon, end_lat, end_lon, mode, boundary_mode
+                )
+            elif start_off_network and not end_off_network:
+                # Scenario A: off-network → on-network
+                result = self._route_A_wilderness_to_network(
+                    start_lat, start_lon, end_lat, end_lon, mode, boundary_mode
+                )
+            else:
+                # Scenario B: off-network → off-network
+                result = self._route_B_wilderness_both(
+                    start_lat, start_lon, end_lat, end_lon, mode, boundary_mode
+                )
+
+        # MVUM Layer 1: annotate the network leg in one central pass. Auto annotates only
+        # its winning candidate (see _route_auto), so probing does not re-annotate.
+        if annotate_mvum and isinstance(result, dict) and result.get("status") == "ok":
+            self._annotate_network_segments(result, mode)
+        return result
+
+    def _annotate_network_segments(self, result, mode):
+        """Mutate result in place: attach edge_mvum to each network feature and write
+        mvum_closed_crossings + mvum_segments_annotated into the summary."""
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            return
+        if getattr(self, "spatial_index", None) is None:
+            return
+        on_date = getattr(self, "mvum_on_date", None) or datetime.now()
+        features = (result.get("route") or {}).get("features", [])
+        total_closed = 0
+        total_annotated = 0
+        for feat in features:
+            props = feat.get("properties") or {}
+            # network features are tagged segment_type == "network"
+            if props.get("segment_type") != "network":
+                continue
+            coords = (feat.get("geometry") or {}).get("coordinates") or []
+            if len(coords) < 2:
+                continue
+            edges = annotate_network_edges(
+                [(c[1], c[0]) for c in coords], mode, self.spatial_index, on_date)
+            props["edge_mvum"] = [e.to_dict() for e in edges]
+            total_closed += sum(1 for e in edges if e.mvum_status == "closed")
+            total_annotated += len(edges)
+        summary = result.setdefault("summary", {})
+        summary["mvum_closed_crossings"] = total_closed
+        summary["mvum_segments_annotated"] = total_annotated
 
     def _eligible_modes_from_category(self, category: Optional[str]):
         """Eligible travel modes for an OSM "key:value" category hint, or None if the
@@ -805,7 +841,7 @@ class OffrouteRouter:
         for candidate in priority:
             result = self.route(
                 start_lat, start_lon, end_lat, end_lon,
-                mode=candidate, boundary_mode=boundary_mode
+                mode=candidate, boundary_mode=boundary_mode, annotate_mvum=False
             )
             if result.get("status") == "ok":
                 minutes = (result.get("summary") or {}).get(
@@ -819,6 +855,7 @@ class OffrouteRouter:
 
         if best_result is not None:
             best_result["selected_mode_set"] = mode_set
+            self._annotate_network_segments(best_result, best_result["selected_mode"])
             return best_result
 
         if last_error is not None:
@@ -886,16 +923,6 @@ class OffrouteRouter:
             duration_min = summary.get("time", 0) / 60
 
             # Build response in same format as wilderness routes
-            # MVUM Layer 1: per-edge access annotation for the network leg.
-            net_edges = []
-            if getattr(self, "spatial_index", None) is not None:
-                net_edges = annotate_network_edges(
-                    [(c[1], c[0]) for c in network_coords], mode,
-                    getattr(self, "spatial_index", None), getattr(self, "mvum_on_date", None))
-            else:
-                logger.debug("MVUM spatial index unavailable; skipping per-edge annotation")
-            mvum_closed = sum(1 for e in net_edges if e.mvum_status == "closed")
-
             network_feature = {
                 "type": "Feature",
                 "properties": {
@@ -904,7 +931,6 @@ class OffrouteRouter:
                     "duration_minutes": duration_min,
                     "maneuvers": maneuvers,
                     "network_mode": mode,
-                    "edge_mvum": [e.to_dict() for e in net_edges],
                 },
                 "geometry": {"type": "LineString", "coordinates": network_coords}
             }
@@ -934,8 +960,6 @@ class OffrouteRouter:
                     "network_minutes": float(duration_min),
                     "on_trail_pct": 100.0,
                     "barrier_crossings": 0,
-                    "mvum_closed_crossings": mvum_closed,
-                    "mvum_segments_annotated": len(net_edges),
                     "network_mode": mode,
                     "scenario": "D",
                     "computation_time_s": time.time() - t0,
@@ -1729,15 +1753,8 @@ class OffrouteRouter:
                 "geometry": {"type": "LineString", "coordinates": wilderness_start}
             })
 
-        # Network segment (MVUM Layer 1: per-edge access annotation)
-        net_edges = []
+        # Network segment
         if network_segment:
-            if getattr(self, "spatial_index", None) is not None:
-                net_edges = annotate_network_edges(
-                    [(c[1], c[0]) for c in network_segment["coordinates"]], mode,
-                    getattr(self, "spatial_index", None), getattr(self, "mvum_on_date", None))
-            else:
-                logger.debug("MVUM spatial index unavailable; skipping per-edge annotation")
             features.append({
                 "type": "Feature",
                 "properties": {
@@ -1746,7 +1763,6 @@ class OffrouteRouter:
                     "duration_minutes": network_segment["duration_minutes"],
                     "maneuvers": network_segment["maneuvers"],
                     "network_mode": mode,
-                    "edge_mvum": [e.to_dict() for e in net_edges],
                 },
                 "geometry": {"type": "LineString", "coordinates": network_segment["coordinates"]}
             })
@@ -1848,8 +1864,6 @@ class OffrouteRouter:
             "network_minutes": float(network_duration_minutes),
             "on_trail_pct": float(on_trail_pct),
             "barrier_crossings": barrier_crossings,
-            "mvum_closed_crossings": sum(1 for e in net_edges if e.mvum_status == "closed"),
-            "mvum_segments_annotated": len(net_edges),
             "boundary_mode": boundary_mode,
             "wilderness_mode": "foot",
             "network_mode": mode,

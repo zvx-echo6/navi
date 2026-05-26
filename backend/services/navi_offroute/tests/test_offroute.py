@@ -269,7 +269,7 @@ ALL_MODES = frozenset({"vehicle", "4w", "2w", "foot"})
 
 
 def _stub_route(per_mode, calls):
-    def stub(self, start_lat, start_lon, end_lat, end_lon, mode="foot", boundary_mode="pragmatic"):
+    def stub(self, start_lat, start_lon, end_lat, end_lon, mode="foot", boundary_mode="pragmatic", **kwargs):
         calls.append(mode)
         return dict(per_mode[mode])
     return stub
@@ -863,3 +863,24 @@ def test_route_auto_per_leg_breakdown():
     assert summ["network_minutes"] > 0
     # approx adds up to total
     assert abs((summ["wilderness_minutes"] + summ["network_minutes"]) - summ["total_effort_minutes"]) < 1e-6
+
+
+def test_route_auto_annotates_only_winner(monkeypatch):
+    # 4 candidates probed (annotate_mvum=False each); _annotate_network_segments must be
+    # called exactly once, on the min-time winner.
+    _typed_all(monkeypatch)
+    calls = []
+    per_mode = {
+        "vehicle": {"status": "ok", "summary": {"total_effort_minutes": 100.0}},
+        "4w": {"status": "ok", "summary": {"total_effort_minutes": 40.0}},   # fastest
+        "2w": {"status": "ok", "summary": {"total_effort_minutes": 80.0}},
+        "foot": {"status": "ok", "summary": {"total_effort_minutes": 500.0}},
+    }
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    annotated = []
+    monkeypatch.setattr(OffrouteRouter, "_annotate_network_segments",
+                        lambda self, result, mode: annotated.append(mode))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
+    assert out["selected_mode"] == "4w"
+    assert annotated == ["4w"]   # annotated once, on the winner only
