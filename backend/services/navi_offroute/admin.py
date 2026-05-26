@@ -133,3 +133,19 @@ def navi_offroute_info():
         },
     )
     return jsonify(info)
+
+
+@bp.route('/api/admin/mvum-spatial/info')
+@require_auth
+def mvum_spatial_info():
+    """Read-only stats for the in-memory MVUM spatial index (Layer 0)."""
+    idx = current_app.config.get('MVUM_SPATIAL_INDEX')
+    if idx is None:
+        return jsonify({'status': 'error', 'message': 'MVUM spatial index not loaded'}), 503
+    return jsonify({
+        'road_count': idx.road_count,
+        'trail_count': idx.trail_count,
+        'bbox': idx.bbox,
+        'build_time_seconds': round(idx.build_time_seconds, 3),
+        'memory_estimate_mb': round(idx.memory_estimate_mb, 1),
+    })

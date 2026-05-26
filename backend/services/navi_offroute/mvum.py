@@ -6,17 +6,22 @@ indicating which roads/trails are open or closed to specific vehicle modes.
 
 MVUM is motor-vehicle specific — foot mode should skip this layer entirely.
 """
+import logging
+import math
 import os
 import re
 import sqlite3
+import time as _time
 import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Literal
 
 import numpy as np
+import psutil
 from shapely import wkb
-from shapely.geometry import Point
+from shapely.geometry import Point, LineString, box
+from shapely.strtree import STRtree
 
 # Path to navi.db (single source of truth); env-overridable.
 DEFAULT_NAVI_DB_PATH = Path("/mnt/nav/navi.db")
@@ -25,6 +30,119 @@ DEFAULT_NAVI_DB_PATH = Path("/mnt/nav/navi.db")
 def navi_db_path() -> Path:
     """navi.db (MVUM tables) path, env-overridable via NAVI_OFFROUTE_NAVI_DB."""
     return Path(os.environ.get("NAVI_OFFROUTE_NAVI_DB", str(DEFAULT_NAVI_DB_PATH)))
+
+
+logger = logging.getLogger("navi_offroute.mvum_spatial")
+
+def _buffer_degrees_for_meters(meters: float, lat: float) -> float:
+    """Approximate buffer radius in degrees for a metre tolerance at a given latitude.
+    Longitude degrees shrink with cos(lat); use the larger of the lat/lon equivalents so
+    the bbox-coarse buffer stays conservative."""
+    cos_lat = max(math.cos(math.radians(lat)), 0.01)
+    lat_deg = meters / 111320.0
+    lon_deg = meters / (111320.0 * cos_lat)
+    return max(lat_deg, lon_deg)
+
+
+class MVUMSpatialIndex:
+    """In-memory STRtree over MVUM road + trail geometries from navi.db.
+
+    Layer 0 of the MVUM/Valhalla spatial-join work: pure spatial lookup. It parses
+    each row's WKB ``shape`` blob with shapely and indexes it in an STRtree, keeping a
+    parallel list of full feature records (every column except the raw blob, plus the
+    parsed ``geometry``). No routing logic and no response formats are touched.
+    """
+
+    def __init__(self, db_path=None):
+        t0 = _time.perf_counter()
+        proc = psutil.Process()
+        rss_before = proc.memory_info().rss
+
+        self.db_path = Path(db_path) if db_path else navi_db_path()
+        self._records = []          # aligned with self._geoms
+        self._geoms = []
+        self.by_id = {}             # feature_id -> record (full-row lookup)
+        self._min_lon = self._min_lat = float("inf")
+        self._max_lon = self._max_lat = float("-inf")
+
+        self.road_count = self._load_table("mvum_roads", "road")
+        self.trail_count = self._load_table("mvum_trails", "trail")
+
+        self._tree = STRtree(self._geoms) if self._geoms else None
+        self.build_time_seconds = _time.perf_counter() - t0
+        self.memory_estimate_mb = max(
+            0.0, (proc.memory_info().rss - rss_before) / (1024 * 1024)
+        )
+        logger.info(
+            "MVUM spatial index loaded: %d roads + %d trails in %.2f seconds",
+            self.road_count, self.trail_count, self.build_time_seconds,
+        )
+
+    def _load_table(self, table, kind):
+        count = 0
+        parse_errors = 0
+        conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            cur = conn.execute(f"SELECT * FROM {table} WHERE shape IS NOT NULL")
+            cols = [c[0] for c in cur.description]
+            for row in cur:
+                try:
+                    geom = wkb.loads(bytes(row["shape"]))
+                except Exception:
+                    parse_errors += 1
+                    continue
+                if geom.is_empty:
+                    continue
+                rec = {c: row[c] for c in cols if c != "shape"}
+                rec["kind"] = kind
+                rec["feature_id"] = f"{kind}:{row['ogc_fid']}"
+                rec["geometry"] = geom
+                self._records.append(rec)
+                self._geoms.append(geom)
+                self.by_id[rec["feature_id"]] = rec
+                minx, miny, maxx, maxy = geom.bounds
+                self._min_lon = min(self._min_lon, minx)
+                self._min_lat = min(self._min_lat, miny)
+                self._max_lon = max(self._max_lon, maxx)
+                self._max_lat = max(self._max_lat, maxy)
+                count += 1
+        finally:
+            conn.close()
+        if parse_errors > 0:
+            logger.warning("%s: %d rows had unparseable WKB shape blobs", table, parse_errors)
+        return count
+
+    @property
+    def bbox(self):
+        """Overall extent as [min_lon, min_lat, max_lon, max_lat]."""
+        if not self._records:
+            return [0.0, 0.0, 0.0, 0.0]
+        return [self._min_lon, self._min_lat, self._max_lon, self._max_lat]
+
+    def _query_geom(self, geom):
+        if self._tree is None:
+            return []
+        return [self._records[i] for i in self._tree.query(geom)]
+
+    def query_bbox(self, min_lat, min_lon, max_lat, max_lon):
+        """Feature records whose bounding box intersects the lat/lon box (coarse)."""
+        return self._query_geom(box(min_lon, min_lat, max_lon, max_lat))
+
+    def query_buffered_line(self, coords, tolerance_m):
+        """Feature records near a (lat, lon) polyline, within ~tolerance_m.
+
+        Coarse bbox+buffer candidate filter only.
+        TODO(PR-B): apply the full parallelism filter (heading / overlap) so that
+        MVUM features which merely cross the route are rejected, keeping only those
+        that run alongside it.
+        """
+        if not coords:
+            return []
+        pts = [(lon, lat) for (lat, lon) in coords]
+        geom = LineString(pts) if len(pts) >= 2 else Point(pts[0])
+        avg_lat = sum(lat for (lat, lon) in coords) / len(coords)
+        return self._query_geom(geom.buffer(_buffer_degrees_for_meters(tolerance_m, avg_lat)))
 
 
 def parse_date_range(date_str: str) -> List[Tuple[int, int, int, int]]:
