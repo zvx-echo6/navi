@@ -30,7 +30,7 @@ def test_parking_index_loads(tmp_path):
     ])
     idx = OSMParkingIndex(db_path=db)
     assert idx.count == 3
-    assert len(idx.records) == len(idx._points) == 3
+    assert len(idx.records) == idx.count == 3
     rec = idx.records[0]
     assert rec["name"] == "Lot A"
     assert rec["road_class"] == "parking"
