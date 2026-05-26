@@ -42,6 +42,7 @@ from .barriers import BarrierReader, WildernessReader, wilderness_tif_path
 from .trails import TrailReader
 from .mvum import get_mvum_access_grid
 from .mvum_annotate import annotate_network_edges
+from .mvum_exclude import build_exclude_polygons
 
 logger = logging.getLogger("navi_offroute.router")
 
@@ -534,6 +535,7 @@ class OffrouteRouter:
         self.entry_index = EntryPointIndex()
         self.spatial_index = None   # MVUMSpatialIndex (Layer 0), injected by the handler
         self.mvum_on_date = None    # optional datetime for seasonal MVUM checks
+        self._exclude_polygons = None  # MVUM Layer 2c, set per route() call
 
     def _init_readers(self):
         """Lazy init readers."""
@@ -635,6 +637,13 @@ class OffrouteRouter:
 
         if mode not in MODE_TO_COSTING:
             return {"status": "error", "message": f"Unknown mode: {mode}"}
+
+        # MVUM Layer 2c: precompute closed-segment exclusion polygons for this mode
+        # (strict boundary only). Both Valhalla call sites read self._exclude_polygons.
+        self._exclude_polygons = build_exclude_polygons(
+            start_lat, start_lon, end_lat, end_lon, mode,
+            getattr(self, "spatial_index", None), getattr(self, "mvum_on_date", None),
+            boundary_mode)
 
         # Vehicle is pure Valhalla road routing: Valhalla snaps endpoints to the
         # nearest road automatically, so the off-network classifier is irrelevant
@@ -887,6 +896,10 @@ class OffrouteRouter:
             "costing": costing,
             "directions_options": {"units": "kilometers"}
         }
+        # MVUM Layer 2c: Valhalla wants array-of-rings, not GeoJSON Polygons.
+        _ex = getattr(self, "_exclude_polygons", None)
+        if _ex:
+            valhalla_request["exclude_polygons"] = [p["coordinates"][0] for p in _ex]
 
         try:
             resp = requests.post(f"{VALHALLA_URL}/route", json=valhalla_request, timeout=30)
@@ -1484,6 +1497,10 @@ class OffrouteRouter:
             "costing": costing,
             "directions_options": {"units": "kilometers"}
         }
+        # MVUM Layer 2c: Valhalla wants array-of-rings, not GeoJSON Polygons.
+        _ex = getattr(self, "_exclude_polygons", None)
+        if _ex:
+            valhalla_request["exclude_polygons"] = [p["coordinates"][0] for p in _ex]
 
         try:
             resp = requests.post(f"{VALHALLA_URL}/route", json=valhalla_request, timeout=30)
