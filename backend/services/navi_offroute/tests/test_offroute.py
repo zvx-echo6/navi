@@ -1229,3 +1229,66 @@ def test_route_auto_network_affinity_biases_path(monkeypatch):
     biased = r2._route_auto(s_lat, s_lon, e_lat, e_lon, "pragmatic", network_affinity=affinity)
     assert base["status"] == "ok" and biased["status"] == "ok"
     assert _on_network_count(biased, trails, meta) < _on_network_count(base, trails, meta)
+
+
+# ── PHASE 4.5 — corridor mask + parallel cost layers (perf) ───────────────────
+import time as _p45time
+from services.navi_offroute.cost import (compute_unified_cost_layers as _cu45,
+                                          compute_cost_multiplier_grid as _ccmg45)
+from services.navi_offroute.astar import inflate_cost_multiplier as _infl45
+
+
+def _eq_with_inf(a, b):
+    return _p4np.array_equal(_p4np.isinf(a), _p4np.isinf(b)) and _p4np.allclose(
+        a[~_p4np.isinf(a)], b[~_p4np.isinf(b)])
+
+
+def test_unified_cost_layers_parallel_matches_sequential():
+    # The concurrent per-mode build must produce byte-identical layers to a serial
+    # reference (and be deterministic run-to-run): catches threading-introduced bugs.
+    rows, cols = 40, 50
+    rng = _p4np.random.default_rng(11)
+    elevation = (1000.0 + rng.normal(0, 40, (rows, cols))).astype(_p4np.float64)
+    elevation[5, 6] = _p4np.nan
+    friction = (1.0 + rng.random((rows, cols))).astype(_p4np.float64)
+    friction_raw = rng.choice([10, 20, 30, 60], size=(rows, cols)).astype(_p4np.uint8)
+    trails = _p4np.zeros((rows, cols), _p4np.uint8); trails[20, :] = 5
+    wild = _p4np.zeros((rows, cols), _p4np.uint8)
+    meta = _p4_meta(rows, cols)
+    cm = float(meta["cell_size_m"])
+    modes = ("foot", "2w", "4w", "vehicle")
+
+    seq = {m: _infl45(_ccmg45(elevation, cell_size_lat_m=cm, cell_size_lon_m=cm,
+                              friction=friction, friction_raw=friction_raw,
+                              wilderness=wild, mode=m)) for m in modes}
+    run1 = _cu45(elevation, friction, friction_raw, trails, wild, meta,
+                 modes=modes, endpoint_line=None)["cost_mult"]
+    run2 = _cu45(elevation, friction, friction_raw, trails, wild, meta,
+                 modes=modes, endpoint_line=None)["cost_mult"]
+    for m in modes:
+        assert _eq_with_inf(run1[m], seq[m]), f"parallel != sequential for {m}"
+        assert _eq_with_inf(run1[m], run2[m]), f"non-deterministic for {m}"
+
+
+def test_route_auto_perf_under_5s(monkeypatch):
+    # ~50 km synthetic grid (no DB/Valhalla): a full _route_auto must finish well under the
+    # old wilderness-route wall-clock. Loose 5 s bound — a CI guard against kernel/cost-layer
+    # regressions, exercising the corridor mask + parallel layers.
+    n = 500                                            # 500 cells * 100 m = ~50 km/side
+    elevation = _p4np.full((n, n), 1000.0)
+    friction_raw = _p4np.full((n, n), 30, dtype=_p4np.uint8)   # grass: foot passable
+    trails = _p4np.zeros((n, n), dtype=_p4np.uint8)
+    barriers = _p4np.zeros((n, n), dtype=_p4np.uint8)
+    meta = _p4_meta(n, n)
+    s_lat, s_lon = _px2ll(250, 20, meta)
+    e_lat, e_lon = _px2ll(250, 480, meta)              # ~46 km along row 250
+    elig = lambda lat, lon: frozenset({"foot"})
+
+    r = _auto_router(monkeypatch, elevation, friction_raw, trails, barriers, meta, elig)
+    r._route_auto(s_lat, s_lon, e_lat, e_lon, "pragmatic")          # warm JIT + caches
+    t0 = _p45time.perf_counter()
+    out = r._route_auto(s_lat, s_lon, e_lat, e_lon, "pragmatic")
+    elapsed = _p45time.perf_counter() - t0
+    assert out["status"] == "ok", out
+    assert out["selected_mode_set"] == ["foot"]
+    assert elapsed <= 5.0, f"_route_auto on ~50 km grid took {elapsed:.2f}s > 5.0s"

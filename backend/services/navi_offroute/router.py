@@ -102,6 +102,15 @@ MODE_TO_COSTING = {
 # transitions.py). The cost_mult_stack / per-mode arrays are packed in this order.
 MODE_ORDER = ["foot", "2w", "4w", "vehicle"]
 
+# Phase 4.5 perf: the unified search is masked to a great-circle corridor between the
+# endpoints -- cells farther than CORRIDOR_PAD_KM perpendicular (or past the endpoints by
+# CORRIDOR_ENDPOINT_PAD_KM along the line) are made impassable, so the kernel doesn't flood
+# the off-route wilderness on long trips. The DEM bbox stays axis-aligned (it can't shrink
+# below the endpoint box); this masks within it. CORRIDOR_PAD_KM is the widen-if-needed
+# knob: a routable off-trail egress farther than this from the straight line gets cut.
+CORRIDOR_PAD_KM = 10.0
+CORRIDOR_ENDPOINT_PAD_KM = 5.0
+
 # Per-endpoint travel-mode eligibility from an OSM-style "key:value" category hint.
 # Looked up exact first, then "key:*" wildcard (see _eligible_modes_from_category).
 _MODES_ALL = frozenset({"vehicle", "4w", "2w", "foot"})
@@ -848,7 +857,8 @@ class OffrouteRouter:
             modes=tuple(MODE_ORDER), boundary_mode=boundary_mode,
             endpoint_line=((start_lat, start_lon), (end_lat, end_lon)),
             valhalla_url=VALHALLA_URL,
-            mvum_by_mode=mvum_by_mode, network_affinity=network_affinity)
+            mvum_by_mode=mvum_by_mode, network_affinity=network_affinity,
+            corridor_pad_km=CORRIDOR_PAD_KM, corridor_endpoint_pad_km=CORRIDOR_ENDPOINT_PAD_KM)
 
         # 5-6. Pack the per-mode arrays the kernel expects (MODE_ORDER == MODE_INDEX order).
         n_modes = len(MODE_ORDER)
