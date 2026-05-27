@@ -198,6 +198,12 @@ MODE_PROFILES: Dict[str, ModeProfile] = {
 # Pragmatic mode friction multiplier for private land
 PRAGMATIC_BARRIER_MULTIPLIER = 5.0
 
+# Mode-switch transition penalties (seconds), unified-graph Auto (spec §4; used by transitions.py).
+TRANSITION_COST_PARKING_S        = 60.0   # park & switch at a lot
+TRANSITION_COST_TRAILHEAD_S      = 30.0   # stage at a trailhead
+TRANSITION_COST_ROAD_TERMINUS_S  = 60.0   # leave/meet vehicle at road end
+TRANSITION_COST_SURFACE_CHANGE_S = 0.0    # surface boundary, free swap
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COST GRID COMPUTATION
@@ -503,6 +509,69 @@ def compute_cost_grid(
         del mvum_closed_mask
 
     return cost
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# UNIFIED COST LAYERS (unified-graph Auto, spec §3.2)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def compute_unified_cost_layers(
+    elevation: np.ndarray,
+    friction: Optional[np.ndarray],
+    friction_raw: Optional[np.ndarray],
+    trails: Optional[np.ndarray],
+    wilderness: Optional[np.ndarray],
+    meta: dict,
+    modes=("foot", "2w", "4w", "vehicle"),
+    boundary_mode: Literal["strict", "pragmatic", "emergency"] = "pragmatic",
+    endpoint_line=None,
+    valhalla_url=None,
+) -> dict:
+    """Per-mode inflated cost layers + mode-transition cells for one Auto search
+    (spec §3.2 / §4 / §5). Returns {"cost_mult": {mode: ndarray}, "transition_cells":
+    [(row, col, from_idx, to_idx, cost_s), ...], "meta": {...DEMReader meta, +
+    "boundary_mode"}}.
+
+    Rasters are INJECTED, not fetched: the raster IO lives on the router's reader
+    objects (router.py::_pathfind_wilderness) and is not duplicated — Phase 4 passes
+    elevation/friction/trails/wilderness + DEMReader `meta` straight in; tests pass
+    synthetic arrays. Each mode's multiplier comes from compute_cost_multiplier_grid(...)
+    then inflate_cost_multiplier(...). boundary_mode governs barrier/MVUM rules, which
+    are PER-EDGE in the kernel (§9), so it is threaded into the returned meta for Phase 4
+    rather than into compute_cost_multiplier_grid (which has no such param, unchanged).
+    """
+    from .astar import inflate_cost_multiplier
+    from .transitions import gather_transition_cells
+
+    cell_size_m = float(meta["cell_size_m"])
+    cost_mult = {}
+    for mode in modes:
+        m = compute_cost_multiplier_grid(
+            elevation,
+            cell_size_lat_m=cell_size_m,
+            cell_size_lon_m=cell_size_m,
+            friction=friction,
+            friction_raw=friction_raw,
+            wilderness=wilderness,
+            mode=mode,
+        )
+        cost_mult[mode] = inflate_cost_multiplier(m)
+
+    transition_cells = gather_transition_cells(
+        meta,
+        endpoint_line=endpoint_line,
+        trail_grid=trails,
+        elevation=elevation,
+        valhalla_url=valhalla_url,
+    )
+
+    out_meta = dict(meta)
+    out_meta["boundary_mode"] = boundary_mode
+    return {
+        "cost_mult": cost_mult,
+        "transition_cells": transition_cells,
+        "meta": out_meta,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

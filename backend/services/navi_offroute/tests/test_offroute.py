@@ -1177,3 +1177,128 @@ def test_multimode_heuristic_admissibility():
                 assert h <= true_cost + 1e-6
                 sampled += 1
     assert sampled > 0   # the sweep actually exercised reachable states
+
+
+# ── PHASE 3 — unified cost layers + transition cells (cost.py + transitions.py) ──
+import os as _os
+import time as _time
+import math as _math
+import numpy as _p3np
+from services.navi_offroute.cost import (
+    compute_unified_cost_layers as _cu_layers,
+    compute_cost_multiplier_grid as _ccmg,
+)
+from services.navi_offroute.astar import inflate_cost_multiplier as _inflate
+import services.navi_offroute.transitions as _trans
+
+
+def _p3_meta(rows, cols, cell_m=30.0):
+    """Synthetic DEMReader-shape meta near lat 40 (mirrors shared/dem.py meta keys)."""
+    dlat = cell_m / 111000.0
+    dlon = cell_m / (111000.0 * _math.cos(_math.radians(40.0)))
+    return {
+        "bounds": (40.0, 40.0 + rows * dlat, -111.0, -111.0 + cols * dlon),
+        "pixel_size_lat": -dlat,
+        "pixel_size_lon": dlon,
+        "origin_lat": 40.0 + rows * dlat,   # top edge (row 0)
+        "origin_lon": -111.0,
+        "cell_size_m": cell_m,
+        "shape": (rows, cols),
+    }
+
+
+def test_unified_cost_layers_per_mode_parity():
+    """cost_mult[mode] == inflate(compute_cost_multiplier_grid(mode)) for each mode."""
+    rows, cols = 24, 30
+    rng = _p3np.random.default_rng(7)
+    elevation = (1000.0 + rng.normal(0, 30, (rows, cols))).astype(_p3np.float64)
+    elevation[3, 4] = _p3np.nan                       # exercise inf handling
+    friction = (1.0 + rng.random((rows, cols))).astype(_p3np.float64)
+    friction_raw = rng.choice([10, 20, 30, 60], size=(rows, cols)).astype(_p3np.uint8)
+    trails = _p3np.zeros((rows, cols), _p3np.uint8); trails[10, :] = 5
+    wilderness = _p3np.zeros((rows, cols), _p3np.uint8); wilderness[0:3, 0:3] = 255
+    meta = _p3_meta(rows, cols)
+    cm = float(meta["cell_size_m"])
+    layers = _cu_layers(
+        elevation, friction, friction_raw, trails, wilderness, meta,
+        modes=("foot", "2w", "4w", "vehicle"), boundary_mode="pragmatic",
+        endpoint_line=None)
+    assert set(layers["cost_mult"]) == {"foot", "2w", "4w", "vehicle"}
+    assert layers["meta"]["boundary_mode"] == "pragmatic"
+    for mode in ("foot", "2w", "4w", "vehicle"):
+        expected = _inflate(_ccmg(
+            elevation, cell_size_lat_m=cm, cell_size_lon_m=cm,
+            friction=friction, friction_raw=friction_raw,
+            wilderness=wilderness, mode=mode))
+        got = layers["cost_mult"][mode]
+        assert _p3np.array_equal(_p3np.isinf(got), _p3np.isinf(expected))
+        fin = ~_p3np.isinf(expected)
+        assert _p3np.allclose(got[fin], expected[fin])
+
+
+def test_road_terminus_transitions_pure_raster():
+    """A road row ending mid-grid yields foot↔vehicle termini at 60 s, no DB."""
+    rows, cols = 10, 10
+    trail_grid = _p3np.zeros((rows, cols), _p3np.uint8)
+    trail_grid[5, 0:6] = 5                            # road cols 0..5; col 6 is off-network
+    meta = _p3_meta(rows, cols)
+    tuples = _trans.road_terminus_transitions(meta, trail_grid)
+    cells = {}
+    for (lat, lon, fm, tm, cost_s) in tuples:
+        cells.setdefault(_trans._latlon_to_pixel(lat, lon, meta), []).append((fm, tm, cost_s))
+    assert set(cells) == {(5, c) for c in range(6)}  # all row-5 road cells border off-network
+    f, v = _trans.MODE_INDEX["foot"], _trans.MODE_INDEX["vehicle"]
+    for edges in cells.values():
+        assert sorted(edges) == sorted([(f, v, 60.0), (v, f, 60.0)])
+
+
+def test_transition_cap_closest_15(monkeypatch):
+    """>15 parking lots within 5 km -> only the closest 15 (by perp distance) survive."""
+    line = ((40.0, -111.0), (40.0, -110.0))           # ~east-west; lat offset = perp distance, all <5 km
+    records = [{"lat": 40.0 + 0.0005 * k, "lon": -110.5, "name": f"P{k}", "access": "yes"}
+               for k in range(1, 21)]
+
+    class _StubParking:
+        def query_parking_near_line(self, coords, buffer_m=2000):
+            return records
+    monkeypatch.setattr(_trans, "load_parking_index", lambda *a, **k: _StubParking())
+    raw = _trans.parking_transitions_near_line(line, buffer_m=5000)
+    capped = _trans._cap_candidates(raw, line)
+    surviving_lats = sorted({round(t[0], 6) for t in capped})
+    expected_lats = sorted({round(40.0 + 0.0005 * k, 6) for k in range(1, 16)})
+    assert surviving_lats == expected_lats            # the closest 15 points
+    assert len(capped) == 15 * 6                      # 6 directed tuples per lot
+
+
+def test_compute_unified_cost_layers_perf():
+    """≤1 s to build 4 cost layers + transition cells for a ~50 km bbox (spec §5 gate).
+    Requires the real parking/trailhead DBs + a reachable Valhalla; skips otherwise."""
+    from services.navi_offroute.mvum_parking import parking_db_path
+    from services.navi_offroute.mvum import navi_db_path
+
+    valhalla_url = _os.environ.get("NAVI_OFFROUTE_VALHALLA_URL", "http://localhost:8002")
+    if not (_os.path.exists(parking_db_path()) and _os.path.exists(navi_db_path())):
+        pytest.skip("parking/trailhead DBs not present locally — skipping perf gate")
+    try:
+        import requests
+        requests.get(f"{valhalla_url}/status", timeout=1).raise_for_status()
+    except Exception as e:
+        pytest.skip(f"Valhalla not reachable at {valhalla_url}: {e}")
+
+    cell_m = 30.0
+    n = int(50_000 / cell_m)                          # ~50 km / 30 m
+    elevation = _p3np.full((n, n), 1000.0, dtype=_p3np.float64)
+    friction = _p3np.ones((n, n), dtype=_p3np.float64)
+    friction_raw = _p3np.full((n, n), 30, dtype=_p3np.uint8)
+    trails = _p3np.zeros((n, n), _p3np.uint8); trails[n // 2, :] = 5
+    wilderness = _p3np.zeros((n, n), _p3np.uint8)
+    meta = _p3_meta(n, n, cell_m)
+    south, north, west, east = meta["bounds"]
+    t0 = _time.perf_counter()
+    layers = _cu_layers(
+        elevation, friction, friction_raw, trails, wilderness, meta,
+        modes=("foot", "2w", "4w", "vehicle"), boundary_mode="pragmatic",
+        endpoint_line=((south, west), (north, east)), valhalla_url=valhalla_url)
+    elapsed = _time.perf_counter() - t0
+    assert set(layers["cost_mult"]) == {"foot", "2w", "4w", "vehicle"}
+    assert elapsed <= 1.0, f"unified cost layers build took {elapsed:.3f}s > 1.0s"
