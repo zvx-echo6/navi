@@ -33,12 +33,14 @@ import requests
 import psycopg2
 import psycopg2.extras
 from shapely.geometry import LineString, Point
-from .astar import astar_multigoal, inflate_cost_multiplier
+from .astar import astar_multigoal, astar_multigoal_multimode, inflate_cost_multiplier
 from .mvum_surface_change import get_surface_change_candidates
 from .mvum_parking import load_parking_index  # noqa: F401 (singleton injected by handler)
 
 from shared.dem import DEMReader, dem_path
-from .cost import compute_cost_grid, compute_cost_multiplier_grid, MODE_PROFILES
+from .cost import (compute_cost_grid, compute_cost_multiplier_grid, MODE_PROFILES,
+                   compute_unified_cost_layers)
+from .transitions import MODE_INDEX
 from .friction import FrictionReader, friction_to_multiplier
 from .barriers import BarrierReader, WildernessReader, wilderness_tif_path
 from .trails import TrailReader
@@ -99,6 +101,10 @@ MODE_TO_COSTING = {
 # Auto mode probes these concrete modes in capability order (most -> least
 # demanding terrain) and uses the first that yields a usable route.
 AUTO_MODE_PRIORITY = ["vehicle", "4w", "2w", "foot"]
+
+# Fixed mode index ordering for the unified-graph kernel (spec §2.1; == MODE_INDEX in
+# transitions.py). The cost_mult_stack / per-mode arrays are packed in this order.
+MODE_ORDER = ["foot", "2w", "4w", "vehicle"]
 
 # MVUM Layer 3a: implicit multi-modal Auto. On long trips, "drive in to a trailhead,
 # switch vehicles, continue offroad" can beat the single-mode winner; Auto picks that
@@ -629,6 +635,7 @@ class OffrouteRouter:
         start_category: Optional[str] = None,
         end_category: Optional[str] = None,
         annotate_mvum: bool = True,
+        network_affinity: Optional[Dict[str, float]] = None,
     ) -> Dict:
         """
         Route between two points, handling all four scenarios.
@@ -650,7 +657,7 @@ class OffrouteRouter:
         if mode == "auto":
             return self._route_auto(
                 start_lat, start_lon, end_lat, end_lon, boundary_mode,
-                start_category, end_category
+                start_category, end_category, network_affinity
             )
 
         if mode not in MODE_TO_COSTING:
@@ -772,7 +779,13 @@ class OffrouteRouter:
         """Eligible modes for an UNTYPED endpoint, derived from Valhalla /locate snaps.
         Runs the three distinct costings (auto/pedestrian/bicycle) in parallel and
         applies the per-mode snap-distance + road-class rules. snap_cache dedupes
-        /locate results within a single request."""
+        /locate results within a single request.
+
+        Spec §6 reframe: under unified-graph Auto this is now a SEED generator (it
+        feeds origin/goal modes to astar_multigoal_multimode), not the load-bearing
+        single-mode chooser it was. Behaviour/return shape are unchanged. The §6
+        single-combined-/locate batch is a Phase-4 follow-up; the 3-call pattern stays
+        until the batch response shape is confirmed against the live instance."""
         # auto costing -> vehicle/4w reach, bicycle -> 2w reach, pedestrian -> foot
         costing_modes = {"auto": "vehicle", "pedestrian": "foot", "bicycle": "2w"}
         need = [c for c in costing_modes if (lat, lon, c) not in snap_cache]
@@ -813,118 +826,245 @@ class OffrouteRouter:
         end_lat: float, end_lon: float,
         boundary_mode: str,
         start_category: Optional[str] = None,
-        end_category: Optional[str] = None
+        end_category: Optional[str] = None,
+        network_affinity: Optional[Dict[str, float]] = None,
     ) -> Dict:
-        """
-        Auto mode: per-endpoint eligible-mode-set intersection.
+        """Unified-graph Auto (spec §2.4): ONE A* over (row, col, mode). Endpoint
+        eligibility only SEEDS the start/goal modes (§6); the optimizer decides where to
+        switch modes (parking / trailhead / road terminus / surface change) instead of
+        committing to a single trip-wide mode. Supersedes the capability pick + single
+        self.route() + _try_hybrid_auto + foot-fallback flow (those stay in place but are
+        no longer reached from here; Phase 5 removes them). No auto_fallback_from (§7)."""
+        # 1. Bootstrap eligibility -> seeds (not a routing decision).
+        snap_cache: dict = {}
+        start_eligible = self._auto_eligible_modes(start_lat, start_lon, start_category, snap_cache)
+        end_eligible = self._auto_eligible_modes(end_lat, end_lon, end_category, snap_cache)
+        seed_set = sorted(start_eligible | end_eligible)
 
-        Each endpoint's eligible modes come from its category type-hint
-        (CATEGORY_ELIGIBLE_MODES); an untyped endpoint falls back to a spatial
-        Valhalla-snap probe. Auto probes the intersection of both endpoints'
-        eligible sets and returns the candidate that minimises total trip time.
-        selected_mode + selected_mode_set are added for visibility.
-        """
-        snap_cache = {}
-        start_typed = self._eligible_modes_from_category(start_category)
-        end_typed = self._eligible_modes_from_category(end_category)
+        # 2-3. bbox covering both endpoints + the shared rasters (one fetch, all modes).
+        try:
+            (elevation, friction_mult, friction_raw, trails, barriers,
+             wilderness, mvum_by_mode, meta) = self._fetch_auto_rasters(
+                start_lat, start_lon, end_lat, end_lon)
+        except Exception as e:
+            logger.exception("auto: raster fetch failed")
+            return {"status": "error", "message": f"Failed to load terrain: {e}",
+                    "selected_mode_set": seed_set}
+        rows, cols = elevation.shape
 
-        jobs = {}
-        if start_typed is None:
-            jobs["start"] = (start_lat, start_lon)
-        if end_typed is None:
-            jobs["end"] = (end_lat, end_lon)
+        # Endpoints -> pixels (mirror the existing entry-point convention).
+        origin_row, origin_col = self.dem_reader.latlon_to_pixel(start_lat, start_lon, meta)
+        goal_row, goal_col = self.dem_reader.latlon_to_pixel(end_lat, end_lon, meta)
+        if not (0 <= origin_row < rows and 0 <= origin_col < cols
+                and 0 <= goal_row < rows and 0 <= goal_col < cols):
+            return {"status": "error", "message": "Endpoint outside grid bounds",
+                    "selected_mode_set": seed_set}
 
-        spatial = {}
-        if len(jobs) == 2:
-            # Both endpoints untyped: resolve them in parallel.
-            with ThreadPoolExecutor(max_workers=2) as ex:
-                futs = {ex.submit(self._spatial_eligible_modes, la, lo, snap_cache): name
-                        for name, (la, lo) in jobs.items()}
-                for fut in as_completed(futs):
-                    spatial[futs[fut]] = fut.result()
-        else:
-            for name, (la, lo) in jobs.items():
-                spatial[name] = self._spatial_eligible_modes(la, lo, snap_cache)
+        # 4. Per-mode cost layers (+ MVUM closures + network_affinity) and transition cells.
+        layers = compute_unified_cost_layers(
+            elevation, friction_mult, friction_raw, trails, wilderness, meta,
+            modes=tuple(MODE_ORDER), boundary_mode=boundary_mode,
+            endpoint_line=((start_lat, start_lon), (end_lat, end_lon)),
+            valhalla_url=VALHALLA_URL,
+            mvum_by_mode=mvum_by_mode, network_affinity=network_affinity)
 
-        start_eligible = start_typed if start_typed is not None else spatial["start"]
-        end_eligible = end_typed if end_typed is not None else spatial["end"]
+        # 5-6. Pack the per-mode arrays the kernel expects (MODE_ORDER == MODE_INDEX order).
+        n_modes = len(MODE_ORDER)
+        cost_mult = layers["cost_mult"]
+        cost_mult_stack = np.empty((rows, cols, n_modes), dtype=np.float64)
+        trail_friction_stack = np.full((n_modes, 256), np.inf, dtype=np.float64)
+        max_grade_arr = np.empty(n_modes, dtype=np.float64)
+        speed_function_ids = np.empty(n_modes, dtype=np.int64)
+        base_speed_kmh_arr = np.empty(n_modes, dtype=np.float64)
+        sf_id = {"tobler": 0, "herzog": 1, "linear": 2}
+        net_aff = network_affinity or {}
+        for mi, mname in enumerate(MODE_ORDER):
+            cost_mult_stack[:, :, mi] = cost_mult[mname]
+            prof = MODE_PROFILES[mname]
+            # §8 network_affinity also scales this mode's on-network (trail) edges: the
+            # kernel costs on-trail edges from trail_friction, NOT cost_mult, so the cost_mult
+            # bias in compute_unified_cost_layers only reaches off-network cells. >1 penalizes
+            # staying on the network, <1 biases toward it; default 1.0 is a no-op.
+            aff = float(net_aff.get(mname, 1.0))
+            for tv, fric in prof.trail_friction.items():
+                trail_friction_stack[mi, tv] = np.inf if fric is None else float(fric) * aff
+            max_grade_arr[mi] = float(np.tan(np.radians(prof.max_slope_deg)))
+            speed_function_ids[mi] = sf_id.get(prof.speed_function, 0)
+            base_speed_kmh_arr[mi] = float(prof.base_speed_kmh)
 
-        intersection = start_eligible & end_eligible
-        if not intersection:
-            # foot is always eligible, so this is defensive only.
-            intersection = frozenset({"foot"})
-        mode_set = sorted(intersection)
+        origin_modes = np.array(sorted(MODE_INDEX[m] for m in start_eligible), dtype=np.int64)
+        goal_modes = np.array(sorted(MODE_INDEX[m] for m in end_eligible), dtype=np.int64)
 
-        priority = [m for m in AUTO_MODE_PRIORITY if m in intersection]
+        # 7. Unpack transition cells into the kernel's flat 1D arrays.
+        tc = layers["transition_cells"]
+        nt = len(tc)
+        trans_rows = np.empty(nt, dtype=np.int64)
+        trans_cols = np.empty(nt, dtype=np.int64)
+        trans_from = np.empty(nt, dtype=np.int64)
+        trans_to = np.empty(nt, dtype=np.int64)
+        trans_cost = np.empty(nt, dtype=np.float64)
+        for i, (tr, tcl, fm, tm, cs) in enumerate(tc):
+            trans_rows[i], trans_cols[i], trans_from[i], trans_to[i], trans_cost[i] = tr, tcl, fm, tm, cs
 
-        # Classify-once / route-once: the eligible-mode sets above already identify the
-        # fastest mode both endpoints can traverse -- the first in AUTO_MODE_PRIORITY
-        # that survives the intersection. Pick it and route a SINGLE time, instead of
-        # routing all four candidates and keeping a min-time winner (the old 4-mode
-        # contest cost ~3s on in-town trips). No routing-failure fall-through: if the
-        # picked mode cannot route, the error is returned. See auto-rewrite-plan.md.
-        mode = priority[0] if priority else "foot"
-        best_result = None
-        best_minutes = None
-        last_error = None
-        _probe_t0 = time.perf_counter()
-        result = self.route(
-            start_lat, start_lon, end_lat, end_lon,
-            mode=mode, boundary_mode=boundary_mode, annotate_mvum=False
-        )
-        if result.get("status") == "ok":
-            best_result = result
-            best_result["selected_mode"] = mode
-            best_minutes = (result.get("summary") or {}).get(
-                "total_effort_minutes", float("inf"))
-        else:
-            last_error = result
-        logger.info("auto: classified mode=%s, routed once in %.2fs",
-                    mode, time.perf_counter() - _probe_t0)
+        # 8. Single unified search.
+        cell_m = float(meta["cell_size_m"])
+        trail_grid = np.ascontiguousarray(
+            trails if trails is not None else np.zeros((rows, cols), np.uint8), dtype=np.uint8)
+        barrier_grid = np.ascontiguousarray(
+            barriers if barriers is not None else np.zeros((rows, cols), np.uint8), dtype=np.uint8)
+        boundary_mode_id = {"strict": 0, "pragmatic": 1, "emergency": 2}.get(boundary_mode, 1)
+        _t0 = time.perf_counter()
+        best_idx, path, total_cost = astar_multigoal_multimode(
+            np.ascontiguousarray(cost_mult_stack), elevation, cell_m, cell_m,
+            max_grade_arr, speed_function_ids, base_speed_kmh_arr,
+            trail_grid, trail_friction_stack, barrier_grid, boundary_mode_id,
+            int(origin_row), int(origin_col), origin_modes,
+            np.array([goal_row], dtype=np.int64), np.array([goal_col], dtype=np.int64), goal_modes,
+            trans_rows, trans_cols, trans_from, trans_to, trans_cost)
+        logger.info("auto: unified A* (%d transition cells) in %.2fs",
+                    nt, time.perf_counter() - _t0)
 
-        # Foot-as-last-resort: foot always routes (modulo bbox limits), so if the
-        # capability-picked mode failed, fall back to foot ONCE rather than surface a
-        # wall to the user. selected_mode_set still reflects the original eligibility.
-        if result.get("status") != "ok" and mode != "foot":
-            _foot_t0 = time.perf_counter()
-            foot_result = self.route(
-                start_lat, start_lon, end_lat, end_lon,
-                mode="foot", boundary_mode=boundary_mode, annotate_mvum=False
-            )
-            if foot_result.get("status") == "ok":
-                best_result = foot_result
-                best_result["selected_mode"] = "foot"
-                best_result["auto_fallback_from"] = mode   # surface to client/UI
-                best_minutes = (foot_result.get("summary") or {}).get(
-                    "total_effort_minutes", float("inf"))
-                last_error = None
-                logger.info("auto: %s failed, foot fallback succeeded in %.2fs",
-                            mode, time.perf_counter() - _foot_t0)
-            else:
-                # foot also failed -- keep the original last_error (return original error)
-                logger.info("auto: %s failed, foot fallback also failed in %.2fs",
-                            mode, time.perf_counter() - _foot_t0)
+        if best_idx < 0 or path.shape[0] == 0:
+            return {"status": "error", "message": "No unified route found",
+                    "selected_mode_set": seed_set}
 
-        if best_result is not None:
-            # MVUM Layer 3a: a "drive to a trailhead, switch, continue offroad" plan may
-            # beat the single-mode winner on long trips. If so, return it instead.
-            hybrid = self._try_hybrid_auto(
-                start_lat, start_lon, end_lat, end_lon, boundary_mode,
-                best_result, best_minutes, intersection)
-            if hybrid is not None:
-                hybrid["selected_mode_set"] = mode_set
-                return hybrid
-            best_result["selected_mode_set"] = mode_set
-            self._annotate_network_segments(best_result, best_result["selected_mode"])
-            return best_result
+        # 9. Render per-mode segments + transition markers (no auto_fallback_from, §7).
+        return self._render_unified_path(path, total_cost, meta, boundary_mode)
 
-        if last_error is not None:
-            last_error["selected_mode_set"] = mode_set
-            return last_error
+    def _auto_eligible_modes(self, lat, lon, category, snap_cache):
+        """Seed modes for one endpoint: category type-hint when present, else the
+        reframed spatial probe (§6). foot is always eligible."""
+        typed = self._eligible_modes_from_category(category)
+        if typed is not None:
+            return frozenset(typed) | {"foot"}
+        return frozenset(self._spatial_eligible_modes(lat, lon, snap_cache)) | {"foot"}
+
+    def _fetch_auto_rasters(self, start_lat, start_lon, end_lat, end_lon):
+        """Fetch the shared rasters for one unified Auto search over a bbox covering both
+        endpoints (+ pad, clamped), via the existing reader objects. Returns
+        (elevation, friction_mult, friction_raw, trails, barriers, wilderness,
+        mvum_by_mode, meta)."""
+        self._init_readers()
+        pad = 0.02
+        bbox = {"south": min(start_lat, end_lat) - pad, "north": max(start_lat, end_lat) + pad,
+                "west": min(start_lon, end_lon) - pad, "east": max(start_lon, end_lon) + pad}
+        MAX = 2.0
+        if (bbox["north"] - bbox["south"] > MAX) or (bbox["east"] - bbox["west"] > MAX):
+            clat, clon, h = (start_lat + end_lat) / 2, (start_lon + end_lon) / 2, MAX / 2
+            bbox = {"south": clat - h, "north": clat + h, "west": clon - h, "east": clon + h}
+        elevation, meta = self.dem_reader.get_elevation_grid(
+            south=bbox["south"], north=bbox["north"], west=bbox["west"], east=bbox["east"])
+        shape = elevation.shape
+        friction_raw = self.friction_reader.get_friction_grid(
+            south=bbox["south"], north=bbox["north"], west=bbox["west"], east=bbox["east"],
+            target_shape=shape)
+        friction_mult = friction_to_multiplier(friction_raw)
+        barriers = self.barrier_reader.get_barrier_grid(
+            south=bbox["south"], north=bbox["north"], west=bbox["west"], east=bbox["east"],
+            target_shape=shape)
+        trails = self.trail_reader.get_trails_grid(
+            south=bbox["south"], north=bbox["north"], west=bbox["west"], east=bbox["east"],
+            target_shape=shape)
+        wilderness = None
+        if self.wilderness_reader is not None:
+            wilderness = self.wilderness_reader.get_wilderness_grid(
+                south=bbox["south"], north=bbox["north"], west=bbox["west"], east=bbox["east"],
+                target_shape=shape)
+        mvum_by_mode = self._build_mvum_by_mode(bbox, shape)
+        elevation = np.ascontiguousarray(elevation, dtype=np.float64)
+        return (elevation, friction_mult, friction_raw, trails, barriers,
+                wilderness, mvum_by_mode, meta)
+
+    def _build_mvum_by_mode(self, bbox, shape):
+        """Per-mode MVUM access rasters for the motorized modes, baked into the cost
+        layers (spec §9): get_mvum_access_grid -> 0=unknown/1=open/255=closed. Best-effort
+        -> returns None (graceful degradation, spec §16 risk register) when the MVUM DB is
+        unavailable (e.g. tests without navi.db)."""
+        mvum_mode = {"2w": "mtb", "4w": "atv", "vehicle": "vehicle"}
+        on_date = getattr(self, "mvum_on_date", None)
+        check = on_date.strftime("%m/%d") if on_date else None
+        out = {}
+        for mode, mv_name in mvum_mode.items():
+            try:
+                out[mode] = get_mvum_access_grid(
+                    bbox["south"], bbox["north"], bbox["west"], bbox["east"],
+                    target_shape=shape, mode=mv_name, check_date=check)
+            except Exception as e:
+                logger.info("auto: MVUM grid unavailable for %s: %s", mode, e)
+        return out or None
+
+    def _append_unified_segment(self, features, seg_coords, mode_idx):
+        """One per-mode LineString feature (skipped if < 2 coords, e.g. a transition-only
+        cell). network_mode drives the map's per-segment colour (Phase 6)."""
+        if len(seg_coords) < 2:
+            return
+        features.append({
+            "type": "Feature",
+            "properties": {"segment_type": "unified", "mode": MODE_ORDER[mode_idx],
+                           "network_mode": MODE_ORDER[mode_idx]},
+            "geometry": {"type": "LineString", "coordinates": list(seg_coords)},
+        })
+
+    def _render_unified_path(self, path, total_cost, meta, boundary_mode):
+        """Render the (N,3) (row, col, mode) unified path into the GeoJSON response shape
+        (per-mode LineString segments + transition Point markers at mode-change cells + a
+        combined full-path line), matching _build_response / _build_hybrid_response.
+        selected_mode_set = sorted distinct modes used; NO auto_fallback_from (spec §7)."""
+        n = path.shape[0]
+        coords = []
+        for i in range(n):
+            lat, lon = self.dem_reader.pixel_to_latlon(int(path[i, 0]), int(path[i, 1]), meta)
+            coords.append([lon, lat])
+        modes = [int(path[i, 2]) for i in range(n)]
+
+        features = []
+        transitions = []
+        seg_start = 0
+        for i in range(1, n):
+            if modes[i] != modes[i - 1]:
+                self._append_unified_segment(features, coords[seg_start:i], modes[i - 1])
+                transitions.append((coords[i], modes[i - 1], modes[i]))
+                seg_start = i
+        self._append_unified_segment(features, coords[seg_start:n], modes[n - 1])
+
+        for (xy, fm, tm) in transitions:
+            features.append({
+                "type": "Feature",
+                "properties": {"segment_type": "transition", "kind": "transition",
+                               "lat": xy[1], "lon": xy[0],
+                               "from_mode": MODE_ORDER[fm], "to_mode": MODE_ORDER[tm]},
+                "geometry": {"type": "Point", "coordinates": [xy[0], xy[1]]},
+            })
+
+        combined = []
+        for xy in coords:
+            if not combined or combined[-1] != xy:
+                combined.append(xy)
+        if len(combined) >= 2:
+            features.append({
+                "type": "Feature",
+                "properties": {"segment_type": "combined", "boundary_mode": boundary_mode,
+                               "scenario": "unified"},
+                "geometry": {"type": "LineString", "coordinates": combined},
+            })
+
+        total_m = sum(haversine_distance(combined[i][1], combined[i][0],
+                                         combined[i + 1][1], combined[i + 1][0])
+                      for i in range(len(combined) - 1))
+        selected_mode_set = sorted({MODE_ORDER[m] for m in modes})
         return {
-            "status": "error",
-            "message": "No route found in any mode",
-            "selected_mode_set": mode_set,
+            "status": "ok",
+            "route": {"type": "FeatureCollection", "features": features},
+            "summary": {
+                "total_distance_km": total_m / 1000.0,
+                "total_effort_minutes": float(total_cost) / 60.0,
+                "scenario": "unified",
+                "boundary_mode": boundary_mode,
+                "selected_mode_set": selected_mode_set,
+            },
+            "selected_mode": selected_mode_set[0] if len(selected_mode_set) == 1 else "hybrid",
+            "selected_mode_set": selected_mode_set,
+            "scenario": "unified",
         }
 
     def _route_coords_latlon(self, result):

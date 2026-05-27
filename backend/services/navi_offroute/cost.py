@@ -526,24 +526,34 @@ def compute_unified_cost_layers(
     boundary_mode: Literal["strict", "pragmatic", "emergency"] = "pragmatic",
     endpoint_line=None,
     valhalla_url=None,
+    mvum_by_mode: Optional[Dict[str, np.ndarray]] = None,
+    network_affinity: Optional[Dict[str, float]] = None,
 ) -> dict:
     """Per-mode inflated cost layers + mode-transition cells for one Auto search
-    (spec §3.2 / §4 / §5). Returns {"cost_mult": {mode: ndarray}, "transition_cells":
+    (spec §3.2 / §4 / §5 / §8). Returns {"cost_mult": {mode: ndarray}, "transition_cells":
     [(row, col, from_idx, to_idx, cost_s), ...], "meta": {...DEMReader meta, +
     "boundary_mode"}}.
 
-    Rasters are INJECTED, not fetched: the raster IO lives on the router's reader
-    objects (router.py::_pathfind_wilderness) and is not duplicated — Phase 4 passes
-    elevation/friction/trails/wilderness + DEMReader `meta` straight in; tests pass
-    synthetic arrays. Each mode's multiplier comes from compute_cost_multiplier_grid(...)
-    then inflate_cost_multiplier(...). boundary_mode governs barrier/MVUM rules, which
-    are PER-EDGE in the kernel (§9), so it is threaded into the returned meta for Phase 4
-    rather than into compute_cost_multiplier_grid (which has no such param, unchanged).
+    Rasters are INJECTED, not fetched: the raster IO lives on the router's reader objects
+    (router.py::_pathfind_wilderness) and is not duplicated — Phase 4 passes the rasters +
+    DEMReader `meta` straight in; tests pass synthetic arrays. Each mode's multiplier comes
+    from compute_cost_multiplier_grid(...), then (still pre-inflation) network_affinity (§8)
+    and MVUM closures (§9) are applied, then inflate_cost_multiplier(...).
+
+    mvum_by_mode: optional {mode: uint8[rows,cols]} (1=open, 255=closed, 0=unknown). For
+    each MOTORIZED mode, closed cells become impassable under `strict`, ×PRAGMATIC under
+    `pragmatic`, ignored under `emergency`; foot skips MVUM entirely. network_affinity:
+    optional {mode: float} multiplying that mode's on-network cells (trails != 0); default
+    1.0 is a no-op. boundary_mode also governs barrier rules, which stay PER-EDGE in the
+    kernel — threaded into the returned meta for Phase 4 (mvum_by_mode=network_affinity=None
+    reproduces the Phase-3 layers exactly, keeping the parity test green).
     """
     from .astar import inflate_cost_multiplier
     from .transitions import gather_transition_cells
 
     cell_size_m = float(meta["cell_size_m"])
+    network_affinity = network_affinity or {}
+    on_network = (trails != 0) if trails is not None else None
     cost_mult = {}
     for mode in modes:
         m = compute_cost_multiplier_grid(
@@ -555,7 +565,26 @@ def compute_unified_cost_layers(
             wilderness=wilderness,
             mode=mode,
         )
-        cost_mult[mode] = inflate_cost_multiplier(m)
+        # §9 MVUM closures: motorized modes only, pre-inflation (closures must bleed like any
+        # impassable cell), modulated by boundary_mode.
+        if mvum_by_mode is not None and mode != "foot" and boundary_mode != "emergency":
+            mv = mvum_by_mode.get(mode)
+            if mv is not None:
+                closed = mv == 255
+                if boundary_mode == "strict":
+                    m[closed] = np.inf
+                else:  # pragmatic
+                    m[closed & np.isfinite(m)] *= PRAGMATIC_BARRIER_MULTIPLIER
+        inflated = inflate_cost_multiplier(m)
+        # §8 network_affinity, applied AFTER inflation: a >1 penalty on on-network cells must
+        # NOT bleed into off-network neighbours (pre-inflation it makes LEAVING the network
+        # harder -- the opposite of intent). The kernel costs on-network EDGES from
+        # trail_friction (not cost_mult), so this is a no-op for movement today; the functional
+        # bias is applied to trail_friction in router packing. Kept here per spec §8.
+        aff = float(network_affinity.get(mode, 1.0))
+        if aff != 1.0 and on_network is not None:
+            inflated[on_network & np.isfinite(inflated)] *= aff
+        cost_mult[mode] = inflated
 
     transition_cells = gather_transition_cells(
         meta,
