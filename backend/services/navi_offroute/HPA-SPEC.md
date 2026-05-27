@@ -186,7 +186,8 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);  -- build provenance, mode
   convention, region boundary polygon/bbox, and build timestamp/commit.
 - **Idaho-size estimate:** ~96K chunks × 400 entrance pairs × 4 modes × ~50 bytes/row
   ≈ **~1.5 GB SQLite**. (Sparse: impassable pairs absent, so the real file is smaller.) This
-  confirms the storage analysis already approved.
+  confirms the storage analysis already approved. `/mnt/nav/hpa/<region>.db` lives on the same
+  fast virtiofs (host NVMe) as the DEM and the other readers — local-disk speed, not network.
 
 ---
 
@@ -319,7 +320,7 @@ Each phase ≤ its own diff budget, HALT-at-diff at every boundary.
 | **Stale tiles after DEM / mode-profile change** | Precomputed costs no longer match the live cost model. | `meta.mode_profile_hash` (hash of `MODE_PROFILES`) + DEM version; mismatch → fall back + log a rebuild-required warning. |
 | **Transition cells moving between chunks on a DEM regrid** | Parking/trailhead chunk membership could shift, breaking stored transition entrances. | Chunk-coord origin pinned at lat=0/lon=0 modulo 1.5 km (§3): chunk identity is deterministic and regrid-stable. |
 | **Mode-switch edges across chunk borders** | A parking lot on a chunk boundary belongs to two chunks; a switch there must be reachable from both. | The transition cell is added as an entrance to **both** neighbouring chunks (overlap, §5). |
-| **SQLite read latency at query time** | Per-chunk cost lookups over NFS could add latency. | Costs are scalar and few (≤400 rows/chunk/mode); index `idx_chunk_mode`; batch-load the covered chunks once per query; the DB is small and OS-page-cacheable. |
+| **SQLite read latency at query time** | Per-chunk cost lookups over virtiofs (host NVMe) — sub-ms cold, single-µs cached. SQLite-over-virtiofs is local-disk fast, not network-bound. | Costs are scalar and few (≤400 rows/chunk/mode); index `idx_chunk_mode`; batch-load the covered chunks once per query; the DB is small and OS-page-cacheable. |
 
 ---
 
