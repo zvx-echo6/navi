@@ -857,31 +857,30 @@ class OffrouteRouter:
 
         priority = [m for m in AUTO_MODE_PRIORITY if m in intersection]
 
-        # Probe every eligible candidate and pick the one that minimises total trip
-        # time, NOT the first that succeeds. When the start is in wilderness and the
-        # end is on-road, falling through to foot would compute the whole network leg
-        # at foot pace. The wilderness leg always uses foot regardless; the candidate
-        # only changes the network leg.
+        # Classify-once / route-once: the eligible-mode sets above already identify the
+        # fastest mode both endpoints can traverse -- the first in AUTO_MODE_PRIORITY
+        # that survives the intersection. Pick it and route a SINGLE time, instead of
+        # routing all four candidates and keeping a min-time winner (the old 4-mode
+        # contest cost ~3s on in-town trips). No routing-failure fall-through: if the
+        # picked mode cannot route, the error is returned. See auto-rewrite-plan.md.
+        mode = priority[0] if priority else "foot"
         best_result = None
         best_minutes = None
         last_error = None
         _probe_t0 = time.perf_counter()
-        for candidate in priority:
-            result = self.route(
-                start_lat, start_lon, end_lat, end_lon,
-                mode=candidate, boundary_mode=boundary_mode, annotate_mvum=False
-            )
-            if result.get("status") == "ok":
-                minutes = (result.get("summary") or {}).get(
-                    "total_effort_minutes", float("inf"))
-                if best_minutes is None or minutes < best_minutes:
-                    best_minutes = minutes
-                    best_result = result
-                    best_result["selected_mode"] = candidate
-            else:
-                last_error = result
-        logger.info("single-mode probing took %.2fs (%d candidate modes)",
-                    time.perf_counter() - _probe_t0, len(priority))
+        result = self.route(
+            start_lat, start_lon, end_lat, end_lon,
+            mode=mode, boundary_mode=boundary_mode, annotate_mvum=False
+        )
+        if result.get("status") == "ok":
+            best_result = result
+            best_result["selected_mode"] = mode
+            best_minutes = (result.get("summary") or {}).get(
+                "total_effort_minutes", float("inf"))
+        else:
+            last_error = result
+        logger.info("auto: classified mode=%s, routed once in %.2fs",
+                    mode, time.perf_counter() - _probe_t0)
 
         if best_result is not None:
             # MVUM Layer 3a: a "drive to a trailhead, switch, continue offroad" plan may

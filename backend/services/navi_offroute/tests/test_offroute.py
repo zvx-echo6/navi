@@ -312,9 +312,9 @@ def _typed_all(monkeypatch):
                         lambda self, cat: ALL_MODES)
 
 
-def test_route_auto_equal_times_keep_priority(monkeypatch):
-    # All candidates succeed with no recorded time -> tie -> highest priority wins,
-    # and every candidate is probed (no early return under min-time selection).
+def test_route_auto_picks_capability_mode(monkeypatch):
+    # Classify-once: typed road endpoints -> intersection = all modes -> the first
+    # AUTO_MODE_PRIORITY mode (vehicle) is picked and routed ONCE (no 4-mode contest).
     _typed_all(monkeypatch)
     calls = []
     monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
@@ -323,27 +323,12 @@ def test_route_auto_equal_times_keep_priority(monkeypatch):
     assert out["status"] == "ok"
     assert out["selected_mode"] == "vehicle"
     assert out["selected_mode_set"] == sorted(ALL_MODES)
-    assert calls == ["vehicle", "4w", "2w", "foot"]
+    assert calls == ["vehicle"]   # ONE route call, not four
 
 
-def test_route_auto_falls_through_to_foot(monkeypatch):
-    _typed_all(monkeypatch)
-    calls = []
-    per_mode = {
-        "vehicle": {"status": "error", "message": "No roads found"},
-        "4w": {"status": "error", "message": "No tracks found"},
-        "2w": {"status": "error", "message": "No tracks found"},
-        "foot": {"status": "ok"},
-    }
-    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
-    r = object.__new__(OffrouteRouter)
-    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
-    assert out["status"] == "ok"
-    assert out["selected_mode"] == "foot"
-    assert calls == ["vehicle", "4w", "2w", "foot"]
-
-
-def test_route_auto_all_error_returns_error(monkeypatch):
+def test_route_auto_no_fallthrough_on_route_error(monkeypatch):
+    # Route-once: if the capability-picked mode (vehicle) cannot route, the error is
+    # returned -- classify-once does NOT fall through to other modes (PR1 trade-off).
     _typed_all(monkeypatch)
     calls = []
     per_mode = {m: {"status": "error", "message": f"{m} failed"} for m in AUTO_MODE_PRIORITY}
@@ -353,23 +338,38 @@ def test_route_auto_all_error_returns_error(monkeypatch):
     assert out["status"] == "error"
     assert "selected_mode" not in out
     assert out["selected_mode_set"] == sorted(ALL_MODES)
-    assert calls == ["vehicle", "4w", "2w", "foot"]
+    assert calls == ["vehicle"]   # only the picked mode is attempted
 
 
-def test_route_auto_selected_mode_present_in_ok_response(monkeypatch):
-    _typed_all(monkeypatch)
+def test_route_auto_tagged_road_to_road_no_spatial_probe(monkeypatch):
+    # Tagged road endpoints -> pure category classification, the spatial probe must
+    # NOT fire, and exactly one route call (mode=vehicle) is made.
     calls = []
-    per_mode = {
-        "vehicle": {"status": "error", "message": "No roads found"},
-        "4w": {"status": "ok", "summary": {"total_effort_minutes": 90.0}},
-        "2w": {"status": "ok", "summary": {"total_effort_minutes": 40.0}},
-        "foot": {"status": "ok", "summary": {"total_effort_minutes": 600.0}},
-    }
-    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    spatial_calls = []
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
+    monkeypatch.setattr(OffrouteRouter, "_spatial_eligible_modes",
+                        lambda self, lat, lon, sc: spatial_calls.append((lat, lon)) or ALL_MODES)
     r = object.__new__(OffrouteRouter)
-    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
-    assert out["status"] == "ok"
-    assert out["selected_mode"] == "2w"   # fastest success wins
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
+                        start_category="building:house", end_category="highway:residential")
+    assert out["selected_mode"] == "vehicle"
+    assert calls == ["vehicle"]
+    assert spatial_calls == []   # no spatial probe for tagged endpoints
+
+
+def test_route_auto_untagged_spatial_called_once_per_endpoint(monkeypatch):
+    # One untagged endpoint -> _spatial_eligible_modes fires exactly once (for that
+    # endpoint only); the tagged endpoint stays a dict lookup.
+    calls = []
+    spatial_calls = []
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
+    monkeypatch.setattr(OffrouteRouter, "_spatial_eligible_modes",
+                        lambda self, lat, lon, sc: spatial_calls.append((lat, lon)) or ALL_MODES)
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
+                        start_category="building:house", end_category=None)  # end untagged
+    assert spatial_calls == [(42.5, -114.5)]   # exactly once, for the untagged end
+    assert calls == ["vehicle"]
 
 
 # ── _route_auto with category type hints (real _eligible_modes_from_category) ──
@@ -381,7 +381,7 @@ def test_route_auto_address_to_address_picks_vehicle(monkeypatch):
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
                         start_category="building:house", end_category="highway:residential")
     assert out["selected_mode"] == "vehicle"
-    assert calls == ["vehicle", "4w", "2w", "foot"]
+    assert calls == ["vehicle"]
 
 
 def test_route_auto_address_to_trailhead_picks_atv(monkeypatch):
@@ -391,7 +391,7 @@ def test_route_auto_address_to_trailhead_picks_atv(monkeypatch):
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
                         start_category="building:house", end_category="highway:trailhead")
     assert out["selected_mode"] == "4w"
-    assert "vehicle" not in calls
+    assert calls == ["4w"]   # capability pick, single call
     assert out["selected_mode_set"] == sorted({"4w", "2w", "foot"})
 
 
@@ -420,6 +420,7 @@ def test_route_auto_both_unknown_uses_spatial_fallback(monkeypatch):
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")  # no categories
     assert len(spatial_calls) == 2  # both endpoints resolved spatially
     assert out["selected_mode"] == "vehicle"
+    assert calls == ["vehicle"]   # one route after classification
 
 
 # ── _spatial_eligible_modes — Valhalla classification.classification + .use ──
@@ -827,10 +828,13 @@ def test_pathfind_wilderness_bbox_pad_is_1_5km(monkeypatch):
     assert abs((bounds["east"] - (-115.0)) - 0.015) < 1e-9
 
 
-# ── Auto min-time selection + per-leg breakdown (feat/auto-picks-fastest) ──
+# ── Auto classify-once priority pick (replaces the old min-time contest) ──
 
-def test_route_auto_picks_min_time(monkeypatch):
-    # vehicle is first in AUTO_MODE_PRIORITY but slow; 4w is fastest -> 4w wins.
+def test_route_auto_picks_priority_not_min_time(monkeypatch):
+    # Classify-once picks the first AUTO_MODE_PRIORITY mode in the intersection
+    # (vehicle) and routes ONCE -- it no longer probes all modes to find a faster one.
+    # (The old min-time contest, where a slower-priority mode could win, is gone -- a
+    # documented PR1 trade-off in auto-rewrite-plan.md.)
     _typed_all(monkeypatch)
     calls = []
     per_mode = {
@@ -843,8 +847,8 @@ def test_route_auto_picks_min_time(monkeypatch):
     r = object.__new__(OffrouteRouter)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
     assert out["status"] == "ok"
-    assert out["selected_mode"] == "4w"                       # fastest, not first-priority
-    assert calls == ["vehicle", "4w", "2w", "foot"]           # probed every candidate
+    assert out["selected_mode"] == "vehicle"                  # first priority, picked by capability
+    assert calls == ["vehicle"]                               # routed once, no contest
 
 
 def test_route_auto_per_leg_breakdown():
@@ -865,25 +869,20 @@ def test_route_auto_per_leg_breakdown():
     assert abs((summ["wilderness_minutes"] + summ["network_minutes"]) - summ["total_effort_minutes"]) < 1e-6
 
 
-def test_route_auto_annotates_only_winner(monkeypatch):
-    # 4 candidates probed (annotate_mvum=False each); _annotate_network_segments must be
-    # called exactly once, on the min-time winner.
+def test_route_auto_annotates_picked_mode_once(monkeypatch):
+    # Classify-once routes the picked mode with annotate_mvum=False, then
+    # _annotate_network_segments runs exactly once, on that picked mode (vehicle).
     _typed_all(monkeypatch)
     calls = []
-    per_mode = {
-        "vehicle": {"status": "ok", "summary": {"total_effort_minutes": 100.0}},
-        "4w": {"status": "ok", "summary": {"total_effort_minutes": 40.0}},   # fastest
-        "2w": {"status": "ok", "summary": {"total_effort_minutes": 80.0}},
-        "foot": {"status": "ok", "summary": {"total_effort_minutes": 500.0}},
-    }
-    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
     annotated = []
     monkeypatch.setattr(OffrouteRouter, "_annotate_network_segments",
                         lambda self, result, mode: annotated.append(mode))
     r = object.__new__(OffrouteRouter)
     out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
-    assert out["selected_mode"] == "4w"
-    assert annotated == ["4w"]   # annotated once, on the winner only
+    assert out["selected_mode"] == "vehicle"
+    assert calls == ["vehicle"]
+    assert annotated == ["vehicle"]   # annotated once, on the picked mode
 
 
 # ── Layer 3b: parking as a hybrid transition candidate source ──
