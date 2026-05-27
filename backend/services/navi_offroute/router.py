@@ -882,6 +882,29 @@ class OffrouteRouter:
         logger.info("auto: classified mode=%s, routed once in %.2fs",
                     mode, time.perf_counter() - _probe_t0)
 
+        # Foot-as-last-resort: foot always routes (modulo bbox limits), so if the
+        # capability-picked mode failed, fall back to foot ONCE rather than surface a
+        # wall to the user. selected_mode_set still reflects the original eligibility.
+        if result.get("status") != "ok" and mode != "foot":
+            _foot_t0 = time.perf_counter()
+            foot_result = self.route(
+                start_lat, start_lon, end_lat, end_lon,
+                mode="foot", boundary_mode=boundary_mode, annotate_mvum=False
+            )
+            if foot_result.get("status") == "ok":
+                best_result = foot_result
+                best_result["selected_mode"] = "foot"
+                best_result["auto_fallback_from"] = mode   # surface to client/UI
+                best_minutes = (foot_result.get("summary") or {}).get(
+                    "total_effort_minutes", float("inf"))
+                last_error = None
+                logger.info("auto: %s failed, foot fallback succeeded in %.2fs",
+                            mode, time.perf_counter() - _foot_t0)
+            else:
+                # foot also failed -- keep the original last_error (return original error)
+                logger.info("auto: %s failed, foot fallback also failed in %.2fs",
+                            mode, time.perf_counter() - _foot_t0)
+
         if best_result is not None:
             # MVUM Layer 3a: a "drive to a trailhead, switch, continue offroad" plan may
             # beat the single-mode winner on long trips. If so, return it instead.

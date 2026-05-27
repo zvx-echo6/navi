@@ -326,9 +326,26 @@ def test_route_auto_picks_capability_mode(monkeypatch):
     assert calls == ["vehicle"]   # ONE route call, not four
 
 
-def test_route_auto_no_fallthrough_on_route_error(monkeypatch):
-    # Route-once: if the capability-picked mode (vehicle) cannot route, the error is
-    # returned -- classify-once does NOT fall through to other modes (PR1 trade-off).
+def test_route_auto_falls_back_to_foot_on_error(monkeypatch):
+    # Foot-as-last-resort: the capability-picked mode (vehicle) fails, so Auto retries
+    # foot ONCE and ships it, tagging auto_fallback_from for the UI.
+    _typed_all(monkeypatch)
+    calls = []
+    per_mode = {m: {"status": "error", "message": f"{m} failed"} for m in AUTO_MODE_PRIORITY}
+    per_mode["foot"] = {"status": "ok"}
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic")
+    assert out["status"] == "ok"
+    assert out["selected_mode"] == "foot"
+    assert out["auto_fallback_from"] == "vehicle"
+    assert out["selected_mode_set"] == sorted(ALL_MODES)   # original eligibility, not foot-only
+    assert calls == ["vehicle", "foot"]
+
+
+def test_route_auto_returns_error_when_picked_and_foot_both_fail(monkeypatch):
+    # Picked mode AND the foot fallback both fail -> original error surfaces, exactly
+    # two attempts (picked, then foot).
     _typed_all(monkeypatch)
     calls = []
     per_mode = {m: {"status": "error", "message": f"{m} failed"} for m in AUTO_MODE_PRIORITY}
@@ -338,7 +355,21 @@ def test_route_auto_no_fallthrough_on_route_error(monkeypatch):
     assert out["status"] == "error"
     assert "selected_mode" not in out
     assert out["selected_mode_set"] == sorted(ALL_MODES)
-    assert calls == ["vehicle"]   # only the picked mode is attempted
+    assert calls == ["vehicle", "foot"]
+
+
+def test_route_auto_no_fallback_when_picked_is_foot(monkeypatch):
+    # When the picked mode is already foot (foot-only intersection), there is no second
+    # attempt -- foot cannot fall back to itself.
+    calls = []
+    per_mode = {"foot": {"status": "error", "message": "foot failed"}}
+    monkeypatch.setattr(OffrouteRouter, "route", _stub_route(per_mode, calls))
+    r = object.__new__(OffrouteRouter)
+    out = r._route_auto(42.0, -114.0, 42.5, -114.5, "pragmatic",
+                        start_category="building:house", end_category="natural:peak")  # -> {foot}
+    assert out["status"] == "error"
+    assert out["selected_mode_set"] == ["foot"]
+    assert calls == ["foot"]   # no fallback attempt
 
 
 def test_route_auto_tagged_road_to_road_no_spatial_probe(monkeypatch):
