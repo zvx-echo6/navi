@@ -989,3 +989,191 @@ def test_hybrid_consumes_parking_candidates(monkeypatch):
     trans = next(f for f in out["route"]["features"]
                  if f["properties"].get("kind") == "transition")
     assert trans["properties"]["name"] == "BLM Trailhead Lot"
+
+
+# ── Multi-mode A* kernel (unified-graph Phase 2; spec §2.3 / §10 / §11) ───────
+from services.navi_offroute.astar import astar_multigoal_multimode as _mm
+from services.navi_offroute.cost import MODE_PROFILES as _PROFILES
+
+_MODE_ORDER = ["foot", "2w", "4w", "vehicle"]   # spec §2.1 fixed index order
+_SFID = {"tobler": 0, "herzog": 1, "linear": 2}
+
+
+def _mode_param_arrays():
+    """Per-mode 1D param arrays (foot,2w,4w,vehicle order) + trail_friction_stack
+    [n_modes,256], built faithfully from MODE_PROFILES."""
+    n = len(_MODE_ORDER)
+    max_grade = _np.empty(n, dtype=_np.float64)
+    sfid = _np.empty(n, dtype=_np.int64)
+    base = _np.empty(n, dtype=_np.float64)
+    tfs = _np.full((n, 256), _np.inf, dtype=_np.float64)
+    for mi, name in enumerate(_MODE_ORDER):
+        p = _PROFILES[name]
+        max_grade[mi] = float(_np.tan(_np.radians(p.max_slope_deg)))
+        sfid[mi] = _SFID[p.speed_function]
+        base[mi] = p.base_speed_kmh
+        for tv, fr in p.trail_friction.items():
+            tfs[mi, tv] = _np.inf if fr is None else float(fr)
+    return max_grade, sfid, base, tfs
+
+
+def _empty_trans():
+    z = _np.empty(0, dtype=_np.int64)
+    return z, z.copy(), z.copy(), z.copy(), _np.empty(0, dtype=_np.float64)
+
+
+def test_multimode_foot_only_parity():
+    # foot-only, no transitions: the multimode kernel (1-mode stack) must reproduce
+    # astar_multigoal exactly -- it is a strict superset.
+    n = 8
+    elev, mult, trail, lookup, barr = _flat_inputs(n)
+    foot_mg = float(_np.tan(_np.radians(_PROFILES["foot"].max_slope_deg)))
+    gr = _np.array([n - 1], dtype=_np.int64)
+    gc = _np.array([n - 1], dtype=_np.int64)
+    idx1, path1, cost1 = astar_multigoal(
+        mult, elev, 30.0, 30.0, foot_mg, 0, 6.0, trail, lookup, barr, 2, 0, 0, gr, gc)
+
+    stack = mult.reshape(n, n, 1).copy()
+    tr, tc, tf, tt, tcost = _empty_trans()
+    idx2, path2, cost2 = _mm(
+        stack, elev, 30.0, 30.0,
+        _np.array([foot_mg]), _np.array([0], dtype=_np.int64), _np.array([6.0]),
+        trail, lookup.reshape(1, 256).copy(), barr, 2,
+        0, 0, _np.array([0], dtype=_np.int64), gr, gc, _np.array([0], dtype=_np.int64),
+        tr, tc, tf, tt, tcost)
+
+    assert idx2 == idx1 == 0
+    assert cost2 == pytest.approx(cost1, rel=1e-9, abs=1e-9)
+    assert _np.array_equal(path2[:, :2], path1)   # same (row,col) sequence
+    assert _np.all(path2[:, 2] == 0)              # all foot
+
+
+def test_multimode_parking_switch():
+    # Forest corridor (foot-only) -> parking cell -> open field where vehicle is
+    # fast and foot is slow. The optimizer must switch foot->vehicle at the parking
+    # cell and beat foot-only. The cost advantage is TERRAIN-driven (no trails / no
+    # friction<1), which keeps the §10 heuristic admissible -- a road's <1 friction
+    # would make effective speed exceed base speed and break the heuristic (a known
+    # property of the inherited single-mode kernel too).
+    rows, cols, road_start = 3, 50, 25
+    elev = _np.zeros((rows, cols), dtype=_np.float64)
+    n_modes = 4
+    stack = _np.full((rows, cols, n_modes), _np.inf, dtype=_np.float64)
+    stack[:, :, 0] = 1.0                       # foot: passable everywhere off-trail
+    stack[:, road_start:cols, 3] = 1.0         # vehicle: drivable only in the open field
+    trail = _np.zeros((rows, cols), dtype=_np.uint8)   # no trails anywhere
+    max_grade, sfid, base, tfs = _mode_param_arrays()
+    barr = _np.zeros((rows, cols), dtype=_np.uint8)
+
+    gr = _np.array([1], dtype=_np.int64)
+    gc = _np.array([cols - 1], dtype=_np.int64)
+    pr, pc = 1, road_start         # parking cell, foot<->vehicle, 60 s each way
+    tr = _np.array([pr, pr], dtype=_np.int64)
+    tc = _np.array([pc, pc], dtype=_np.int64)
+    tf = _np.array([0, 3], dtype=_np.int64)
+    tt = _np.array([3, 0], dtype=_np.int64)
+    tcost = _np.array([60.0, 60.0], dtype=_np.float64)
+    om = _np.array([0], dtype=_np.int64)        # start on foot
+    gm = _np.array([3, 0], dtype=_np.int64)     # finish vehicle or foot
+
+    idx, path, cost = _mm(
+        stack, elev, 30.0, 30.0, max_grade, sfid, base, trail, tfs, barr, 1,
+        1, 0, om, gr, gc, gm, tr, tc, tf, tt, tcost)
+
+    assert idx == 0
+    modes = path[:, 2]
+    assert modes[0] == 0 and modes[-1] == 3       # foot start, vehicle finish
+    switches = [k for k in range(1, len(path)) if modes[k] != modes[k - 1]]
+    assert len(switches) == 1                     # exactly one mode change
+    sk = switches[0]
+    assert modes[sk - 1] == 0 and modes[sk] == 3  # foot -> vehicle
+    assert tuple(path[sk, :2]) == (pr, pc)        # at the parking cell
+    assert tuple(path[sk - 1, :2]) == (pr, pc)    # same cell, mode-change edge
+
+    tr0, tc0, tf0, tt0, tcost0 = _empty_trans()
+    _, _, cost_foot_only = _mm(
+        stack, elev, 30.0, 30.0, max_grade, sfid, base, trail, tfs, barr, 1,
+        1, 0, _np.array([0], dtype=_np.int64), gr, gc, _np.array([0], dtype=_np.int64),
+        tr0, tc0, tf0, tt0, tcost0)
+    assert cost < cost_foot_only
+
+
+def test_multimode_no_transitions_independent():
+    # No transitions: the 4-mode search degrades to 4 independent single-mode
+    # searches -- the winning path never changes mode, and its cost equals the
+    # min over the four single-mode runs (vehicle wins on flat passable terrain).
+    # Off-trail only (no friction<1) keeps the heuristic admissible.
+    n = 12
+    elev = _np.zeros((n, n), dtype=_np.float64)
+    n_modes = 4
+    stack = _np.ones((n, n, n_modes), dtype=_np.float64)  # all modes passable off-trail
+    trail = _np.zeros((n, n), dtype=_np.uint8)            # no trails
+    max_grade, sfid, base, tfs = _mode_param_arrays()
+    barr = _np.zeros((n, n), dtype=_np.uint8)
+    gr = _np.array([n - 1], dtype=_np.int64)
+    gc = _np.array([n - 1], dtype=_np.int64)
+    all_modes = _np.array([0, 1, 2, 3], dtype=_np.int64)
+    tr, tc, tf, tt, tcost = _empty_trans()
+
+    idx, path, cost = _mm(
+        stack, elev, 30.0, 30.0, max_grade, sfid, base, trail, tfs, barr, 2,
+        0, 0, all_modes, gr, gc, all_modes, tr, tc, tf, tt, tcost)
+
+    assert _np.all(path[:, 2] == path[0, 2])       # single mode the whole way
+    winning_mode = int(path[0, 2])
+
+    single_costs = []
+    for mi in range(4):
+        _, _, c1 = astar_multigoal(
+            stack[:, :, mi].copy(), elev, 30.0, 30.0,
+            float(max_grade[mi]), int(sfid[mi]), float(base[mi]),
+            trail, tfs[mi].copy(), barr, 2, 0, 0, gr, gc)
+        single_costs.append(c1)
+    assert cost == pytest.approx(min(single_costs), rel=1e-9, abs=1e-9)
+    assert winning_mode == int(_np.argmin(single_costs))  # vehicle (fastest base)
+
+
+def test_multimode_heuristic_admissibility():
+    # §10 admissibility: h(r,c,m) must never exceed the true optimal remaining cost.
+    # vehicle (global-fastest base) is an allowed goal mode, so max_goal_speed is the
+    # global max -> h is a true lower bound. No trails (friction<1 would let a road
+    # beat base speed), so effective speed <= base speed everywhere.
+    rows, cols = 6, 10
+    rng = _np.random.RandomState(0)
+    elev = (rng.rand(rows, cols) * 20.0).astype(_np.float64)
+    n_modes = 4
+    stack = _np.ones((rows, cols, n_modes), dtype=_np.float64)
+    stack[2:4, 3:6, 1] = _np.inf   # a forest block impassable to wheeled modes
+    stack[2:4, 3:6, 2] = _np.inf
+    stack[2:4, 3:6, 3] = _np.inf
+    trail = _np.zeros((rows, cols), dtype=_np.uint8)
+    max_grade, sfid, base, tfs = _mode_param_arrays()
+    barr = _np.zeros((rows, cols), dtype=_np.uint8)
+    gr = _np.array([rows - 1], dtype=_np.int64)
+    gc = _np.array([cols - 1], dtype=_np.int64)
+    gm = _np.array([0, 3], dtype=_np.int64)        # foot or vehicle finish
+    tr = _np.array([0, 0], dtype=_np.int64)        # one foot<->vehicle transition
+    tc = _np.array([5, 5], dtype=_np.int64)
+    tf = _np.array([0, 3], dtype=_np.int64)
+    tt = _np.array([3, 0], dtype=_np.int64)
+    tcost = _np.array([60.0, 60.0], dtype=_np.float64)
+
+    max_goal_speed = max(float(base[g]) for g in gm)
+
+    sampled = 0
+    for r in range(0, rows, 2):
+        for c in range(0, cols, 3):
+            for m in (0, 3):
+                d = float(_np.hypot((r - (rows - 1)) * 30.0, (c - (cols - 1)) * 30.0))
+                h = d * 3.6 / max_goal_speed
+                # Oracle: same kernel with the heuristic disabled (Dijkstra), seeded
+                # only from this state -> exact true remaining cost.
+                _, _, true_cost = _mm(
+                    stack, elev, 30.0, 30.0, max_grade, sfid, base, trail, tfs, barr, 2,
+                    r, c, _np.array([m], dtype=_np.int64), gr, gc, gm,
+                    tr, tc, tf, tt, tcost, True)
+                if not _np.isfinite(true_cost):
+                    continue
+                assert h <= true_cost + 1e-6
+                sampled += 1
+    assert sampled > 0   # the sweep actually exercised reachable states
