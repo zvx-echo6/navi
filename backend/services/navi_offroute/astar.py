@@ -12,7 +12,12 @@ Cliffs (|grade| > max_grade) incur a smooth exponential penalty rather than a ha
 wall, so a single noisy DEM cell can't fabricate an impassable edge; only truly
 absurd grades (penalty > SLOPE_PENALTY_CAP) are dropped.
 """
+import hashlib
+import heapq
+import itertools
 import math
+import sqlite3
+from collections import defaultdict
 
 import numpy as np
 from numba import njit
@@ -597,3 +602,231 @@ def astar_multigoal_multimode(
                                 break
 
     return -1, np.empty((0, 3), dtype=np.int64), INF
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HPA* TWO-LEVEL RUNTIME (unified-graph perf, HPA-SPEC.md §8/§9, Phase H3)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# astar_hpa_multimode is a PURE-PYTHON sibling of astar_multigoal_multimode (NOT @njit:
+# it does SQLite I/O + per-chunk Python loops). It searches the precomputed abstract chunk
+# graph (cost tiles from hpa_build), then refines each hop with the existing @njit
+# astar_multigoal on that chunk's live cost layer. astar_multigoal / astar_multigoal_multimode
+# are byte-unchanged; HPA* engages only when the dispatcher passes a tile DB.
+#
+# v1 limitations (HPA-SPEC.md §5/§8, PR #44): border entrances ONLY (no transition-cell
+# entrances ≥20), so there are NO mode-switch edges -> the abstract path is SINGLE-MODE
+# (a mode m in start_modes ∩ goal_modes). A route whose optimum needs a mode switch (the §1
+# wilderness→home walk-then-drive) will here degrade to single-mode or find no path; the
+# dispatcher then falls back to astar_multigoal_multimode. **This means enabling HPA* on a
+# mixed-mode route can return a worse selected_mode_set than unified A* — keep disabled in
+# prod until transition-cell entrances land (a follow-up) or H5 gates it.**
+# The abstract search uses Dijkstra (h≡0, trivially admissible/optimal); the abstract graph
+# is tiny, so a §10-style heuristic isn't needed for v1.
+
+HPA_BORDER_ENTRANCES = 20
+
+
+def _hpa_profile_hash():
+    from .cost import MODE_PROFILES
+    return hashlib.sha256(repr(MODE_PROFILES).encode()).hexdigest()
+
+
+def _hpa_coverage_reason(conn, needed_chunks, boundary_mode, network_affinity):
+    """Return a fallback reason string (HPA cannot/should-not engage), or None if clear.
+    Order: config gates first (cheap), then freshness, then tile coverage."""
+    if boundary_mode != "pragmatic":
+        return "boundary_mode"
+    if network_affinity and any(float(v) != 1.0 for v in network_affinity.values()):
+        return "affinity"
+    row = conn.execute("SELECT value FROM meta WHERE key='mode_profile_hash'").fetchone()
+    if not row or row[0] != _hpa_profile_hash():
+        return "stale_profile"
+    cxs = [c[0] for c in needed_chunks]
+    cys = [c[1] for c in needed_chunks]
+    present = {(r[0], r[1]) for r in conn.execute(
+        "SELECT DISTINCT chunk_x, chunk_y FROM chunk_costs "
+        "WHERE chunk_x BETWEEN ? AND ? AND chunk_y BETWEEN ? AND ?",
+        (min(cxs), max(cxs), min(cys), max(cys)))}
+    if any(ch not in present for ch in needed_chunks):
+        return "missing_chunk"
+    return None
+
+
+def _hpa_abstract_search(conn, needed_chunks, relevant_modes, start_edges, goal_edges):
+    """Dijkstra over the abstract graph. Nodes are (cx, cy, entrance, mode) plus virtual
+    "START"/"GOAL". Edges: intra-chunk (precomputed tile costs), inter-chunk seams (free,
+    same physical border cell), and the start/goal pseudo-edges. Returns
+    (node_seq_excl_endpoints, total_cost) or (None, INF). v1: no cross-mode edges."""
+    present = set(needed_chunks)
+    rmodes = set(relevant_modes)
+    cxs = [c[0] for c in needed_chunks]
+    cys = [c[1] for c in needed_chunks]
+    adj = defaultdict(list)
+    # Intra-chunk directed edges (border entrances 0..19 only — transition cells deferred).
+    for cx, cy, m, fe, te, cost in conn.execute(
+            "SELECT chunk_x, chunk_y, mode_idx, from_entrance, to_entrance, cost_s FROM chunk_costs "
+            "WHERE chunk_x BETWEEN ? AND ? AND chunk_y BETWEEN ? AND ?",
+            (min(cxs), max(cxs), min(cys), max(cys))):
+        if m in rmodes and fe < HPA_BORDER_ENTRANCES and te < HPA_BORDER_ENTRANCES:
+            adj[(cx, cy, fe, m)].append(((cx, cy, te, m), float(cost)))
+    # Inter-chunk seams (free, both directions). Right 5..9 ↔ left 15..19 of (cx+1,cy);
+    # bottom 10..14 ↔ top 0..4 of (cx,cy+1) — same fraction, same physical cell (spec §8).
+    for (cx, cy) in needed_chunks:
+        for m in rmodes:
+            if (cx + 1, cy) in present:
+                for k in range(5):
+                    a, b = (cx, cy, 5 + k, m), (cx + 1, cy, 15 + k, m)
+                    adj[a].append((b, 0.0)); adj[b].append((a, 0.0))
+            if (cx, cy + 1) in present:
+                for k in range(5):
+                    a, b = (cx, cy, 10 + k, m), (cx, cy + 1, k, m)
+                    adj[a].append((b, 0.0)); adj[b].append((a, 0.0))
+    for node, cost in start_edges.items():
+        adj["START"].append((node, float(cost)))
+    for node, cost in goal_edges.items():
+        adj[node].append(("GOAL", float(cost)))
+
+    counter = itertools.count()
+    dist = {"START": 0.0}
+    prev = {}
+    pq = [(0.0, next(counter), "START")]
+    while pq:
+        d, _, u = heapq.heappop(pq)
+        if u == "GOAL":
+            break
+        if d > dist.get(u, INF):
+            continue
+        for v, w in adj[u]:
+            nd = d + w
+            if nd < dist.get(v, INF):
+                dist[v] = nd
+                prev[v] = u
+                heapq.heappush(pq, (nd, next(counter), v))
+    if "GOAL" not in dist:
+        return None, INF
+    seq, node = [], "GOAL"
+    while node != "START":
+        if node != "GOAL":
+            seq.append(node)
+        node = prev[node]
+    seq.reverse()
+    return seq, dist["GOAL"]
+
+
+def _hpa_inchunk(layer, fr, fc, gr, gc):
+    """Least-time path + cost between two cells of a chunk's live cost layer (single mode)."""
+    _, path, cost = astar_multigoal(
+        layer["cost_mult"], layer["elevation"], layer["cell_size_m"], layer["cell_size_m"],
+        layer["max_grade"], layer["speed_function_id"], layer["base_speed_kmh"],
+        layer["trail_grid"], layer["trail_friction_lookup"], layer["barrier_grid"], 1,
+        int(fr), int(fc), np.array([gr], dtype=np.int64), np.array([gc], dtype=np.int64))
+    return path, cost
+
+
+def _hpa_emit(layer, path, mode, dem_reader, full_meta, out):
+    """Append a chunk-local cell path to `out` as (full_row, full_col, mode), via lat/lon
+    (chunk grid -> full-bbox grid) since the chunk fetch and full fetch have different pixel
+    origins. Consecutive duplicates (e.g. at seams) are dropped."""
+    for k in range(path.shape[0]):
+        lat, lon = dem_reader.pixel_to_latlon(int(path[k, 0]), int(path[k, 1]), layer["meta"])
+        r, c = dem_reader.latlon_to_pixel(lat, lon, full_meta)
+        node = (int(r), int(c), int(mode))
+        if not out or out[-1] != node:
+            out.append(node)
+
+
+def astar_hpa_multimode(tile_db_path, full_meta, start_lat, start_lon, end_lat, end_lon,
+                        origin_modes, goal_modes, boundary_mode, network_affinity,
+                        chunk_layer=None, dem_reader=None):
+    """Two-level HPA* (HPA-SPEC.md §8). Returns (idx, path_Nx3_int64, total_cost, reason)
+    matching astar_multigoal_multimode's render contract: idx==0 on success (reason None),
+    idx==-1 on fallback (reason in {boundary_mode, affinity, stale_profile, missing_chunk,
+    no_abstract_path, refine_failed}). chunk_layer(cx, cy, mode_idx)->layer dict (live,
+    native-30m, tile-grid-aligned) is supplied by the dispatcher for refinement."""
+    from . import hpa_build as hb
+    empty = np.empty((0, 3), dtype=np.int64)
+    south, north, west, east = full_meta["bounds"]
+    needed = hb.chunks_in_bbox(south, west, north, east)
+
+    conn = sqlite3.connect(f"file:{tile_db_path}?mode=ro", uri=True)
+    try:
+        reason = _hpa_coverage_reason(conn, needed, boundary_mode, network_affinity)
+        if reason is not None:
+            return -1, empty, INF, reason
+        relevant = sorted(set(int(x) for x in origin_modes) & set(int(x) for x in goal_modes))
+        if not relevant:
+            return -1, empty, INF, "no_abstract_path"
+
+        start_chunk = hb.chunk_coords(start_lat, start_lon)
+        goal_chunk = hb.chunk_coords(end_lat, end_lon)
+
+        # Same chunk: a direct in-chunk A* beats routing out to a border entrance and back.
+        if start_chunk == goal_chunk:
+            best = None
+            for m in relevant:
+                L = chunk_layer(start_chunk[0], start_chunk[1], m)
+                sr, sc = dem_reader.latlon_to_pixel(start_lat, start_lon, L["meta"])
+                gr, gc = dem_reader.latlon_to_pixel(end_lat, end_lon, L["meta"])
+                path, cost = _hpa_inchunk(L, sr, sc, gr, gc)
+                if np.isfinite(cost) and (best is None or cost < best[0]):
+                    best = (cost, L, path, m)
+            if best is None:
+                return -1, empty, INF, "no_abstract_path"
+            out = []
+            _hpa_emit(best[1], best[2], best[3], dem_reader, full_meta, out)
+            return (0, np.array(out, dtype=np.int64), best[0], None) if len(out) >= 2 \
+                else (-1, empty, INF, "refine_failed")
+
+        # Pseudo-edges: start cell -> each start-chunk entrance; each goal-chunk entrance -> end.
+        start_edges, goal_edges = {}, {}
+        for m in relevant:
+            Ls = chunk_layer(start_chunk[0], start_chunk[1], m)
+            sr, sc = dem_reader.latlon_to_pixel(start_lat, start_lon, Ls["meta"])
+            for ei, (er, ec) in enumerate(Ls["entrance_cells"]):
+                _, cost = _hpa_inchunk(Ls, sr, sc, er, ec)
+                if np.isfinite(cost):
+                    start_edges[(start_chunk[0], start_chunk[1], ei, m)] = cost
+            Lg = chunk_layer(goal_chunk[0], goal_chunk[1], m)
+            gr, gc = dem_reader.latlon_to_pixel(end_lat, end_lon, Lg["meta"])
+            for ei, (er, ec) in enumerate(Lg["entrance_cells"]):
+                _, cost = _hpa_inchunk(Lg, er, ec, gr, gc)
+                if np.isfinite(cost):
+                    goal_edges[(goal_chunk[0], goal_chunk[1], ei, m)] = cost
+
+        seq, cost = _hpa_abstract_search(conn, needed, relevant, start_edges, goal_edges)
+        if seq is None:
+            return -1, empty, INF, "no_abstract_path"
+    finally:
+        conn.close()
+
+    # Refinement: stitch the real cells for each hop. Single mode throughout (v1).
+    m = seq[0][3]
+    out = []
+    Ls = chunk_layer(start_chunk[0], start_chunk[1], m)
+    sr, sc = dem_reader.latlon_to_pixel(start_lat, start_lon, Ls["meta"])
+    fr, fc = Ls["entrance_cells"][seq[0][2]]
+    path, c = _hpa_inchunk(Ls, sr, sc, fr, fc)
+    if not np.isfinite(c):
+        return -1, np.empty((0, 3), dtype=np.int64), INF, "refine_failed"
+    _hpa_emit(Ls, path, m, dem_reader, full_meta, out)
+    for a, b in zip(seq, seq[1:]):
+        if a[0] == b[0] and a[1] == b[1]:          # intra-chunk hop -> refine
+            L = chunk_layer(a[0], a[1], a[3])
+            ar, ac = L["entrance_cells"][a[2]]
+            br, bc = L["entrance_cells"][b[2]]
+            path, c = _hpa_inchunk(L, ar, ac, br, bc)
+            if not np.isfinite(c):
+                return -1, np.empty((0, 3), dtype=np.int64), INF, "refine_failed"
+            _hpa_emit(L, path, m, dem_reader, full_meta, out)
+        # else: inter-chunk seam (same physical cell) -> no refinement
+    Lg = chunk_layer(goal_chunk[0], goal_chunk[1], m)
+    lr, lc = Lg["entrance_cells"][seq[-1][2]]
+    gr, gc = dem_reader.latlon_to_pixel(end_lat, end_lon, Lg["meta"])
+    path, c = _hpa_inchunk(Lg, lr, lc, gr, gc)
+    if not np.isfinite(c):
+        return -1, np.empty((0, 3), dtype=np.int64), INF, "refine_failed"
+    _hpa_emit(Lg, path, m, dem_reader, full_meta, out)
+    if len(out) < 2:
+        return -1, np.empty((0, 3), dtype=np.int64), INF, "refine_failed"
+    return 0, np.array(out, dtype=np.int64), cost, None

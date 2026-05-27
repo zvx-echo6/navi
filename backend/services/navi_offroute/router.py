@@ -33,7 +33,8 @@ import requests
 import psycopg2
 import psycopg2.extras
 from shapely.geometry import LineString, Point
-from .astar import astar_multigoal, astar_multigoal_multimode, inflate_cost_multiplier
+from .astar import (astar_multigoal, astar_multigoal_multimode, astar_hpa_multimode,
+                    inflate_cost_multiplier)
 from .mvum_surface_change import get_surface_change_candidates
 from .mvum_parking import load_parking_index  # noqa: F401 (singleton injected by handler)
 
@@ -59,6 +60,11 @@ POSTGIS_DSN = os.environ.get("NAVI_OFFROUTE_POSTGIS_DSN", "dbname=padus")
 
 # Valhalla endpoint (recon-side network router, HTTP)
 VALHALLA_URL = os.environ.get("NAVI_OFFROUTE_VALHALLA_URL", "http://localhost:8002")
+
+# HPA* cost-tile DB (HPA-SPEC.md §8/§9, Phase H3). Unset (None) -> HPA* never engages and
+# Auto routing is byte-identical to the unified-graph path. Set to a tile DB (built by
+# hpa_build) to enable the two-level fast path for covered, pragmatic, no-affinity routes.
+HPA_TILE_DB = os.environ.get("NAVI_OFFROUTE_HPA_DB")
 
 # Search radius for entry points (km)
 DEFAULT_SEARCH_RADIUS_KM = 50
@@ -887,6 +893,27 @@ class OffrouteRouter:
         origin_modes = np.array(sorted(MODE_INDEX[m] for m in start_eligible), dtype=np.int64)
         goal_modes = np.array(sorted(MODE_INDEX[m] for m in end_eligible), dtype=np.int64)
 
+        # HPA* fast path (Phase H3): when a tile DB is configured + covers the route, search
+        # the precomputed abstract chunk graph instead of flooding the full bbox. Whole-route
+        # fallback to the unified kernel below on any miss (HPA-SPEC.md §8/§9). When
+        # NAVI_OFFROUTE_HPA_DB is unset this block is skipped entirely (behaviour unchanged).
+        if self._hpa_eligible(boundary_mode, network_affinity):
+            _h0 = time.perf_counter()
+            _cache = {"raster": {}, "layer": {}}
+            hidx, hpath, hcost, hreason = astar_hpa_multimode(
+                HPA_TILE_DB, meta, start_lat, start_lon, end_lat, end_lon,
+                origin_modes, goal_modes, boundary_mode, network_affinity,
+                chunk_layer=lambda cx, cy, mi: self._hpa_chunk_layer(cx, cy, mi, _cache),
+                dem_reader=self.dem_reader)
+            if hidx >= 0 and hpath.shape[0] > 0:
+                logger.info("auto: HPA* (chunks=%d) in %.2fs",
+                            len(_cache["raster"]), time.perf_counter() - _h0)
+                return self._render_unified_path(hpath, hcost, meta, boundary_mode)
+            logger.info("auto: HPA fallback reason=%s -> unified A*", hreason)
+        elif HPA_TILE_DB and os.path.exists(HPA_TILE_DB):
+            _r = "boundary_mode" if boundary_mode != "pragmatic" else "affinity"
+            logger.info("auto: HPA fallback reason=%s -> unified A*", _r)
+
         # 7. Unpack transition cells into the kernel's flat 1D arrays.
         tc = layers["transition_cells"]
         nt = len(tc)
@@ -1058,6 +1085,68 @@ class OffrouteRouter:
             "selected_mode_set": selected_mode_set,
             "scenario": "unified",
         }
+
+    def _hpa_eligible(self, boundary_mode, network_affinity):
+        """HPA* engages only with a configured + existing tile DB, the default boundary mode,
+        and no network_affinity — the tiles are pure-terrain/pragmatic (HPA-SPEC.md §8), so
+        other configs would change the answer and must use the unified fallback."""
+        if not (HPA_TILE_DB and os.path.exists(HPA_TILE_DB)):
+            return False
+        if boundary_mode != "pragmatic":
+            return False
+        if network_affinity and any(float(v) != 1.0 for v in network_affinity.values()):
+            return False
+        return True
+
+    def _hpa_chunk_layer(self, cx, cy, mode_idx, cache):
+        """Live native-30m cost layer for one chunk (tile-grid-aligned), for HPA* refinement.
+        Pure terrain only (no MVUM/barriers/network_affinity/corridor-mask), matching the H2
+        tile build so entrance cells and costs line up. Rasters cached per chunk, layers per
+        (chunk, mode)."""
+        from . import hpa_build as hb
+        if (cx, cy) not in cache["raster"]:
+            s, w, n, e = hb.chunk_bounds(cx, cy)
+            elev, cmeta = self.dem_reader.get_elevation_grid(south=s, north=n, west=w, east=e)
+            shape = elev.shape
+            fraw = self.friction_reader.get_friction_grid(
+                south=s, north=n, west=w, east=e, target_shape=shape)
+            fmult = friction_to_multiplier(fraw)
+            trails = self.trail_reader.get_trails_grid(
+                south=s, north=n, west=w, east=e, target_shape=shape)
+            wild = None
+            if self.wilderness_reader is not None:
+                wild = self.wilderness_reader.get_wilderness_grid(
+                    south=s, north=n, west=w, east=e, target_shape=shape)
+            cache["raster"][(cx, cy)] = (
+                np.ascontiguousarray(elev, np.float64), fmult, fraw, trails, wild, cmeta)
+        elev, fmult, fraw, trails, wild, cmeta = cache["raster"][(cx, cy)]
+        key = (cx, cy, mode_idx)
+        if key not in cache["layer"]:
+            mode = MODE_ORDER[mode_idx]
+            prof = MODE_PROFILES[mode]
+            cs = float(cmeta["cell_size_m"])
+            cm = compute_cost_multiplier_grid(
+                elev, cell_size_lat_m=cs, cell_size_lon_m=cs,
+                friction=fmult, friction_raw=fraw, wilderness=wild, mode=mode)
+            cm = np.ascontiguousarray(inflate_cost_multiplier(cm), np.float64)
+            tfl = np.full(256, np.inf, np.float64)
+            for tv, fr in prof.trail_friction.items():
+                tfl[tv] = np.inf if fr is None else float(fr)
+            shape = elev.shape
+            cache["layer"][key] = {
+                "cost_mult": cm, "elevation": elev,
+                "trail_grid": np.ascontiguousarray(
+                    trails if trails is not None else np.zeros(shape, np.uint8), np.uint8),
+                "trail_friction_lookup": tfl,
+                "barrier_grid": np.zeros(shape, np.uint8),
+                "max_grade": float(np.tan(np.radians(prof.max_slope_deg))),
+                "speed_function_id": {"tobler": 0, "herzog": 1, "linear": 2}.get(prof.speed_function, 0),
+                "base_speed_kmh": float(prof.base_speed_kmh),
+                "cell_size_m": cs,
+                "entrance_cells": hb._entrance_cells(*shape),
+                "meta": cmeta,
+            }
+        return cache["layer"][key]
 
     def _route_D_network_only(
         self,
