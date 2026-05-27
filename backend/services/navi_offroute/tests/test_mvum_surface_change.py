@@ -1,9 +1,8 @@
 """MVUM Layer 3c tests: surface-change transition candidate extraction.
 
 The boundary tests feed synthetic trace_attributes ``edges`` straight into the pure
-``_edges_to_candidates`` (no Valhalla). The integration test stubs both candidate
-sources and self.route on a bare router to confirm surface-change candidates flow
-through _try_hybrid_auto alongside trailheads.
+``_edges_to_candidates`` (no Valhalla). (The _try_hybrid_auto integration test was
+removed in unified-graph Phase 5 with the hybrid path.)
 """
 import pytest
 
@@ -88,80 +87,3 @@ def test_encode_polyline6_roundtrips_with_router_decoder():
     decoded = r._decode_polyline(encode_polyline6(coords))   # [lon, lat]
     back = [(round(c[1], 5), round(c[0], 5)) for c in decoded]
     assert back == [(round(la, 5), round(lo, 5)) for la, lo in coords]
-
-
-# ── integration with _try_hybrid_auto ───────────────────────────────────────
-
-def _winning_single_mode(distance_km, minutes):
-    return {
-        "status": "ok",
-        "route": {"type": "FeatureCollection", "features": [
-            {"type": "Feature", "properties": {"segment_type": "combined"},
-             "geometry": {"type": "LineString",
-                          "coordinates": [[-114.0, 44.0], [-114.5, 44.0]]}},
-        ]},
-        "summary": {"total_distance_km": distance_km, "total_effort_minutes": minutes,
-                    "network_distance_km": distance_km, "network_duration_minutes": minutes,
-                    "wilderness_distance_km": 0.0, "wilderness_effort_minutes": 0.0,
-                    "scenario": "D"},
-        "selected_mode": "vehicle",
-    }
-
-
-def _ok_leg(distance_km, minutes):
-    return {
-        "status": "ok",
-        "route": {"type": "FeatureCollection", "features": [
-            {"type": "Feature",
-             "properties": {"segment_type": "network", "network_mode": "x"},
-             "geometry": {"type": "LineString",
-                          "coordinates": [[-114.0, 44.0], [-114.1, 44.0]]}},
-        ]},
-        "summary": {"total_distance_km": distance_km, "total_effort_minutes": minutes,
-                    "network_distance_km": distance_km, "network_duration_minutes": minutes,
-                    "wilderness_distance_km": 0.0, "wilderness_effort_minutes": 0.0,
-                    "scenario": "D"},
-    }
-
-
-class _FakeTrailheads:
-    def __init__(self, records):
-        self._records = records
-
-    def query_trailheads_near_line(self, coords, buffer_m=2000):
-        return list(self._records)
-
-
-def test_integration_with_hybrid(monkeypatch):
-    trailhead = {"lat": 44.0, "lon": -114.20, "name": "Iron Creek TH", "road_class": "track"}
-    surface = {"lat": 44.0, "lon": -114.30, "name": "Surface change: paved→track",
-               "road_class": "unclassified"}
-    # Surface-change source returns one candidate; trailheads return one.
-    monkeypatch.setattr(
-        "services.navi_offroute.router.get_surface_change_candidates",
-        lambda coords, url: [surface])
-
-    seen_dests = []
-
-    def fake_route(self, s_lat, s_lon, e_lat, e_lon, mode="foot",
-                   boundary_mode="pragmatic", annotate_mvum=True, **k):
-        seen_dests.append((round(e_lat, 4), round(e_lon, 4)))
-        if mode == "vehicle":
-            return _ok_leg(12.0, 20.0)
-        return _ok_leg(4.0, 30.0)
-    monkeypatch.setattr(OffrouteRouter, "route", fake_route)
-
-    r = object.__new__(OffrouteRouter)
-    r.spatial_index = None
-    r.trailhead_index = _FakeTrailheads([trailhead])
-
-    # 70-min single-mode vs ~50-min hybrid = ~20 min savings: qualifies (>15) but is
-    # below the early-abort margin (30), so BOTH candidate sources are probed.
-    best = _winning_single_mode(distance_km=30.0, minutes=70.0)
-    out = r._try_hybrid_auto(44.0, -114.0, 44.0, -114.5, "pragmatic",
-                             best, 70.0, frozenset({"vehicle", "4w", "2w", "foot"}))
-    assert out is not None
-    assert out["selected_mode"] == "hybrid"
-    # BOTH candidate types were probed as leg-1 destinations (drive-to-transition).
-    assert (round(trailhead["lat"], 4), round(trailhead["lon"], 4)) in seen_dests
-    assert (round(surface["lat"], 4), round(surface["lon"], 4)) in seen_dests
