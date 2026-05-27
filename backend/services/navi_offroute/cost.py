@@ -515,6 +515,35 @@ def compute_cost_grid(
 # UNIFIED COST LAYERS (unified-graph Auto, spec §3.2)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _corridor_mask(shape, meta, endpoint_line, pad_km, endpoint_pad_km):
+    """Boolean grid, True where a cell lies OUTSIDE the great-circle corridor: its
+    perpendicular distance to the start↔end line exceeds `pad_km`, or it falls more than
+    `endpoint_pad_km` past either endpoint along the line. Vectorised local-equirectangular
+    planar approximation (the corridor is one local region; sub-km error over ~200 km).
+
+    Phase 4.5 perf: a `dem_reader.get_elevation_grid` bbox is axis-aligned, so it cannot be
+    shrunk below the endpoint bounding box. Instead of shrinking the grid we mask it — cells
+    outside the corridor are made impassable so the A* kernel never floods the off-route
+    wilderness, which is where the long-route kernel time goes."""
+    (lat0, lon0), (lat1, lon1) = endpoint_line
+    rows, cols = shape
+    ky = 111.0
+    kx = 111.0 * math.cos(math.radians((lat0 + lat1) / 2.0))
+    lat = meta["origin_lat"] + np.arange(rows)[:, None] * meta["pixel_size_lat"]   # (rows,1)
+    lon = meta["origin_lon"] + np.arange(cols)[None, :] * meta["pixel_size_lon"]   # (1,cols)
+    y = (lat - lat0) * ky          # km north of start  (rows,1)
+    x = (lon - lon0) * kx          # km east  of start  (1,cols)
+    ex = (lon1 - lon0) * kx
+    ey = (lat1 - lat0) * ky
+    L = math.hypot(ex, ey)
+    if L < 1e-6:
+        return np.zeros(shape, dtype=bool)   # degenerate (start==end): no corridor
+    ux, uy = ex / L, ey / L
+    t = x * ux + y * uy            # along-line km   (rows,cols)
+    d = np.abs(x * uy - y * ux)    # perpendicular km (rows,cols)
+    return (d > pad_km) | (t < -endpoint_pad_km) | (t > L + endpoint_pad_km)
+
+
 def compute_unified_cost_layers(
     elevation: np.ndarray,
     friction: Optional[np.ndarray],
@@ -528,6 +557,8 @@ def compute_unified_cost_layers(
     valhalla_url=None,
     mvum_by_mode: Optional[Dict[str, np.ndarray]] = None,
     network_affinity: Optional[Dict[str, float]] = None,
+    corridor_pad_km: Optional[float] = None,
+    corridor_endpoint_pad_km: float = 0.0,
 ) -> dict:
     """Per-mode inflated cost layers + mode-transition cells for one Auto search
     (spec §3.2 / §4 / §5 / §8). Returns {"cost_mult": {mode: ndarray}, "transition_cells":
@@ -537,25 +568,30 @@ def compute_unified_cost_layers(
     Rasters are INJECTED, not fetched: the raster IO lives on the router's reader objects
     (router.py::_pathfind_wilderness) and is not duplicated — Phase 4 passes the rasters +
     DEMReader `meta` straight in; tests pass synthetic arrays. Each mode's multiplier comes
-    from compute_cost_multiplier_grid(...), then (still pre-inflation) network_affinity (§8)
-    and MVUM closures (§9) are applied, then inflate_cost_multiplier(...).
+    from compute_cost_multiplier_grid(...), then (still pre-inflation) MVUM closures (§9) and
+    (post-inflation) network_affinity (§8) are applied, then inflate_cost_multiplier(...).
+    The four per-mode layers are built CONCURRENTLY (Phase 4.5 perf): numpy/scipy release the
+    GIL on the heavy compute, and the layers are independent. Assembly is deterministic
+    (ordered by `modes`, not completion order).
 
     mvum_by_mode: optional {mode: uint8[rows,cols]} (1=open, 255=closed, 0=unknown). For
     each MOTORIZED mode, closed cells become impassable under `strict`, ×PRAGMATIC under
     `pragmatic`, ignored under `emergency`; foot skips MVUM entirely. network_affinity:
     optional {mode: float} multiplying that mode's on-network cells (trails != 0); default
-    1.0 is a no-op. boundary_mode also governs barrier rules, which stay PER-EDGE in the
-    kernel — threaded into the returned meta for Phase 4 (mvum_by_mode=network_affinity=None
-    reproduces the Phase-3 layers exactly, keeping the parity test green).
+    1.0 is a no-op. corridor_pad_km: when set (with endpoint_line), cells > pad_km from the
+    great-circle line are made impassable in every layer (Phase 4.5 kernel speedup, §A).
+    mvum_by_mode=network_affinity=corridor_pad_km=None reproduces the Phase-3 layers exactly,
+    keeping the parity test green.
     """
     from .astar import inflate_cost_multiplier
     from .transitions import gather_transition_cells
+    from concurrent.futures import ThreadPoolExecutor
 
     cell_size_m = float(meta["cell_size_m"])
     network_affinity = network_affinity or {}
     on_network = (trails != 0) if trails is not None else None
-    cost_mult = {}
-    for mode in modes:
+
+    def _build_mode_layer(mode):
         m = compute_cost_multiplier_grid(
             elevation,
             cell_size_lat_m=cell_size_m,
@@ -584,7 +620,24 @@ def compute_unified_cost_layers(
         aff = float(network_affinity.get(mode, 1.0))
         if aff != 1.0 and on_network is not None:
             inflated[on_network & np.isfinite(inflated)] *= aff
-        cost_mult[mode] = inflated
+        return mode, inflated
+
+    # Build all modes concurrently; assemble deterministically in `modes` order.
+    with ThreadPoolExecutor(max_workers=max(1, len(modes))) as ex:
+        built = dict(ex.map(_build_mode_layer, modes))
+    cost_mult = {mode: built[mode] for mode in modes}
+
+    # Corridor mask (Phase 4.5, §A): cells outside the great-circle corridor are made
+    # impassable so the A* kernel never floods the off-route wilderness. Applied AFTER
+    # inflation so the wall is crisp (no blur bleed inward). Off-trail only -- the kernel
+    # costs on-trail edges from trail_friction, not cost_mult, so a road that bulges past
+    # the band stays usable. A routable off-trail detour wider than corridor_pad_km is cut;
+    # widen the pad knob (router.CORRIDOR_PAD_KM) if that ever bites.
+    if endpoint_line is not None and corridor_pad_km is not None:
+        mask = _corridor_mask(elevation.shape, meta, endpoint_line,
+                              corridor_pad_km, corridor_endpoint_pad_km)
+        for mode in modes:
+            cost_mult[mode][mask] = np.inf
 
     transition_cells = gather_transition_cells(
         meta,
