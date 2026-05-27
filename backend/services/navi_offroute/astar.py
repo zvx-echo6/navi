@@ -375,14 +375,38 @@ def astar_multigoal_multimode(
     for gi in range(goal_modes.shape[0]):
         goal_mode_ok[goal_modes[gi]] = True
 
-    # §10: divide straight-line distance by the FASTEST base speed over goal modes
-    # -> smallest possible finishing time -> admissible lower bound. Independent of
-    # the state's current mode (a slow-mode state may switch to a fast mode later).
+    # §10: divide straight-line distance by the FASTEST EFFECTIVE speed over goal modes
+    # -> smallest possible finishing time -> admissible lower bound. Independent of the
+    # state's current mode (a slow-mode state may switch to a fast mode later).
     max_goal_speed = 0.0
     for gi in range(goal_modes.shape[0]):
         s = base_speed_kmh_arr[goal_modes[gi]]
         if s > max_goal_speed:
             max_goal_speed = s
+    # An edge's time is base_time * factor, where the factor is the trail friction (on a
+    # trail) or the avg context multiplier (off-trail); effective speed = base / factor. So
+    # distance/base_speed alone OVERESTIMATES remaining cost wherever some factor < 1.0 (a
+    # road's 0.1 friction is ~10x faster) -> inadmissible. Bound instead by base speed /
+    # the SMALLEST factor reachable by any goal mode, over BOTH trail friction and the
+    # context multiplier (network_affinity can scale trail friction above the off-trail
+    # multiplier, so trail friction alone is not always the fastest surface).
+    min_factor = INF
+    for gi in range(goal_modes.shape[0]):
+        gm = goal_modes[gi]
+        for v in range(256):
+            f = trail_friction_stack[gm, v]
+            if f < min_factor:
+                min_factor = f
+        for rr in range(rows):
+            for cc in range(cols):
+                cmv = cost_mult_stack[rr, cc, gm]
+                if cmv < min_factor:
+                    min_factor = cmv
+    if not (min_factor < INF):
+        min_factor = 1.0
+    if min_factor < 1e-6:
+        min_factor = 1e-6
+    max_effective_speed = max_goal_speed / min_factor
 
     g_score = np.full((rows, cols, n_modes), INF, dtype=np.float64)
     parent = np.full((rows, cols, n_modes), -1, dtype=np.int64)  # parent's packed heap id
@@ -435,7 +459,7 @@ def astar_multigoal_multimode(
             d = math.sqrt(dr * dr + dc * dc)
             if d < best:
                 best = d
-        return best * 3.6 / max_goal_speed  # metres -> seconds at fastest goal speed
+        return best * 3.6 / max_effective_speed  # metres -> s at fastest effective speed (§10)
 
     # Seed every allowed origin mode at the origin cell.
     for oi in range(origin_modes.shape[0]):

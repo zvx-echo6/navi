@@ -312,6 +312,7 @@ def _typed_all(monkeypatch):
                         lambda self, cat: ALL_MODES)
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_picks_capability_mode(monkeypatch):
     # Classify-once: typed road endpoints -> intersection = all modes -> the first
     # AUTO_MODE_PRIORITY mode (vehicle) is picked and routed ONCE (no 4-mode contest).
@@ -326,6 +327,7 @@ def test_route_auto_picks_capability_mode(monkeypatch):
     assert calls == ["vehicle"]   # ONE route call, not four
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_falls_back_to_foot_on_error(monkeypatch):
     # Foot-as-last-resort: the capability-picked mode (vehicle) fails, so Auto retries
     # foot ONCE and ships it, tagging auto_fallback_from for the UI.
@@ -343,6 +345,7 @@ def test_route_auto_falls_back_to_foot_on_error(monkeypatch):
     assert calls == ["vehicle", "foot"]
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_returns_error_when_picked_and_foot_both_fail(monkeypatch):
     # Picked mode AND the foot fallback both fail -> original error surfaces, exactly
     # two attempts (picked, then foot).
@@ -358,6 +361,7 @@ def test_route_auto_returns_error_when_picked_and_foot_both_fail(monkeypatch):
     assert calls == ["vehicle", "foot"]
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_no_fallback_when_picked_is_foot(monkeypatch):
     # When the picked mode is already foot (foot-only intersection), there is no second
     # attempt -- foot cannot fall back to itself.
@@ -372,6 +376,7 @@ def test_route_auto_no_fallback_when_picked_is_foot(monkeypatch):
     assert calls == ["foot"]   # no fallback attempt
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_tagged_road_to_road_no_spatial_probe(monkeypatch):
     # Tagged road endpoints -> pure category classification, the spatial probe must
     # NOT fire, and exactly one route call (mode=vehicle) is made.
@@ -388,6 +393,7 @@ def test_route_auto_tagged_road_to_road_no_spatial_probe(monkeypatch):
     assert spatial_calls == []   # no spatial probe for tagged endpoints
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_untagged_spatial_called_once_per_endpoint(monkeypatch):
     # One untagged endpoint -> _spatial_eligible_modes fires exactly once (for that
     # endpoint only); the tagged endpoint stays a dict lookup.
@@ -405,6 +411,7 @@ def test_route_auto_untagged_spatial_called_once_per_endpoint(monkeypatch):
 
 # ── _route_auto with category type hints (real _eligible_modes_from_category) ──
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_address_to_address_picks_vehicle(monkeypatch):
     calls = []
     monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
@@ -415,6 +422,7 @@ def test_route_auto_address_to_address_picks_vehicle(monkeypatch):
     assert calls == ["vehicle"]
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_address_to_trailhead_picks_atv(monkeypatch):
     calls = []
     monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
@@ -426,6 +434,7 @@ def test_route_auto_address_to_trailhead_picks_atv(monkeypatch):
     assert out["selected_mode_set"] == sorted({"4w", "2w", "foot"})
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_address_to_peak_picks_foot(monkeypatch):
     calls = []
     monkeypatch.setattr(OffrouteRouter, "route", _stub_route(_all_ok(), calls))
@@ -437,6 +446,7 @@ def test_route_auto_address_to_peak_picks_foot(monkeypatch):
     assert out["selected_mode_set"] == ["foot"]
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_both_unknown_uses_spatial_fallback(monkeypatch):
     calls = []
     spatial_calls = []
@@ -861,6 +871,7 @@ def test_pathfind_wilderness_bbox_pad_is_1_5km(monkeypatch):
 
 # ── Auto classify-once priority pick (replaces the old min-time contest) ──
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_picks_priority_not_min_time(monkeypatch):
     # Classify-once picks the first AUTO_MODE_PRIORITY mode in the intersection
     # (vehicle) and routes ONCE -- it no longer probes all modes to find a faster one.
@@ -882,6 +893,7 @@ def test_route_auto_picks_priority_not_min_time(monkeypatch):
     assert calls == ["vehicle"]                               # routed once, no contest
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_per_leg_breakdown():
     # Scenario A (_build_response): foot wilderness leg + network leg -> both > 0.
     r = object.__new__(OffrouteRouter)
@@ -900,6 +912,7 @@ def test_route_auto_per_leg_breakdown():
     assert abs((summ["wilderness_minutes"] + summ["network_minutes"]) - summ["total_effort_minutes"]) < 1e-6
 
 
+@pytest.mark.skip(reason="superseded by unified-graph Phase 4")
 def test_route_auto_annotates_picked_mode_once(monkeypatch):
     # Classify-once routes the picked mode with annotate_mvum=False, then
     # _annotate_network_segments runs exactly once, on that picked mode (vehicle).
@@ -1302,3 +1315,222 @@ def test_compute_unified_cost_layers_perf():
     elapsed = _time.perf_counter() - t0
     assert set(layers["cost_mult"]) == {"foot", "2w", "4w", "vehicle"}
     assert elapsed <= 1.0, f"unified cost layers build took {elapsed:.3f}s > 1.0s"
+
+
+# ── PHASE 4 — unified-graph _route_auto integration ───────────────────────────
+# Hermetic: stub reader objects feed synthetic rasters, the REAL multimode kernel runs,
+# transition DBs + MVUM + Valhalla are monkeypatched to deterministic empties.
+import numpy as _p4np
+import services.navi_offroute.router as _p4router
+import services.navi_offroute.transitions as _p4trans
+from services.navi_offroute.router import OffrouteRouter as _P4Router, MODE_ORDER as _MO
+from services.navi_offroute.transitions import (_latlon_to_pixel as _ll2px,
+                                                _pixel_to_latlon as _px2ll)
+from services.navi_offroute.astar import astar_multigoal_multimode as _mm4
+from services.navi_offroute.cost import MODE_PROFILES as _MP4
+
+
+def _p4_meta(rows, cols, cell_m=100.0):
+    dlat = cell_m / 111000.0
+    dlon = cell_m / (111000.0 * _math.cos(_math.radians(40.0)))
+    return {"bounds": (40.0, 40.0 + rows * dlat, -111.0, -111.0 + cols * dlon),
+            "pixel_size_lat": -dlat, "pixel_size_lon": dlon,
+            "origin_lat": 40.0 + rows * dlat, "origin_lon": -111.0,
+            "cell_size_m": cell_m, "shape": (rows, cols)}
+
+
+class _Grid:
+    def __init__(self, arr): self._arr = arr
+    def get_friction_grid(self, **kw): return self._arr
+    def get_barrier_grid(self, **kw): return self._arr
+    def get_trails_grid(self, **kw): return self._arr
+    def get_wilderness_grid(self, **kw): return self._arr
+    def close(self): pass
+
+
+class _StubDem:
+    def __init__(self, elevation, meta): self._e, self._m = elevation, meta
+    def get_elevation_grid(self, **kw): return self._e, self._m
+    def latlon_to_pixel(self, lat, lon, meta): return _ll2px(lat, lon, meta)
+    def pixel_to_latlon(self, row, col, meta): return _px2ll(row, col, meta)
+    def close(self): pass
+
+
+class _StubIdx:
+    def __init__(self, recs): self._r = recs or []
+    def query_parking_near_line(self, coords, buffer_m=2000): return self._r
+    def query_trailheads_near_line(self, coords, buffer_m=2000): return self._r
+
+
+def _auto_router(monkeypatch, elevation, friction_raw, trails, barriers, meta, eligible):
+    """An OffrouteRouter wired with synthetic rasters + deterministic-empty DBs/MVUM.
+    `eligible(lat, lon) -> frozenset` supplies the per-endpoint seed modes (spatial probe)."""
+    r = _P4Router()
+    r.dem_reader = _StubDem(elevation.astype(_p4np.float64), meta)
+    r.friction_reader = _Grid(friction_raw)
+    r.barrier_reader = _Grid(barriers)
+    r.trail_reader = _Grid(trails)
+    r.wilderness_reader = _Grid(_p4np.zeros_like(barriers))
+    monkeypatch.setattr(_p4router, "get_mvum_access_grid",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no mvum db")))
+    monkeypatch.setattr(_p4trans, "load_parking_index", lambda *a, **k: _StubIdx([]))
+    monkeypatch.setattr(_p4trans, "load_trailheads", lambda *a, **k: _StubIdx([]))
+    monkeypatch.setattr(_p4trans, "get_surface_change_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(_P4Router, "_spatial_eligible_modes",
+                        lambda self, lat, lon, cache: eligible(lat, lon))
+    return r
+
+
+def _unified_segments(result):
+    return [f for f in result["route"]["features"]
+            if (f["properties"] or {}).get("segment_type") == "unified"]
+
+
+def _transition_feats(result):
+    return [f for f in result["route"]["features"]
+            if (f["properties"] or {}).get("segment_type") == "transition"]
+
+
+def test_route_auto_wilderness_to_home_walk_then_drive(monkeypatch):
+    # §1 failure case: wilderness start (foot-only) -> long road to an addressed end.
+    rows, cols = 3, 40
+    elevation = _p4np.full((rows, cols), 1000.0)
+    friction_raw = _p4np.full((rows, cols), 10, dtype=_p4np.uint8)   # forest: foot ok, vehicle inf
+    trails = _p4np.zeros((rows, cols), dtype=_p4np.uint8)
+    trails[1, 8:40] = 5                                              # road from col 8 -> terminus at 8
+    barriers = _p4np.zeros((rows, cols), dtype=_p4np.uint8)
+    meta = _p4_meta(rows, cols)
+    s_lat, s_lon = _px2ll(1, 0, meta)        # wilderness start
+    e_lat, e_lon = _px2ll(1, 39, meta)       # on-road end
+    elig = lambda lat, lon: (frozenset({"foot"}) if abs(lon - s_lon) < 1e-9
+                             else frozenset({"foot", "2w", "4w", "vehicle"}))
+    r = _auto_router(monkeypatch, elevation, friction_raw, trails, barriers, meta, elig)
+
+    out = r._route_auto(s_lat, s_lon, e_lat, e_lon, "pragmatic")
+    assert out["status"] == "ok", out
+    assert "foot" in out["selected_mode_set"] and "vehicle" in out["selected_mode_set"]
+    segs = _unified_segments(out)
+    assert segs[0]["properties"]["network_mode"] == "foot"
+    assert segs[-1]["properties"]["network_mode"] == "vehicle"
+    trans = _transition_feats(out)
+    assert len(trans) == 1
+    assert _ll2px(trans[0]["properties"]["lat"], trans[0]["properties"]["lon"], meta) == (1, 8)
+
+
+def test_route_auto_foot_to_offpath(monkeypatch):
+    rows, cols = 3, 12
+    elevation = _p4np.full((rows, cols), 1000.0)
+    friction_raw = _p4np.full((rows, cols), 30, dtype=_p4np.uint8)   # grass, foot passable
+    trails = _p4np.zeros((rows, cols), dtype=_p4np.uint8)            # no network at all
+    barriers = _p4np.zeros((rows, cols), dtype=_p4np.uint8)
+    meta = _p4_meta(rows, cols)
+    s_lat, s_lon = _px2ll(1, 0, meta)
+    e_lat, e_lon = _px2ll(1, 11, meta)
+    elig = lambda lat, lon: frozenset({"foot"})
+    r = _auto_router(monkeypatch, elevation, friction_raw, trails, barriers, meta, elig)
+
+    out = r._route_auto(s_lat, s_lon, e_lat, e_lon, "pragmatic")
+    assert out["status"] == "ok", out
+    assert out["selected_mode_set"] == ["foot"]
+    assert _transition_feats(out) == []
+    assert all(s["properties"]["network_mode"] == "foot" for s in _unified_segments(out))
+
+
+def test_route_auto_road_to_road(monkeypatch):
+    rows, cols = 3, 20
+    elevation = _p4np.full((rows, cols), 1000.0)
+    friction_raw = _p4np.full((rows, cols), 10, dtype=_p4np.uint8)   # off-road forest (vehicle inf)
+    trails = _p4np.zeros((rows, cols), dtype=_p4np.uint8)
+    trails[1, :] = 5                                                 # road spans the grid
+    barriers = _p4np.zeros((rows, cols), dtype=_p4np.uint8)
+    meta = _p4_meta(rows, cols)
+    s_lat, s_lon = _px2ll(1, 0, meta)
+    e_lat, e_lon = _px2ll(1, 19, meta)
+    elig = lambda lat, lon: frozenset({"foot", "2w", "4w", "vehicle"})
+    r = _auto_router(monkeypatch, elevation, friction_raw, trails, barriers, meta, elig)
+
+    out = r._route_auto(s_lat, s_lon, e_lat, e_lon, "pragmatic")
+    assert out["status"] == "ok", out
+    assert "vehicle" in out["selected_mode_set"]
+    # No off-network excursion: every combined-path cell sits on the road (trail != 0).
+    combined = [f for f in out["route"]["features"]
+                if f["properties"].get("segment_type") == "combined"][0]
+    for lon, lat in combined["geometry"]["coordinates"]:
+        rr, cc = _ll2px(lat, lon, meta)
+        assert trails[rr, cc] != 0
+
+
+def test_route_auto_heuristic_admissibility_road_case():
+    # §10 fix: with a fast road (friction 0.1) the A* heuristic must stay admissible, so
+    # the heuristic-guided cost equals the disable_heuristic=True (Dijkstra) cost.
+    rows, cols, nm = 3, 20, 4
+    elevation = _p4np.full((rows, cols), 1000.0)
+    trail = _p4np.zeros((rows, cols), dtype=_p4np.uint8); trail[1, :] = 5
+    stack = _p4np.full((rows, cols, nm), _p4np.inf)
+    stack[:, :, 0] = 1.0                                            # foot passable off-trail
+    tfs = _p4np.full((nm, 256), _p4np.inf)
+    tfs[0, 5] = 0.1; tfs[3, 5] = 0.1                                # foot + vehicle on road
+    mg = _p4np.array([_p4np.tan(_p4np.radians(_MP4[m].max_slope_deg)) for m in _MO])
+    sfid = _p4np.array([{"tobler": 0, "herzog": 1, "linear": 2}[_MP4[m].speed_function]
+                        for m in _MO], dtype=_p4np.int64)
+    base = _p4np.array([_MP4[m].base_speed_kmh for m in _MO])
+    barr = _p4np.zeros((rows, cols), dtype=_p4np.uint8)
+    empty_i = _p4np.empty(0, dtype=_p4np.int64); empty_f = _p4np.empty(0, dtype=_p4np.float64)
+    seed = _p4np.array([3], dtype=_p4np.int64)                     # vehicle origin + goal
+    gr = _p4np.array([1], dtype=_p4np.int64); gc = _p4np.array([19], dtype=_p4np.int64)
+    args = (stack, elevation, 100.0, 100.0, mg, sfid, base, trail, tfs, barr, 1,
+            1, 0, seed, gr, gc, seed, empty_i, empty_i, empty_i, empty_i, empty_f)
+    _, _, cost_h = _mm4(*args)
+    _, _, cost_dijkstra = _mm4(*args, disable_heuristic=True)
+    assert _p4np.isfinite(cost_h) and _p4np.isfinite(cost_dijkstra)
+    assert cost_h <= cost_dijkstra + 1e-6
+
+
+def test_route_auto_no_auto_fallback_from_field(monkeypatch):
+    rows, cols = 3, 10
+    elevation = _p4np.full((rows, cols), 1000.0)
+    friction_raw = _p4np.full((rows, cols), 30, dtype=_p4np.uint8)
+    trails = _p4np.zeros((rows, cols), dtype=_p4np.uint8)
+    barriers = _p4np.zeros((rows, cols), dtype=_p4np.uint8)
+    meta = _p4_meta(rows, cols)
+    s_lat, s_lon = _px2ll(1, 0, meta); e_lat, e_lon = _px2ll(1, 9, meta)
+    r = _auto_router(monkeypatch, elevation, friction_raw, trails, barriers, meta,
+                     lambda lat, lon: frozenset({"foot"}))
+    out = r._route_auto(s_lat, s_lon, e_lat, e_lon, "pragmatic")
+    assert out["status"] == "ok"
+    assert "auto_fallback_from" not in out
+    assert "auto_fallback_from" not in (out.get("summary") or {})
+
+
+def _on_network_count(result, trails, meta):
+    combined = [f for f in result["route"]["features"]
+                if f["properties"].get("segment_type") == "combined"][0]
+    n = 0
+    for lon, lat in combined["geometry"]["coordinates"]:
+        rr, cc = _ll2px(lat, lon, meta)
+        if trails[rr, cc] != 0:
+            n += 1
+    return n
+
+
+def test_route_auto_network_affinity_biases_path(monkeypatch):
+    # Road (row 0, fast) vs flat grass field (drivable, slower). network_affinity > 1
+    # penalises on-network edges; pushing it high across the modes biases the path off the
+    # network. (foot is always an eligible seed, so a single-mode affinity is escaped by a
+    # mode switch -- the bias must cover the modes that can ride the road.)
+    rows, cols = 4, 14
+    elevation = _p4np.full((rows, cols), 1000.0)
+    friction_raw = _p4np.full((rows, cols), 30, dtype=_p4np.uint8)   # flat grass: off-road drivable
+    trails = _p4np.zeros((rows, cols), dtype=_p4np.uint8); trails[0, :] = 5
+    barriers = _p4np.zeros((rows, cols), dtype=_p4np.uint8)
+    meta = _p4_meta(rows, cols)
+    s_lat, s_lon = _px2ll(0, 0, meta); e_lat, e_lon = _px2ll(0, 13, meta)
+    elig = lambda lat, lon: frozenset({"foot", "2w", "4w", "vehicle"})
+    affinity = {m: 80.0 for m in ("foot", "2w", "4w", "vehicle")}
+
+    r1 = _auto_router(monkeypatch, elevation, friction_raw, trails, barriers, meta, elig)
+    base = r1._route_auto(s_lat, s_lon, e_lat, e_lon, "pragmatic")
+    r2 = _auto_router(monkeypatch, elevation, friction_raw, trails, barriers, meta, elig)
+    biased = r2._route_auto(s_lat, s_lon, e_lat, e_lon, "pragmatic", network_affinity=affinity)
+    assert base["status"] == "ok" and biased["status"] == "ok"
+    assert _on_network_count(biased, trails, meta) < _on_network_count(base, trails, meta)
