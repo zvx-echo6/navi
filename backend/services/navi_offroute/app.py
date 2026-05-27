@@ -3,6 +3,7 @@
 Gunicorn entry:
     gunicorn 'services.navi_offroute.app:create_app()' --bind 127.0.0.1:8428 --workers 2
 """
+import logging
 import time
 
 from flask import Flask
@@ -13,6 +14,11 @@ from . import offroute_route, admin
 from .mvum import MVUMSpatialIndex
 from .mvum_transitions import load_trailheads
 from .mvum_parking import load_parking_index
+
+# Emit INFO+ so PR #34 per-stage Auto timing logs (single-mode probing took...,
+# hybrid candidate gathering..., hybrid probing took...) reach stderr/journal;
+# navi-offroute had no logging config, so the last-resort handler dropped INFO.
+logging.basicConfig(level=logging.INFO)
 
 # Process-wide singleton: build the MVUM spatial index once per process (per gunicorn
 # worker in prod; once across create_app() calls in tests), not once per app instance.
