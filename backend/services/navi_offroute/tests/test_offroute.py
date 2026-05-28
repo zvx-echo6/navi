@@ -1405,15 +1405,32 @@ def test_route_auto_untagged_tight_snap_fires_bypass(monkeypatch):
     assert out["summary"]["auto_bypass"] is True
 
 
-def test_route_auto_untagged_relaxed_snap_skips_bypass(monkeypatch):
+def test_route_auto_untagged_relaxed_snap_fires_bypass(monkeypatch):
+    # PR #48: a relaxed (50m) snap that still grants "vehicle" (paved + flat-terrain grace in
+    # _spatial_eligible_modes) now fires the bypass -- we trust _auto_eligible_modes's judgment.
     r = object.__new__(OffrouteRouter)
     monkeypatch.setattr(OffrouteRouter, "_spatial_eligible_modes", _spatial_relaxed_paved)
+    monkeypatch.setattr(OffrouteRouter, "_fetch_auto_rasters", _bp_fetch_should_not_run)
+    monkeypatch.setattr(_p4router.requests, "post", lambda *a, **k: _BypassOKResp())
+    out = r._route_auto(42.5558, -114.4701, 42.5644, -114.4631, "pragmatic")  # no categories
+    assert out["status"] == "ok"
+    assert out["selected_mode"] == "vehicle"
+    assert out["summary"]["auto_bypass"] is True
+
+
+def test_route_auto_untagged_no_vehicle_in_eligibility_skips_bypass(monkeypatch):
+    # Safety gate (preserved from PR #47 test 6): when _spatial_eligible_modes withholds
+    # "vehicle" -- e.g. _is_terrain_flat rejected a non-flat wilderness click near a road --
+    # the bypass declines and the unified flow runs (preserving any walk-then-drive plan).
+    r = object.__new__(OffrouteRouter)
+    monkeypatch.setattr(OffrouteRouter, "_spatial_eligible_modes",
+                        lambda self, lat, lon, cache: frozenset({"foot"}))
     monkeypatch.setattr(OffrouteRouter, "_route_D_network_only",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("D must not run")))
     monkeypatch.setattr(OffrouteRouter, "_fetch_auto_rasters", _bp_fetch_sentinel)
     out = r._route_auto(42.5558, -114.4701, 42.5644, -114.4631, "pragmatic")  # no categories
     assert out["status"] == "error"
-    assert "Failed to load terrain" in out["message"]   # relaxed snap rejected -> unified flow
+    assert "Failed to load terrain" in out["message"]   # no vehicle -> unified flow
 
 
 def test_route_auto_e2e_http_in_town_fires_bypass(client, monkeypatch):
