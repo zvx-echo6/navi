@@ -838,6 +838,30 @@ class OffrouteRouter:
         end_eligible = self._auto_eligible_modes(end_lat, end_lon, end_category, snap_cache)
         seed_set = sorted(start_eligible | end_eligible)
 
+        # === Valhalla bypass: pure road↔road skips the raster pipeline entirely ===
+        # When BOTH endpoints are tagged with a vehicle-eligible category (only _MODES_ALL
+        # contains "vehicle"), the trip is on-road end-to-end -> hand it straight to the same
+        # inline-Valhalla path explicit vehicle requests use, saving the ~7.5s raster build +
+        # unified A*. Untagged endpoints (category -> None) and any non-paved category fall
+        # through to the unified flow. Boundary-mode MVUM exclusions are not applied here (urban
+        # roads aren't MVUM-gated); this matches a pragmatic in-town vehicle route.
+        bp_start = self._eligible_modes_from_category(start_category)
+        bp_end = self._eligible_modes_from_category(end_category)
+        if (bp_start is not None and bp_end is not None
+                and "vehicle" in bp_start and "vehicle" in bp_end):
+            _bt0 = time.perf_counter()
+            bypass = self._route_D_network_only(start_lat, start_lon, end_lat, end_lon, "vehicle")
+            if bypass.get("status") == "ok":
+                bypass["selected_mode"] = "vehicle"
+                bypass["selected_mode_set"] = ["vehicle"]
+                bypass.setdefault("summary", {})["auto_bypass"] = True
+                logger.info("auto bypass: vehicle road↔road via Valhalla in %.3fs",
+                            time.perf_counter() - _bt0)
+                return bypass
+            logger.warning("auto bypass attempted but Valhalla returned %s; falling through to unified",
+                           bypass.get("status"))
+        # === end bypass ===
+
         # 2-3. bbox covering both endpoints + the shared rasters (one fetch, all modes).
         try:
             (elevation, friction_mult, friction_raw, trails, barriers,
