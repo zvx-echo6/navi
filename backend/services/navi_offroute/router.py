@@ -754,6 +754,26 @@ class OffrouteRouter:
             return CATEGORY_ELIGIBLE_MODES.get(f"{key}:*")
         return None
 
+    def _bypass_eligible(self, lat: float, lon: float,
+                         category: Optional[str], snap_cache: dict) -> bool:
+        """True when this endpoint is clearly ON a paved road. Gates the Valhalla bypass
+        in _route_auto. Two safe paths:
+          1. positive OSM category hint (CATEGORY_ELIGIBLE_MODES grants "vehicle"), OR
+          2. cached auto-snap is tight (<= AUTO_SNAP_TIGHT_M) AND the snapped road is a
+             paved highway class.
+        Deliberately EXCLUDES the relaxed-snap-with-flat case (d_auto <= 100m + flat
+        terrain), which can grant 'vehicle' eligibility up to 100m off a road — bypassing
+        there would silently re-snap a wilderness/park-lot click to the road and lose any
+        walk-then-drive leg the unified flow would have produced."""
+        typed = self._eligible_modes_from_category(category)
+        if typed is not None:
+            return "vehicle" in typed
+        snap = snap_cache.get((lat, lon, "auto"))
+        if snap is None:
+            return False  # tagged-endpoint short-circuit didn't pre-populate; safe default
+        return (snap["snap_distance_m"] <= AUTO_SNAP_TIGHT_M
+                and snap.get("road_class") in PAVED_HIGHWAY_CLASSES)
+
     def _is_terrain_flat(self, lat: float, lon: float) -> bool:
         """True if the DEM is flat (max-min < FLAT_TERRAIN_DELTA_M) across the center
         and four cardinal points FLAT_SAMPLE_RADIUS_M away. Conservative: any DEM read
@@ -839,16 +859,15 @@ class OffrouteRouter:
         seed_set = sorted(start_eligible | end_eligible)
 
         # === Valhalla bypass: pure road↔road skips the raster pipeline entirely ===
-        # When BOTH endpoints are tagged with a vehicle-eligible category (only _MODES_ALL
-        # contains "vehicle"), the trip is on-road end-to-end -> hand it straight to the same
-        # inline-Valhalla path explicit vehicle requests use, saving the ~7.5s raster build +
-        # unified A*. Untagged endpoints (category -> None) and any non-paved category fall
-        # through to the unified flow. Boundary-mode MVUM exclusions are not applied here (urban
-        # roads aren't MVUM-gated); this matches a pragmatic in-town vehicle route.
-        bp_start = self._eligible_modes_from_category(start_category)
-        bp_end = self._eligible_modes_from_category(end_category)
-        if (bp_start is not None and bp_end is not None
-                and "vehicle" in bp_start and "vehicle" in bp_end):
+        # When BOTH endpoints are clearly ON a paved road -- by vehicle-eligible category hint
+        # OR a tight (<=5m) auto-snap to a paved highway (_bypass_eligible) -- the trip is
+        # on-road end-to-end, so hand it to the same inline-Valhalla path explicit vehicle
+        # requests use, saving the ~7.5s raster build + unified A*. Untagged raw-coordinate
+        # clicks now qualify via the tight-snap path; the relaxed (<=100m) snap is excluded so
+        # an off-road click isn't silently re-snapped to the road. Boundary-mode MVUM
+        # exclusions aren't applied here (urban roads aren't MVUM-gated).
+        if (self._bypass_eligible(start_lat, start_lon, start_category, snap_cache)
+                and self._bypass_eligible(end_lat, end_lon, end_category, snap_cache)):
             _bt0 = time.perf_counter()
             bypass = self._route_D_network_only(start_lat, start_lon, end_lat, end_lon, "vehicle")
             if bypass.get("status") == "ok":
