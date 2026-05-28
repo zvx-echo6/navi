@@ -77,24 +77,41 @@ def _cross_track_distance_m(lat, lon, line):
 def _cap_candidates(raw, line):
     """§5 cap for one transition type: group by (lat, lon) so a point's several directed
     tuples count as ONE candidate, keep the closest _CAP_PER_TYPE points within
-    _CAP_RADIUS_M of `line`, flatten. line=None -> uncapped (test convenience)."""
+    _CAP_RADIUS_M of `line`, flatten. line=None -> uncapped (test convenience).
+
+    Vectorised (O2a perf): the per-unique-point cross-track distance is computed in one numpy
+    pass instead of ~1M pure-Python great-circle calls (the dominant Route B cost). The math
+    is identical to the scalar _cross_track_distance_m / _bearing (retained as the test
+    oracle); the result is set-equivalent — the kernel consumes the cells order-independently."""
     if not raw:
         return []
     if line is None:
         return list(raw)
-    groups = {}
-    for t in raw:
-        groups.setdefault((t[0], t[1]), []).append(t)
-    scored = []
-    for (lat, lon), tuples in groups.items():
-        d = _cross_track_distance_m(lat, lon, line)
-        if d <= _CAP_RADIUS_M:
-            scored.append((d, tuples))
-    scored.sort(key=lambda x: x[0])
-    out = []
-    for _d, tuples in scored[:_CAP_PER_TYPE]:
-        out.extend(tuples)
-    return out
+    (lat1, lon1), (lat2, lon2) = line
+    pts = np.array([(t[0], t[1]) for t in raw], dtype=np.float64)   # (N, 2) lat/lon
+    uniq, inv = np.unique(pts, axis=0, return_inverse=True)         # one row per physical point
+    inv = inv.reshape(-1)
+
+    # Cross-track distance per unique point -- vectorised twin of _cross_track_distance_m.
+    phi1, lam1 = math.radians(lat1), math.radians(lon1)
+    phi3, lam3 = np.radians(uniq[:, 0]), np.radians(uniq[:, 1])
+    h = (np.sin((phi3 - phi1) / 2) ** 2
+         + math.cos(phi1) * np.cos(phi3) * np.sin((lam3 - lam1) / 2) ** 2)
+    d13 = 2 * np.arcsin(np.minimum(1.0, np.sqrt(h)))               # angular distance (radians)
+    if lat1 == lat2 and lon1 == lon2:
+        dxt = d13 * _EARTH_R_M                                     # degenerate line -> point dist
+    else:
+        theta12 = _bearing(phi1, lam1, math.radians(lat2), math.radians(lon2))
+        theta13 = np.arctan2(
+            np.sin(lam3 - lam1) * np.cos(phi3),
+            math.cos(phi1) * np.sin(phi3) - math.sin(phi1) * np.cos(phi3) * np.cos(lam3 - lam1))
+        dxt = np.abs(np.arcsin(np.clip(np.sin(d13) * np.sin(theta13 - theta12), -1.0, 1.0))) * _EARTH_R_M
+
+    within = np.nonzero(dxt <= _CAP_RADIUS_M)[0]                   # unique points within 5 km
+    if within.size > _CAP_PER_TYPE:                               # keep the closest _CAP_PER_TYPE
+        within = within[np.argpartition(dxt[within], _CAP_PER_TYPE)[:_CAP_PER_TYPE]]
+    keep = np.isin(inv, within)                                   # raw entries whose point survives
+    return [raw[i] for i in np.nonzero(keep)[0].tolist()]
 
 
 def parking_transitions_near_line(line, buffer_m=5000):

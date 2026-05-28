@@ -978,6 +978,39 @@ def test_transition_cap_closest_15(monkeypatch):
     assert len(capped) == 15 * 6                      # 6 directed tuples per lot
 
 
+def test_cap_candidates_vectorized_matches_scalar_oracle():
+    """O2a safety net: the vectorized _cap_candidates must select the SAME set as the scalar
+    reference. Oracle = the original group/score/filter/sort/take-K loop using the retained
+    scalar _cross_track_distance_m. 200 points on an east-west line at strictly increasing
+    perpendicular offsets (no boundary ties), straddling the 5 km radius; 2 tuples/point."""
+    line = ((40.0, -111.0), (40.0, -110.0))           # east-west at lat 40
+    raw = []
+    for i in range(200):
+        lat = 40.0 + (i + 1) * 0.0008                 # perp dist ~ (i+1)*89 m -> ~56 within 5 km
+        raw.append((lat, -110.5, 0, 3, 60.0))
+        raw.append((lat, -110.5, 3, 0, 60.0))
+
+    def oracle(raw, line):
+        groups = {}
+        for t in raw:
+            groups.setdefault((t[0], t[1]), []).append(t)
+        scored = []
+        for (la, lo), tuples in groups.items():
+            d = _trans._cross_track_distance_m(la, lo, line)
+            if d <= _trans._CAP_RADIUS_M:
+                scored.append((d, tuples))
+        scored.sort(key=lambda x: x[0])
+        out = []
+        for _d, tuples in scored[:_trans._CAP_PER_TYPE]:
+            out.extend(tuples)
+        return out
+
+    vec = _trans._cap_candidates(raw, line)
+    orc = oracle(raw, line)
+    assert set(vec) == set(orc)
+    assert len(vec) == len(orc) == _trans._CAP_PER_TYPE * 2   # 15 closest points x 2 tuples
+
+
 def test_compute_unified_cost_layers_perf():
     """≤1 s to build 4 cost layers + transition cells for a ~50 km bbox (spec §5 gate).
     Requires the real parking/trailhead DBs + a reachable Valhalla; skips otherwise."""
