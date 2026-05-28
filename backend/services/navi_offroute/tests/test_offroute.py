@@ -1372,3 +1372,59 @@ def test_route_auto_bypass_falls_through_on_valhalla_error(monkeypatch, caplog):
     assert out["status"] == "error"
     assert "Failed to load terrain" in out["message"]   # fell through to the unified flow
     assert "auto_bypass" not in (out.get("summary") or {})
+
+
+# ── PR 47: bypass fires on untagged road clicks (tight snap), not relaxed/off-road ──
+
+def _spatial_tight_paved(self, lat, lon, snap_cache):
+    """Stub _spatial_eligible_modes: tight (3m) snap to a paved residential road, like a
+    raw in-town map click ON the road. Populates snap_cache the way the real probe does."""
+    snap_cache[(lat, lon, "auto")] = {"snap_distance_m": 3.0, "road_class": "residential",
+                                      "use": "road", "on_network": True,
+                                      "snapped_lat": lat, "snapped_lon": lon}
+    return frozenset({"vehicle", "4w", "2w", "foot"})
+
+
+def _spatial_relaxed_paved(self, lat, lon, snap_cache):
+    """Stub: relaxed (50m) snap to a paved road + 'vehicle' eligibility (the flat-terrain
+    grace). 50m > AUTO_SNAP_TIGHT_M, so _bypass_eligible must reject this."""
+    snap_cache[(lat, lon, "auto")] = {"snap_distance_m": 50.0, "road_class": "residential",
+                                      "use": "road", "on_network": True,
+                                      "snapped_lat": lat, "snapped_lon": lon}
+    return frozenset({"vehicle", "4w", "2w", "foot"})
+
+
+def test_route_auto_untagged_tight_snap_fires_bypass(monkeypatch):
+    r = object.__new__(OffrouteRouter)
+    monkeypatch.setattr(OffrouteRouter, "_spatial_eligible_modes", _spatial_tight_paved)
+    monkeypatch.setattr(OffrouteRouter, "_fetch_auto_rasters", _bp_fetch_should_not_run)
+    monkeypatch.setattr(_p4router.requests, "post", lambda *a, **k: _BypassOKResp())
+    out = r._route_auto(42.5558, -114.4701, 42.5644, -114.4631, "pragmatic")  # no categories
+    assert out["status"] == "ok"
+    assert out["selected_mode"] == "vehicle"
+    assert out["summary"]["auto_bypass"] is True
+
+
+def test_route_auto_untagged_relaxed_snap_skips_bypass(monkeypatch):
+    r = object.__new__(OffrouteRouter)
+    monkeypatch.setattr(OffrouteRouter, "_spatial_eligible_modes", _spatial_relaxed_paved)
+    monkeypatch.setattr(OffrouteRouter, "_route_D_network_only",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("D must not run")))
+    monkeypatch.setattr(OffrouteRouter, "_fetch_auto_rasters", _bp_fetch_sentinel)
+    out = r._route_auto(42.5558, -114.4701, 42.5644, -114.4631, "pragmatic")  # no categories
+    assert out["status"] == "error"
+    assert "Failed to load terrain" in out["message"]   # relaxed snap rejected -> unified flow
+
+
+def test_route_auto_e2e_http_in_town_fires_bypass(client, monkeypatch):
+    # Full HTTP path through /api/offroute with the PRODUCTION request shape: NO categories.
+    # This is the test that would have caught PR #46's wiring gap.
+    monkeypatch.setattr(OffrouteRouter, "_spatial_eligible_modes", _spatial_tight_paved)
+    monkeypatch.setattr(OffrouteRouter, "_fetch_auto_rasters", _bp_fetch_should_not_run)
+    monkeypatch.setattr(_p4router.requests, "post", lambda *a, **k: _BypassOKResp())
+    resp = _post(client, {"start": [42.5558, -114.4701], "end": [42.5644, -114.4631],
+                          "mode": "auto", "boundary_mode": "pragmatic"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["selected_mode"] == "vehicle"
+    assert data["summary"]["auto_bypass"] is True
