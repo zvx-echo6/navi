@@ -1478,3 +1478,28 @@ def test_route_auto_e2e_http_in_town_fires_bypass(client, monkeypatch):
     data = resp.get_json()
     assert data["selected_mode"] == "vehicle"
     assert data["summary"]["auto_bypass"] is True
+
+
+def test_mvum_cache_decode_once(monkeypatch):
+    """O3a: the process-level decoded-feature cache decodes WKB once — a second call adds zero
+    wkb.loads (cache hit). Skips without the real navi.db (e.g. matt-desktop)."""
+    import services.navi_offroute.mvum as _mvum
+    from services.navi_offroute.mvum import navi_db_path
+    if not navi_db_path().exists():
+        pytest.skip("navi.db not present locally")
+    monkeypatch.setattr(_mvum, "_FEATURE_CACHE", None)        # force a cold build, auto-reverted
+    n = [0]
+    orig = _mvum.wkb.loads
+    def counting(*a, **k):
+        n[0] += 1
+        return orig(*a, **k)
+    monkeypatch.setattr(_mvum.wkb, "loads", counting)
+    bbox = (43.5, 44.0, -115.0, -114.0)                       # Sawtooth NF area
+    g1 = _mvum.get_mvum_access_grids_all_modes(*bbox, target_shape=(200, 200),
+                                               modes=["mtb", "atv", "vehicle"])
+    first = n[0]
+    g2 = _mvum.get_mvum_access_grids_all_modes(*bbox, target_shape=(200, 200),
+                                               modes=["mtb", "atv", "vehicle"])
+    assert first > 0                                          # cold call decoded features
+    assert n[0] == first                                      # warm call added ZERO decodes
+    assert set(g1) == {"mtb", "atv", "vehicle"} and g1["atv"].shape == (200, 200)

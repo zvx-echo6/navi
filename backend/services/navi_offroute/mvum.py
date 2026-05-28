@@ -11,6 +11,7 @@ import math
 import os
 import re
 import sqlite3
+import threading
 import time as _time
 import warnings
 from datetime import datetime
@@ -550,6 +551,134 @@ class MVUMReader:
             self._conn = None
 
 
+# ── Process-level decoded-feature cache (O3a perf) ────────────────────────────────
+# query_*_bbox ignore the bbox and scan the whole mvum_roads+mvum_trails tables, and the
+# WKB decode (the dominant cost) is bbox- AND mode-independent, so the decoded feature set
+# is cacheable once per worker process. We also pre-compute each motorized mode's access
+# flag at build time (check_date=None, the only value the Auto path ever passes), turning
+# 3 redundant full-table decodes per request into one cold decode + cheap per-request raster.
+_CACHE_MODES = ("mtb", "atv", "vehicle")     # motorized modes baked into the cache
+_FEATURE_CACHE = None                        # list of (geom, (minx,miny,maxx,maxy), {mode: access})
+_FEATURE_CACHE_LOCK = threading.Lock()
+
+_ROADS_SQL = """SELECT ogc_fid, id, name, symbol, operationalmaintlevel, seasonal,
+                       atv, atv_datesopen, motorcycle, motorcycle_datesopen,
+                       highclearancevehicle, highclearancevehicle_datesopen,
+                       passengervehicle, passengervehicle_datesopen,
+                       e_bike_class1, e_bike_class1_dur, shape FROM mvum_roads"""
+_TRAILS_SQL = """SELECT ogc_fid, id, name, symbol, seasonal, trailclass,
+                        atv, atv_datesopen, motorcycle, motorcycle_datesopen,
+                        highclearancevehicle, highclearancevehicle_datesopen,
+                        passengervehicle, passengervehicle_datesopen,
+                        e_bike_class1, e_bike_class1_dur, shape FROM mvum_trails"""
+
+
+def _parse_check_date(check_date):
+    """'MM/DD' -> (month, day) or None (matches the inline parse in the legacy path)."""
+    if check_date:
+        m = re.match(r"(\d{1,2})/(\d{1,2})", check_date)
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def _row_access(row, table, mode, check_date):
+    """Per-mode access (True=open / False=closed / None=not applicable) — identical logic to
+    query_roads_bbox / query_trails_bbox."""
+    status_field, dates_field = get_mode_field(mode)
+    keys = row.keys()
+    access = check_access(
+        row[status_field] if status_field in keys else None,
+        row[dates_field] if dates_field in keys else None,
+        row["seasonal"], check_date)
+    if access is None:
+        if table == "mvum_roads":
+            access = symbol_to_access(row["symbol"], mode, row["operationalmaintlevel"])
+        else:
+            access = symbol_to_access(row["symbol"], mode)
+    return access
+
+
+def _rasterize_feature(grid, geom, value, west, north, pixel_lon, pixel_lat):
+    """Bresenham-rasterize a (Multi)LineString into grid — extracted verbatim from the
+    legacy get_mvum_access_grid inner loop so the cache and fallback paths can't diverge."""
+    if geom.geom_type == "MultiLineString":
+        coords_list = [list(line.coords) for line in geom.geoms]
+    elif geom.geom_type == "LineString":
+        coords_list = [list(geom.coords)]
+    else:
+        return
+    for coords in coords_list:
+        for i in range(len(coords) - 1):
+            x1, y1 = coords[i]
+            x2, y2 = coords[i + 1]
+            _draw_line(grid, int((north - y1) / pixel_lat), int((x1 - west) / pixel_lon),
+                       int((north - y2) / pixel_lat), int((x2 - west) / pixel_lon), value)
+
+
+def _load_all_decoded_features(db_path):
+    """Decode all mvum_roads + mvum_trails geometries ONCE; pre-compute each motorized mode's
+    access at check_date=None. Returns [(geom, bounds, {mode: access}), ...]. Raises if the DB
+    is missing (propagated so callers fall back to None — graceful degradation)."""
+    t0 = _time.perf_counter()
+    reader = MVUMReader(db_path)
+    out = []
+    try:
+        conn = reader._get_conn()
+        for table, sql in (("mvum_roads", _ROADS_SQL), ("mvum_trails", _TRAILS_SQL)):
+            if not reader.table_exists(table):
+                continue
+            for row in conn.execute(sql):
+                shape = row["shape"]
+                if shape is None:
+                    continue
+                try:
+                    geom = wkb.loads(shape)
+                except Exception:
+                    continue
+                acc = {m: _row_access(row, table, m, None) for m in _CACHE_MODES}
+                if all(a is None for a in acc.values()):
+                    continue                      # applies to no mode (legacy: excluded)
+                out.append((geom, geom.bounds, acc))
+    finally:
+        reader.close()
+    logger.info("mvum: decoded %d features into process cache in %.2fs",
+                len(out), _time.perf_counter() - t0)
+    return out
+
+
+def _get_feature_cache(db_path=None):
+    """Lazy, threadsafe-init process-level decoded-feature cache. Read-only after init."""
+    global _FEATURE_CACHE
+    if _FEATURE_CACHE is None:
+        with _FEATURE_CACHE_LOCK:
+            if _FEATURE_CACHE is None:
+                _FEATURE_CACHE = _load_all_decoded_features(db_path)
+    return _FEATURE_CACHE
+
+
+def _rasterize_uncached(grid, south, north, west, east, mode, parsed_date,
+                        pixel_lon, pixel_lat, db_path):
+    """Legacy per-request path (query + decode + rasterize) — used for the rare seasonal
+    (check_date set) case so its behaviour is preserved exactly."""
+    reader = MVUMReader(db_path)
+    try:
+        for feats in (reader.query_roads_bbox(south, north, west, east, mode, parsed_date),
+                      reader.query_trails_bbox(south, north, west, east, mode, parsed_date)):
+            for feat in feats:
+                try:
+                    geom = wkb.loads(feat["shape"])
+                except Exception:
+                    continue
+                minx, miny, maxx, maxy = geom.bounds
+                if maxx < west or minx > east or maxy < south or miny > north:
+                    continue
+                _rasterize_feature(grid, geom, 1 if feat["access"] else 255,
+                                   west, north, pixel_lon, pixel_lat)
+    finally:
+        reader.close()
+
+
 def get_mvum_access_grid(
     south: float, north: float, west: float, east: float,
     target_shape: Tuple[int, int],
@@ -557,92 +686,64 @@ def get_mvum_access_grid(
     check_date: Optional[str] = None,
     db_path: Path = None     # None → navi_db_path() (env NAVI_OFFROUTE_NAVI_DB)
 ) -> np.ndarray:
-    """
-    Get MVUM access grid for pathfinding.
+    """MVUM access grid (uint8: 0=no data, 1=open, 255=closed) for one mode over a bbox.
 
-    Args:
-        south, north, west, east: Bounding box (WGS84)
-        target_shape: (rows, cols) to match elevation grid
-        mode: Travel mode (foot skips MVUM entirely)
-        check_date: Optional "MM/DD" string for seasonal checking
-        db_path: Path to navi.db
-
-    Returns:
-        np.ndarray of uint8:
-            0   = no MVUM data (defer to existing trail/friction logic)
-            1   = road/trail is OPEN to this vehicle mode
-            255 = road/trail EXISTS but is CLOSED to this mode
-    """
-    # Foot mode bypasses MVUM entirely
+    Cache-backed (O3a) for the common path (check_date=None, motorized mode): rasterizes from
+    the process-wide decoded-feature cache. Falls back to the legacy per-request query+decode
+    for seasonal checks or unusual modes. Foot bypasses MVUM (zeros). Signature unchanged."""
     if mode == "foot":
         return np.zeros(target_shape, dtype=np.uint8)
-
-    # Parse check_date if provided
-    parsed_date = None
-    if check_date:
-        match = re.match(r"(\d{1,2})/(\d{1,2})", check_date)
-        if match:
-            parsed_date = (int(match.group(1)), int(match.group(2)))
-
-    # Initialize output grid
     grid = np.zeros(target_shape, dtype=np.uint8)
     rows, cols = target_shape
-
-    # Pixel size
     pixel_lat = (north - south) / rows
     pixel_lon = (east - west) / cols
+    parsed_date = _parse_check_date(check_date)
 
-    reader = MVUMReader(db_path)
-
-    try:
-        # Query roads and trails
-        roads = reader.query_roads_bbox(south, north, west, east, mode, parsed_date)
-        trails = reader.query_trails_bbox(south, north, west, east, mode, parsed_date)
-
-        # Rasterize features
-        for features in [roads, trails]:
-            for feat in features:
-                try:
-                    geom = wkb.loads(feat["shape"])
-
-                    # Get geometry bounds
-                    minx, miny, maxx, maxy = geom.bounds
-
-                    # Check if intersects our bbox
-                    if maxx < west or minx > east or maxy < south or miny > north:
-                        continue
-
-                    # Rasterize line
-                    value = 1 if feat["access"] else 255
-
-                    # Simple line rasterization
-                    if geom.geom_type in ("LineString", "MultiLineString"):
-                        if geom.geom_type == "MultiLineString":
-                            coords_list = [list(line.coords) for line in geom.geoms]
-                        else:
-                            coords_list = [list(geom.coords)]
-
-                        for coords in coords_list:
-                            for i in range(len(coords) - 1):
-                                x1, y1 = coords[i]
-                                x2, y2 = coords[i + 1]
-
-                                # Convert to pixel coordinates
-                                col1 = int((x1 - west) / pixel_lon)
-                                row1 = int((north - y1) / pixel_lat)
-                                col2 = int((x2 - west) / pixel_lon)
-                                row2 = int((north - y2) / pixel_lat)
-
-                                # Bresenham's line algorithm
-                                _draw_line(grid, row1, col1, row2, col2, value)
-
-                except Exception as e:
-                    continue
-
-    finally:
-        reader.close()
-
+    if parsed_date is None and mode in _CACHE_MODES:
+        for geom, (minx, miny, maxx, maxy), acc in _get_feature_cache(db_path):
+            if maxx < west or minx > east or maxy < south or miny > north:
+                continue
+            a = acc.get(mode)
+            if a is None:
+                continue
+            _rasterize_feature(grid, geom, 1 if a else 255, west, north, pixel_lon, pixel_lat)
+    else:
+        _rasterize_uncached(grid, south, north, west, east, mode, parsed_date,
+                            pixel_lon, pixel_lat, db_path)
     return grid
+
+
+def get_mvum_access_grids_all_modes(
+    south: float, north: float, west: float, east: float,
+    target_shape: Tuple[int, int],
+    modes: List[str],
+    check_date: Optional[str] = None,
+    db_path: Path = None,
+) -> Dict[str, np.ndarray]:
+    """Build MVUM access grids for several motorized modes in ONE pass over the cached features
+    (vs N independent decodes). Returns {mode: uint8 grid}, same per-grid semantics as
+    get_mvum_access_grid. Seasonal (check_date set) defers per-mode to the legacy path."""
+    rows, cols = target_shape
+    pixel_lat = (north - south) / rows
+    pixel_lon = (east - west) / cols
+    grids = {m: np.zeros(target_shape, dtype=np.uint8) for m in modes}
+    parsed_date = _parse_check_date(check_date)
+
+    if parsed_date is not None:
+        for m in modes:
+            grids[m] = get_mvum_access_grid(south, north, west, east, target_shape,
+                                            m, check_date, db_path)
+        return grids
+
+    for geom, (minx, miny, maxx, maxy), acc in _get_feature_cache(db_path):
+        if maxx < west or minx > east or maxy < south or miny > north:
+            continue
+        for m in modes:
+            a = acc.get(m)
+            if a is None:
+                continue
+            _rasterize_feature(grids[m], geom, 1 if a else 255, west, north, pixel_lon, pixel_lat)
+    return grids
 
 
 def _draw_line(grid: np.ndarray, r1: int, c1: int, r2: int, c2: int, value: int):
