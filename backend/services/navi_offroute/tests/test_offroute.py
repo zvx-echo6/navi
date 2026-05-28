@@ -960,6 +960,19 @@ def test_road_terminus_transitions_pure_raster():
         assert sorted(edges) == sorted([(f, v, 60.0), (v, f, 60.0)])
 
 
+def test_road_terminus_dilation_no_wrap():
+    """O2b safety net: the 3×3 dilation must NOT wrap the raster edges. The only road cell sits
+    at corner (0,0) with all real in-bounds neighbours on-network; the only off-network cell is
+    the opposite corner (4,4). With border_value=0 the corner road cell has no off-network
+    neighbour -> no termini. np.roll would wrap (4,4) into (0,0)'s neighbourhood and falsely fire."""
+    rows, cols = 5, 5
+    trail_grid = _p3np.full((rows, cols), 10, _p3np.uint8)  # all on-network (trail), non-road
+    trail_grid[0, 0] = 5                                    # the only road cell, at the corner
+    trail_grid[4, 4] = 0                                    # the only off-network cell, opposite corner
+    meta = _p3_meta(rows, cols)
+    assert _trans.road_terminus_transitions(meta, trail_grid) == []
+
+
 def test_transition_cap_closest_15(monkeypatch):
     """>15 parking lots within 5 km -> only the closest 15 (by perp distance) survive."""
     line = ((40.0, -111.0), (40.0, -110.0))           # ~east-west; lat offset = perp distance, all <5 km

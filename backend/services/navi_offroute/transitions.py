@@ -10,6 +10,7 @@ DEMReader.latlon_to_pixel (shared/dem.py).
 import math
 
 import numpy as np
+import scipy.ndimage as ndi
 
 from .cost import (
     TRANSITION_COST_PARKING_S,
@@ -143,32 +144,28 @@ def trailhead_transitions_near_line(line, buffer_m=5000):
 def road_terminus_transitions(meta, trail_grid, elevation=None):
     """Road-terminus mode switches from the trail raster (spec §4): a road(5)/track(15) cell
     with a passable off-network 8-neighbour (value 0; finite elev when `elevation` given).
-    foot↔vehicle at TRANSITION_COST_ROAD_TERMINUS_S. Pure raster scan, no DB — fixes §1."""
-    rows, cols = trail_grid.shape
+    foot↔vehicle at TRANSITION_COST_ROAD_TERMINUS_S. Pure raster scan, no DB — fixes §1.
+
+    O2b: the per-road-cell 8-neighbour Python loop is replaced by one 3×3 binary dilation of
+    the off-network mask (scipy.ndimage). `border_value=0` treats out-of-bounds neighbours as
+    on-network, matching the scalar version's OOB skip — NOT np.roll, which would wrap the
+    raster edges and fabricate phantom neighbours. A road cell is never off-network itself, so
+    dilating with the centre included is equivalent to the loop's strict-neighbour test. The
+    surviving cell set (and the 2 directed tuples per cell) is identical; only emission order
+    differs, and the cap / kernel consume the cells order-independently."""
     pairs = (("foot", "vehicle"),)
     road = (trail_grid == 5) | (trail_grid == 15)
-    rs, cs = np.nonzero(road)
+    offnet = (trail_grid == 0)
+    if elevation is not None:
+        offnet &= np.isfinite(elevation)
+    offnet_neighbour = ndi.binary_dilation(
+        offnet, structure=np.ones((3, 3), dtype=bool), border_value=0)
+    terminus = road & offnet_neighbour                # road cell with ≥1 off-network 8-neighbour
+    rs, cs = np.nonzero(terminus)
     out = []
     for r, c in zip(rs.tolist(), cs.tolist()):
-        is_terminus = False
-        for dr in (-1, 0, 1):
-            for dc in (-1, 0, 1):
-                if dr == 0 and dc == 0:
-                    continue
-                nr, nc = r + dr, c + dc
-                if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
-                    continue
-                if trail_grid[nr, nc] != 0:
-                    continue
-                if elevation is not None and not np.isfinite(elevation[nr, nc]):
-                    continue
-                is_terminus = True
-                break
-            if is_terminus:
-                break
-        if is_terminus:
-            lat, lon = _pixel_to_latlon(r, c, meta)
-            out.extend(_bidir(lat, lon, pairs, TRANSITION_COST_ROAD_TERMINUS_S))
+        lat, lon = _pixel_to_latlon(r, c, meta)
+        out.extend(_bidir(lat, lon, pairs, TRANSITION_COST_ROAD_TERMINUS_S))
     return out
 
 
