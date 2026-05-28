@@ -1292,3 +1292,83 @@ def test_route_auto_perf_under_5s(monkeypatch):
     assert out["status"] == "ok", out
     assert out["selected_mode_set"] == ["foot"]
     assert elapsed <= 5.0, f"_route_auto on ~50 km grid took {elapsed:.2f}s > 5.0s"
+
+
+# ── Auto Valhalla bypass: pure road↔road skips the raster pipeline ────────────
+import logging as _bp_logging
+
+
+class _BypassOKResp:
+    status_code = 200
+    def json(self):
+        return {"trip": {"legs": [{"shape": "", "maneuvers": []}],
+                         "summary": {"length": 1.2, "time": 90}}}
+
+
+class _BypassErrResp:
+    status_code = 500
+    text = "valhalla boom"
+
+
+def _bp_fetch_should_not_run(*a, **k):
+    raise AssertionError("_fetch_auto_rasters must NOT run when the bypass fires")
+
+
+def _bp_fetch_sentinel(*a, **k):
+    raise RuntimeError("FETCH_REACHED")   # proves we fell through to the unified flow
+
+
+def test_route_auto_road_road_uses_valhalla_bypass(monkeypatch):
+    r = object.__new__(OffrouteRouter)
+    monkeypatch.setattr(OffrouteRouter, "_fetch_auto_rasters", _bp_fetch_should_not_run)
+    calls = []
+    real_D = OffrouteRouter._route_D_network_only
+    monkeypatch.setattr(OffrouteRouter, "_route_D_network_only",
+                        lambda self, *a, **k: (calls.append(a) or real_D(self, *a, **k)))
+    monkeypatch.setattr(_p4router.requests, "post", lambda *a, **k: _BypassOKResp())
+
+    out = r._route_auto(42.5558, -114.4701, 42.5644, -114.4631, "pragmatic",
+                        start_category="highway:residential", end_category="highway:residential")
+    assert out["status"] == "ok"
+    assert out["selected_mode"] == "vehicle"
+    assert out["selected_mode_set"] == ["vehicle"]
+    assert out["summary"]["auto_bypass"] is True
+    assert out["summary"]["scenario"] == "D"
+    assert len(calls) == 1                              # _route_D_network_only called exactly once
+
+
+def test_route_auto_road_offroad_skips_bypass(monkeypatch):
+    r = object.__new__(OffrouteRouter)
+    monkeypatch.setattr(OffrouteRouter, "_route_D_network_only",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("D must not run")))
+    monkeypatch.setattr(OffrouteRouter, "_fetch_auto_rasters", _bp_fetch_sentinel)
+    # start = paved road (vehicle eligible), end = footway (foot-only, no vehicle) -> no bypass.
+    out = r._route_auto(42.5558, -114.4701, 42.5878, -114.5550, "pragmatic",
+                        start_category="highway:residential", end_category="highway:footway")
+    assert out["status"] == "error"
+    assert "Failed to load terrain" in out["message"]   # reached _fetch_auto_rasters (unified flow)
+
+
+def test_route_auto_untagged_skips_bypass(monkeypatch):
+    r = object.__new__(OffrouteRouter)
+    monkeypatch.setattr(OffrouteRouter, "_spatial_eligible_modes",
+                        lambda self, lat, lon, cache: frozenset({"foot"}))
+    monkeypatch.setattr(OffrouteRouter, "_route_D_network_only",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("D must not run")))
+    monkeypatch.setattr(OffrouteRouter, "_fetch_auto_rasters", _bp_fetch_sentinel)
+    out = r._route_auto(42.5558, -114.4701, 42.5644, -114.4631, "pragmatic")  # no categories
+    assert out["status"] == "error"
+    assert "Failed to load terrain" in out["message"]   # bypass skipped, unified flow reached
+
+
+def test_route_auto_bypass_falls_through_on_valhalla_error(monkeypatch, caplog):
+    r = object.__new__(OffrouteRouter)
+    monkeypatch.setattr(_p4router.requests, "post", lambda *a, **k: _BypassErrResp())
+    monkeypatch.setattr(OffrouteRouter, "_fetch_auto_rasters", _bp_fetch_sentinel)
+    with caplog.at_level(_bp_logging.WARNING, logger="navi_offroute.router"):
+        out = r._route_auto(42.5558, -114.4701, 42.5644, -114.4631, "pragmatic",
+                            start_category="highway:residential", end_category="highway:residential")
+    assert "auto bypass attempted but Valhalla returned" in caplog.text
+    assert out["status"] == "error"
+    assert "Failed to load terrain" in out["message"]   # fell through to the unified flow
+    assert "auto_bypass" not in (out.get("summary") or {})
