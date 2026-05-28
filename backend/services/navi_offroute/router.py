@@ -45,7 +45,7 @@ from .transitions import MODE_INDEX
 from .friction import FrictionReader, friction_to_multiplier
 from .barriers import BarrierReader, WildernessReader, wilderness_tif_path
 from .trails import TrailReader
-from .mvum import get_mvum_access_grid
+from .mvum import get_mvum_access_grid, get_mvum_access_grids_all_modes
 from .mvum_annotate import annotate_network_edges
 from .mvum_exclude import build_exclude_polygons
 
@@ -1025,14 +1025,16 @@ class OffrouteRouter:
         mvum_mode = {"2w": "mtb", "4w": "atv", "vehicle": "vehicle"}
         on_date = getattr(self, "mvum_on_date", None)
         check = on_date.strftime("%m/%d") if on_date else None
-        out = {}
-        for mode, mv_name in mvum_mode.items():
-            try:
-                out[mode] = get_mvum_access_grid(
-                    bbox["south"], bbox["north"], bbox["west"], bbox["east"],
-                    target_shape=shape, mode=mv_name, check_date=check)
-            except Exception as e:
-                logger.info("auto: MVUM grid unavailable for %s: %s", mode, e)
+        # O3a: one pass over the process-cached decoded features for all motorized modes,
+        # instead of 3 independent full-table decodes.
+        try:
+            grids = get_mvum_access_grids_all_modes(
+                bbox["south"], bbox["north"], bbox["west"], bbox["east"],
+                target_shape=shape, modes=list(mvum_mode.values()), check_date=check)
+        except Exception as e:
+            logger.info("auto: MVUM grids unavailable: %s", e)
+            return None
+        out = {mode: grids[mv_name] for mode, mv_name in mvum_mode.items() if mv_name in grids}
         return out or None
 
     def _append_unified_segment(self, features, seg_coords, mode_idx):
