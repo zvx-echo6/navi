@@ -1119,6 +1119,13 @@ def _auto_router(monkeypatch, elevation, friction_raw, trails, barriers, meta, e
     monkeypatch.setattr(_p4trans, "get_surface_change_candidates", lambda *a, **k: [])
     monkeypatch.setattr(_P4Router, "_spatial_eligible_modes",
                         lambda self, lat, lon, cache: eligible(lat, lon))
+    # Force the road↔road Valhalla bypass (router.py §847-862, PR #46-48) to fall through
+    # to the unified kernel: synthetic fixtures use vehicle-eligible endpoints, which would
+    # otherwise hand off to real Valhalla and produce real-OSM coords that don't match the
+    # in-memory grid (CI: matt-desktop's Valhalla is unreachable so falls through naturally;
+    # deploy VM's Valhalla is healthy and returns real Utah road data → assertions blow up).
+    monkeypatch.setattr(_P4Router, "_route_D_network_only",
+                        lambda *a, **kw: {"status": "error", "reason": "synthetic-test stub"})
     return r
 
 
