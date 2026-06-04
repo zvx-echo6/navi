@@ -106,12 +106,3 @@ def test_load_env_disabled_paths(tmp_path, monkeypatch):
     # neither var set -> empty
     monkeypatch.delenv(hm.ENV_LEGACY, raising=False)
     assert not hm.load().enabled()
-
-
-def test_get_connection_caches_per_path(tmp_path):
-    import sqlite3
-    p = _touch(str(tmp_path), "x.db")
-    with sqlite3.connect(p) as c:
-        c.execute("CREATE TABLE t (x INTEGER)")
-    m = hm.HPAManifest(entries=[hm.TileDBEntry("x", p, None)])
-    assert m.get_connection(p) is m.get_connection(p)

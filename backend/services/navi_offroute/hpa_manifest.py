@@ -10,9 +10,8 @@ neither env var set -> HPA disabled (same as today).
 import json
 import logging
 import os
-import sqlite3
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +42,8 @@ class TileDBEntry:
 
 @dataclass
 class HPAManifest:
-    """Registry of regional tile DBs + lazy per-path sqlite connection cache.
-    The cache is process-local mutable state; entries are immutable after load."""
+    """Registry of regional tile DBs. Immutable after load."""
     entries: List[TileDBEntry] = field(default_factory=list)
-    _conns: Dict[str, sqlite3.Connection] = field(default_factory=dict)
 
     def enabled(self) -> bool:
         return len(self.entries) > 0
@@ -72,17 +69,6 @@ class HPAManifest:
         cx1, cy1 = chunk_coords(north, east)
         return self.dbs_for_chunks(min(cx0, cx1), max(cx0, cx1),
                                    min(cy0, cy1), max(cy0, cy1))
-
-    def get_connection(self, abs_path: str) -> sqlite3.Connection:
-        """Read-only sqlite connection cached for the life of the process. v1
-        dispatch (astar_hpa_multimode) opens its own connection per call and does
-        not yet use this cache; multi-region UNION + admin endpoints will."""
-        conn = self._conns.get(abs_path)
-        if conn is None:
-            conn = sqlite3.connect(f"file:{abs_path}?mode=ro", uri=True)
-            self._conns[abs_path] = conn
-        return conn
-
 
 # ── loaders ──────────────────────────────────────────────────────────────────
 
