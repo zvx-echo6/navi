@@ -9,6 +9,7 @@ import pytest
 
 from services.navi_offroute import astar, hpa_build as hb
 import services.navi_offroute.router as router_mod
+from services.navi_offroute import hpa_manifest
 import services.navi_offroute.transitions as p_trans
 from services.navi_offroute.router import OffrouteRouter
 from services.navi_offroute.transitions import _latlon_to_pixel as _ll2px, _pixel_to_latlon as _px2ll
@@ -130,7 +131,8 @@ def _stub_router(monkeypatch):
 def test_hpa_dispatcher_uses_hpa_when_tile_db_set(tmp_path, monkeypatch, caplog):
     db = str(tmp_path / "tiles.db")
     _make_tile_db(db, _base_rows())                       # a real file so os.path.exists passes
-    monkeypatch.setattr(router_mod, "HPA_TILE_DB", db)
+    monkeypatch.setattr(router_mod, "_HPA_MANIFEST", hpa_manifest.HPAManifest(
+        entries=[hpa_manifest.TileDBEntry(name="test", abs_path=db, chunk_bounds=None)]))
 
     calls = []
 

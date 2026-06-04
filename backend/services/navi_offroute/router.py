@@ -48,6 +48,7 @@ from .trails import TrailReader
 from .mvum import get_mvum_access_grid, get_mvum_access_grids_all_modes
 from .mvum_annotate import annotate_network_edges
 from .mvum_exclude import build_exclude_polygons
+from . import hpa_manifest
 
 logger = logging.getLogger("navi_offroute.router")
 
@@ -61,10 +62,11 @@ POSTGIS_DSN = os.environ.get("NAVI_OFFROUTE_POSTGIS_DSN", "dbname=padus")
 # Valhalla endpoint (recon-side network router, HTTP)
 VALHALLA_URL = os.environ.get("NAVI_OFFROUTE_VALHALLA_URL", "http://localhost:8002")
 
-# HPA* cost-tile DB (HPA-SPEC.md §8/§9, Phase H3). Unset (None) -> HPA* never engages and
-# Auto routing is byte-identical to the unified-graph path. Set to a tile DB (built by
-# hpa_build) to enable the two-level fast path for covered, pragmatic, no-affinity routes.
-HPA_TILE_DB = os.environ.get("NAVI_OFFROUTE_HPA_DB")
+# HPA* cost-tile manifest (HPA-SPEC.md §8/§9, Phase H3 + H6a-pre). Empty manifest ->
+# HPA* never engages; Auto routing is byte-identical to the unified-graph path. Populated
+# from NAVI_OFFROUTE_HPA_DIR (manifest.json) or the legacy NAVI_OFFROUTE_HPA_DB (treated as
+# a single unbounded entry). See hpa_manifest.py.
+_HPA_MANIFEST = hpa_manifest.load()
 
 # Search radius for entry points (km)
 DEFAULT_SEARCH_RADIUS_KM = 50
@@ -916,24 +918,31 @@ class OffrouteRouter:
         origin_modes = np.array(sorted(MODE_INDEX[m] for m in start_eligible), dtype=np.int64)
         goal_modes = np.array(sorted(MODE_INDEX[m] for m in end_eligible), dtype=np.int64)
 
-        # HPA* fast path (Phase H3): when a tile DB is configured + covers the route, search
-        # the precomputed abstract chunk graph instead of flooding the full bbox. Whole-route
-        # fallback to the unified kernel below on any miss (HPA-SPEC.md §8/§9). When
-        # NAVI_OFFROUTE_HPA_DB is unset this block is skipped entirely (behaviour unchanged).
+        # HPA* fast path (Phase H3 + H6a-pre): consult the manifest for any tile DB(s) that
+        # cover this route's chunk range; with exactly one match, dispatch to the precomputed
+        # abstract graph instead of flooding the full bbox. Multi-region UNION across DBs is
+        # a future PR (needs astar_hpa_multimode signature change); for now multi-match logs
+        # the reason and falls through to the unified kernel. Whole-route fallback on any
+        # miss (HPA-SPEC.md §8/§9). With an empty manifest this block is skipped entirely.
         if self._hpa_eligible(boundary_mode, network_affinity):
-            _h0 = time.perf_counter()
-            _cache = {"raster": {}, "layer": {}}
-            hidx, hpath, hcost, hreason = astar_hpa_multimode(
-                HPA_TILE_DB, meta, start_lat, start_lon, end_lat, end_lon,
-                origin_modes, goal_modes, boundary_mode, network_affinity,
-                chunk_layer=lambda cx, cy, mi: self._hpa_chunk_layer(cx, cy, mi, _cache),
-                dem_reader=self.dem_reader)
-            if hidx >= 0 and hpath.shape[0] > 0:
-                logger.info("auto: HPA* (chunks=%d) in %.2fs",
-                            len(_cache["raster"]), time.perf_counter() - _h0)
-                return self._render_unified_path(hpath, hcost, meta, boundary_mode)
-            logger.info("auto: HPA fallback reason=%s -> unified A*", hreason)
-        elif HPA_TILE_DB and os.path.exists(HPA_TILE_DB):
+            db_paths = _HPA_MANIFEST.dbs_for_route_bbox(*meta["bounds"])
+            if len(db_paths) == 1:
+                _h0 = time.perf_counter()
+                _cache = {"raster": {}, "layer": {}}
+                hidx, hpath, hcost, hreason = astar_hpa_multimode(
+                    db_paths[0], meta, start_lat, start_lon, end_lat, end_lon,
+                    origin_modes, goal_modes, boundary_mode, network_affinity,
+                    chunk_layer=lambda cx, cy, mi: self._hpa_chunk_layer(cx, cy, mi, _cache),
+                    dem_reader=self.dem_reader)
+                if hidx >= 0 and hpath.shape[0] > 0:
+                    logger.info("auto: HPA* (chunks=%d) in %.2fs",
+                                len(_cache["raster"]), time.perf_counter() - _h0)
+                    return self._render_unified_path(hpath, hcost, meta, boundary_mode)
+                logger.info("auto: HPA fallback reason=%s -> unified A*", hreason)
+            else:
+                _r = "multi_region" if len(db_paths) > 1 else "no_coverage"
+                logger.info("auto: HPA fallback reason=%s -> unified A*", _r)
+        elif _HPA_MANIFEST.enabled():
             _r = "boundary_mode" if boundary_mode != "pragmatic" else "affinity"
             logger.info("auto: HPA fallback reason=%s -> unified A*", _r)
 
@@ -1112,10 +1121,10 @@ class OffrouteRouter:
         }
 
     def _hpa_eligible(self, boundary_mode, network_affinity):
-        """HPA* engages only with a configured + existing tile DB, the default boundary mode,
+        """HPA* engages only with a non-empty tile-DB manifest, the default boundary mode,
         and no network_affinity — the tiles are pure-terrain/pragmatic (HPA-SPEC.md §8), so
         other configs would change the answer and must use the unified fallback."""
-        if not (HPA_TILE_DB and os.path.exists(HPA_TILE_DB)):
+        if not _HPA_MANIFEST.enabled():
             return False
         if boundary_mode != "pragmatic":
             return False
