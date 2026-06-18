@@ -1,33 +1,50 @@
 # navi-backend
 
-Monorepo of small, single-responsibility HTTP services extracted from the `recon`
-codebase as part of the **recon ↔ Navi decoupling** project. Each service owns a
-slice of the `/api/*` surface that `navi.echo6.co` depends on, runs behind the
-existing Caddy/Authentik edge, and is fronted by the `navi.echo6.co` nginx vhost.
+Full monorepo for the Navi backend and frontend, extracted from the `recon`
+codebase as part of the **recon <=> Navi decoupling** project.
 
-See `HANDOFF-recon-navi-decoupling-v3.md` for the full plan. This repo is
-extraction **#1**: `navi-traffic`.
+`backend/` contains 8 single-responsibility microservices that together own the
+`/api/*` surface that `navi.echo6.co` depends on; `frontend/` is the Vite SPA.
+All backend services run behind the existing Caddy/Authentik edge.
+
+**Note:** `navi-traffic` (the original extraction #1 — TomTom traffic tile proxy)
+has been **retired**. Traffic data is now served by the `central` service
+(central.echo6.mesh).
+
+## Services
+
+| # | Service | Port | Description |
+|---|---------|------|-------------|
+| 1 | navi-traffic | — | **DISABLED** — retired, traffic now via central |
+| 2 | navi-config | 8422 | Configuration store |
+| 3 | navi-contacts | 8423 | Contacts / address book |
+| 4 | navi-landclass | 8424 | Land classification lookup |
+| 5 | navi-places | 8425 | Places / POI search |
+| 6 | navi-geo | 8426 | Geocoding, reverse geocoding, enrichment bundle |
+| 7 | navi-admin | 8427 | Fleet admin front door (fan-out to all services) |
+| 8 | navi-offroute | 8428 | Off-road / off-network routing |
 
 ## Layout
 
 ```
-navi-backend/
-├── shared/                  # cross-service helpers, imported by every service
-│   ├── auth.py              # get_user_id(req), require_auth decorator (Authentik header)
-│   └── admin_info.py        # build_info_response(), mask_key(), time_dependency()
-├── services/
-│   └── navi_traffic/        # extraction #1 — TomTom traffic tile proxy (:8421)
-│       ├── app.py           # Flask factory (create_app) + gunicorn entry
-│       ├── traffic.py       # /api/traffic/flow/<z>/<x>/<y>.png  (ported from recon)
-│       ├── admin.py         # /api/admin/navi-traffic/info  (§4.5 admin convention)
-│       └── tests/
-└── deploy/
-    ├── systemd/navi-traffic.service
-    └── nginx/navi-traffic.conf.snippet
+navi-mono/
+├── backend/
+│   ├── shared/                  # cross-service helpers, imported by every service
+│   │   ├── auth.py              # get_user_id(req), require_auth decorator (Authentik header)
+│   │   └── admin_info.py        # build_info_response(), mask_key(), time_dependency()
+│   └── services/
+│       ├── navi_config/         # :8422
+│       ├── navi_contacts/       # :8423
+│       ├── navi_landclass/      # :8424
+│       ├── navi_places/         # :8425
+│       ├── navi_geo/            # :8426
+│       ├── navi_admin/          # :8427
+│       └── navi_offroute/       # :8428
+└── frontend/                    # Vite SPA
 ```
 
-Service directories use an underscore (`navi_traffic`) so they're importable
-Python packages; the **service name** stays `navi-traffic` (hyphen) in systemd,
+Service directories use an underscore (`navi_geo`) so they are importable
+Python packages; the **service name** stays hyphenated (`navi-geo`) in systemd,
 nginx, and the admin-info `service` field.
 
 ## Setup
@@ -42,14 +59,7 @@ python -m venv .venv
 ## Test
 
 ```bash
-.venv/bin/pytest services/navi_traffic/tests/ -v
-```
-
-## Run (local)
-
-```bash
-TOMTOM_API_KEY=... .venv/bin/gunicorn 'services.navi_traffic.app:create_app()' \
-    --bind 127.0.0.1:8421 --workers 2
+.venv/bin/pytest services/navi_geo/tests/ -v
 ```
 
 ## Run (local) — navi-geo (extraction #6)
@@ -106,7 +116,7 @@ stitched to the road network via Valhalla) and `GET /api/mvum` (Motor Vehicle
 Use Map road/trail access lookup). Both public. The `^~ /api/offroute` nginx
 block needs a long `proxy_read_timeout` (130s); routes can take ~2 min.
 
-## The admin-info convention (§4.5)
+## The admin-info convention (section 4.5)
 
 Every service exposes `GET /api/admin/<service-name>/info`, gated by `require_auth`,
 returning a uniform shape: `service`, `version` (git SHA), `port`, `config`, `env`
